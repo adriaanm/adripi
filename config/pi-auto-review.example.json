@@ -1,0 +1,8 @@
+{
+  "model": "current",
+  "reasoning": "off",
+  "timeoutMs": 90000,
+  "maxTokens": 4096,
+  "retries": 2,
+  "failureMode": "deny"
+}

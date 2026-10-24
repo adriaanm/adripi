@@ -1,0 +1,9 @@
+# Standard Pi packages, installed in this order.
+npm:@juicesharp/rpiv-todo
+npm:pi-web-access
+npm:@narumitw/pi-goal
+npm:@aliou/pi-neuralwatt
+npm:@gotgenes/pi-permission-system
+npm:@erichll/pi-auto-review
+# Upstream sandbox; install.sh overlays the fork in extensions/pi-sandbox.
+npm:@erichll/pi-sandbox@0.27.0

@@ -1,0 +1,77 @@
+{
+  "name": "@erichll/pi-sandbox",
+  "version": "0.27.0",
+  "description": "Linux (bubblewrap) and macOS (Seatbelt) process sandbox for Pi backed by Anthropic's @anthropic-ai/sandbox-runtime. Fail-closed static filesystem policy plus per-connection network approval from pi-auto-review; sandboxes main-agent Bash and built-in subagent process trees.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "security",
+    "sandbox",
+    "sandbox-runtime"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/erichll/pi-packages.git",
+    "directory": "packages/pi-sandbox"
+  },
+  "homepage": "https://github.com/erichll/pi-packages/tree/main/packages/pi-sandbox",
+  "bugs": {
+    "url": "https://github.com/erichll/pi-packages/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "files": [
+    "src",
+    "CHANGELOG.md",
+    "README.md",
+    "NOTICE"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./approval": "./src/approval.ts",
+    "./runner": "./src/runner.ts",
+    "./subagent": "./src/subagent.ts",
+    "./traps": "./src/traps.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "^0.0.78",
+    "@erichll/pi-auto-review": "^0.27.0",
+    "jiti": "2.7.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=1.3.0",
+    "@earendil-works/pi-tui": ">=1.3.0",
+    "pi-subagents": ">=0.79.0",
+    "typebox": ">=1.4.2"
+  },
+  "peerDependenciesMeta": {
+    "pi-subagents": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^1.3.0",
+    "@earendil-works/pi-coding-agent": "^1.3.0",
+    "@earendil-works/pi-tui": "^1.3.0",
+    "@types/node": "^26.6.5",
+    "pi-subagents": "^0.79.0",
+    "typebox": "^1.4.2",
+    "typescript": "^7.0.2"
+  }
+}

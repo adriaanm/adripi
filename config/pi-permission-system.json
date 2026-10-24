@@ -1,0 +1,219 @@
+{
+  "$schema": "https://raw.githubusercontent.com/gotgenes/pi-packages/main/packages/pi-permission-system/schemas/permissions.schema.json",
+
+  // pi-auto-review is an authorizer *inside* this permission system. Requests
+  // that resolve to `ask` on a reviewed surface go to the reviewer model.
+  "authorizerChain": ["pi-auto-review"],
+
+  "debugLog": false,
+  "permissionReviewLog": true,
+  "doublePressToConfirm": true,
+
+  // A prompt nobody answers within two minutes is dismissed and the request
+  // denied, with the agent told nobody answered. Unset would wait forever.
+  "promptTimeoutMs": 120000,
+
+  // Read-only tools may read these without tripping the external_directory gate.
+  "piInfrastructureReadPaths": ["~/.npm/*", "~/.cargo/registry/*", "~/.cache/*"],
+
+  "permission": {
+    // Anything not named below prompts. Every tool is listed explicitly so a
+    // newly installed extension tool is gated by default rather than trusted.
+    "*": "ask",
+
+    // --- File tools -------------------------------------------------------
+    // Reads are not gated; writes are not gated (per operator preference).
+    // The `path` surface below is what keeps credentials out of reach.
+    "read": "allow",
+    "grep": "allow",
+    "find": "allow",
+    "ls": "allow",
+    "write": {
+      "*": "allow",
+      "*.lock": "deny"
+    },
+    "edit": {
+      "*": "allow"
+    },
+
+    // --- Cross-cutting path gate -----------------------------------------
+    // Applies to every tool and to bash tokens. Matches both the referenced
+    // path and its symlink-resolved form, so a symlink cannot alias past a deny.
+    // Ordering is last-match-wins: catch-all first, denies after.
+    "path": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow",
+      "*.pem": "deny",
+      "*.key": "deny",
+      "*.p12": "deny",
+      "*.pfx": "deny",
+      "*.jks": "deny",
+      "*.keystore": "deny",
+      ".envrc": "deny",
+      ".npmrc": "deny",
+      ".pypirc": "deny",
+      ".netrc": "deny",
+      ".git-credentials": "deny",
+      "id_rsa": "deny",
+      "id_ed25519": "deny",
+      ".git/config": "deny",
+      ".git/hooks/*": "deny",
+      "~/.ssh/*": "deny",
+      "~/.aws/*": "deny",
+      "~/.kube/*": "deny",
+      "~/.config/gcloud/*": "deny",
+      "~/.gnupg/*": "deny",
+      "~/.docker/config.json": "deny",
+      "~/.config/gh/hosts.yml": "deny",
+      "~/.azure/*": "deny",
+      "~/.pi/agent/auth.json": "deny",
+      "~/.pi/agent/cliproxyapi.json": "deny"
+    },
+
+    // --- CWD boundary -----------------------------------------------------
+    // Reaching outside the working tree prompts, except for scratch space.
+    "external_directory": {
+      "*": "ask",
+      "/tmp": "allow",
+      "/tmp/*": "allow"
+    },
+    "external_directory_read": {
+      "~/.agents/skills/*": "allow",
+      "~/.pi/agent/skills/*": "allow"
+    },
+
+    // --- Bash: read-only allowlist ---------------------------------------
+    // Only commands whose sole effect is to read or report are allowed.
+    // Everything else falls through to the reviewer. find/fd with -exec, and
+    // wrappers (sudo, env, xargs, bash -c, eval), are floored to `ask` by the
+    // parser regardless of these rules. Last-match-wins: catch-all first.
+    "bash": {
+      "*": "ask",
+
+      // File inspection
+      "cat *": "allow",
+      "head *": "allow",
+      "tail *": "allow",
+      "less *": "allow",
+      "more *": "allow",
+
+      // Listing and metadata
+      "ls *": "allow",
+      "ls": "allow",
+      "tree *": "allow",
+      "stat *": "allow",
+      "file *": "allow",
+      "wc *": "allow",
+      "du *": "allow",
+      "df *": "allow",
+      "pwd": "allow",
+
+      // Search (find/fd with -exec are auto-floored to ask)
+      "grep *": "allow",
+      "egrep *": "allow",
+      "fgrep *": "allow",
+      "rg *": "allow",
+      "rg": "allow",
+      "find *": "allow",
+      "fd *": "allow",
+
+      // Comparison and hashing
+      "diff *": "allow",
+      "cmp *": "allow",
+      "comm *": "allow",
+      "md5sum *": "allow",
+      "sha1sum *": "allow",
+      "sha256sum *": "allow",
+      "cksum *": "allow",
+
+      // System info
+      "whoami": "allow",
+      "id": "allow",
+      "hostname": "allow",
+      "uname *": "allow",
+      "date": "allow",
+      "uptime": "allow",
+      "ps *": "allow",
+      "printenv *": "allow",
+      "which *": "allow",
+      "type *": "allow",
+      "node --version": "allow",
+      "node -v": "allow",
+
+      // Build/task runners: listing only, never a run
+      "just --list": "allow",
+      "just -l": "allow",
+      "git --version": "allow",
+
+      // Git read-only subcommands. Never a broad "git *": git has mutating
+      // subcommands. Bare "git branch"/"git status" match literally only, so
+      // "git branch -D x" falls through to the catch-all.
+      "git status": "allow",
+      "git status *": "allow",
+      "git diff *": "allow",
+      "git log *": "allow",
+      "git show *": "allow",
+      "git blame *": "allow",
+      "git ls-files *": "allow",
+      "git branch": "allow",
+      "git remote -v": "allow",
+      "git rev-parse *": "allow",
+
+      // Deterministic denies for catastrophic operations, placed last so they
+      // are reachable under last-match-wins. pi-auto-review hard-denies these
+      // too; this is defence in depth that never reaches the model.
+      "rm -rf /": "deny",
+      "rm -rf /*": "deny",
+      "rm -rf ~": "deny",
+      "rm -rf ~/*": "deny",
+      "rm -rf $HOME": "deny",
+      "mkfs*": "deny",
+      "shutdown *": "deny",
+      "poweroff *": "deny",
+      "halt *": "deny",
+      "reboot *": "ask",
+      "dd *": "ask",
+      "sudo *": "ask",
+      "doas *": "ask",
+      "crontab *": "ask",
+      "systemctl *": "ask",
+      "launchctl *": "ask",
+      "kill *": "ask",
+      "pkill *": "ask",
+      "killall *": "ask",
+      "chmod 777 *": "ask",
+      "chown *": "ask",
+      "sh": "ask",
+      "bash": "ask",
+      "zsh": "ask",
+      "git config *": "ask",
+      "git -c *": "ask",
+      "npm publish*": "ask",
+      "gh release create*": "ask"
+    },
+
+    // --- Non-bash tools ---------------------------------------------------
+    // Read-only or state-only tools. Everything here was enumerated from the
+    // live tool registry rather than guessed.
+    "web_search": "allow",
+    "fetch_content": "allow",
+    "source_check": "allow",
+    "get_search_content": "allow",
+    "web_enable": "allow",
+    "todo": "allow",
+    "goal_complete": "allow",
+    "goal_blocked": "allow",
+    "goal_wait": "allow",
+    "codemode": "allow",
+    "tool_search": "allow",
+
+    // pi-sandbox registers a process-backed subagent tool and sandboxes each
+    // worker tree, so the tool itself is allowed.
+    "subagent": "allow",
+
+    // Inert on macOS, but gate it rather than trusting it.
+    "powershell": "ask"
+  }
+}
