@@ -13,6 +13,7 @@ and local forks of the security extensions.
   `personal` branch:
   - `erichll/pi-packages` — `pi-sandbox` + `pi-auto-review`
   - `gotgenes/pi-packages` — `pi-permission-system`
+  - `andersonbcdefg/pi-guardian` — reviewer sidecar extension allowlist
 - `config/` — shareable permission, auto-review, and project sandbox configs.
 - `docs/pi-sandbox-fork.md` — the personal delta on top of upstream.
 - `install.sh` — submodules, packages, fork deployment, global configs.
@@ -102,6 +103,24 @@ git add .gitmodules && git commit -m "forks: point submodules at my forks"
 ```
 
 Then a fresh checkout can `git submodule update --init` the pushed commits.
+
+## Guardian reviewer extensions
+
+The `pi-guardian` fork adds `reviewer.extensions` to `guardian.json`.
+Entries are passed to the reviewer sidecar as explicit `--extension` arguments
+while the sidecar keeps `--no-tools` and `--no-extensions`. Package sources
+are supported, so the Neuralwatt provider can be named by coordinate instead
+of by a machine-specific path:
+
+```json
+"reviewer": {
+  "model": "neuralwatt/nw-flash",
+  "extensions": ["npm:@aliou/pi-neuralwatt@0.18.0"]
+}
+```
+
+Only listed extensions load; Pi's discovery of all other user/project
+extensions stays disabled. This is intended for provider-only extensions.
 
 ## Sandbox side-steps
 

@@ -10,3 +10,4 @@
 @erichll/pi-sandbox|forks/erichll-pi-packages/packages/pi-sandbox
 @erichll/pi-auto-review|forks/erichll-pi-packages/packages/pi-auto-review
 @gotgenes/pi-permission-system|forks/gotgenes-pi-packages/packages/pi-permission-system
+pi-guardian|forks/andersonbcdefg-pi-guardian

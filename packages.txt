@@ -1,13 +1,14 @@
 # Standard Pi packages, installed in this order.
 #
-# The three forked packages are still installed from npm: Pi then wires their
+# The forked packages are still installed from npm: Pi then wires their
 # dependencies and host peers into the managed install. install.sh afterwards
 # deploys the fork source over each one (see forks.txt). Keep the pinned
 # versions in sync with the fork base tags recorded in forks.txt.
 npm:@juicesharp/rpiv-todo
 npm:pi-web-access
 npm:@narumitw/pi-goal
-npm:@aliou/pi-neuralwatt
+npm:@aliou/pi-neuralwatt@0.18.0
+npm:pi-guardian@0.1.0
 npm:@gotgenes/pi-permission-system@41.0.0
 npm:@erichll/pi-auto-review@0.27.2
 npm:@erichll/pi-sandbox@0.27.0
