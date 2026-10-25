@@ -124,6 +124,14 @@
       "df *": "allow",
       "pwd": "allow",
 
+      // Directory navigation has no filesystem/network effect of its own. The
+      // parser folds a literal `cd` into the effective directory for the
+      // external_directory/path gates, so gating the navigation itself would
+      // only produce a misleading "allow cd" prompt while the real ask is a
+      // later command (e.g. `cd repo && git init`).
+      "cd": "allow",
+      "cd *": "allow",
+
       // Search (find/fd with -exec are auto-floored to ask)
       "grep *": "allow",
       "egrep *": "allow",
