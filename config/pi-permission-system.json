@@ -86,9 +86,11 @@
       "~/.agents/skills/*": "allow",
       "~/.pi/agent/skills/*": "allow"
     },
-    // Build caches live outside the working tree. Grants stay per-user (never
-    // the shared temp root) so xcodebuild/Go writes do not prompt on every run.
+    // Build tools write outside the working tree. `/tmp` and the per-user
+    // darwin temp dirs are scratch space; the cache entries are per-user.
+    // The catch-all stays first so a directional map cannot widen by omission.
     "external_directory_write": {
+      "*": "ask",
       "/tmp/*": "allow",
       "/var/folders/*": "allow",
       "/private/var/folders/*": "allow",

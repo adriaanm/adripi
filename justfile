@@ -1,10 +1,9 @@
 # adripi maintenance
 
-# shell-syntax check and strict-JSON config validation (the permission config
-# is JSONC and validated by its extension)
+# shell-syntax check and config validation (the permission config is JSONC)
 check:
     bash -n install.sh
-    node -e 'for (const f of ["config/pi-auto-review.example.json","config/pi-sandbox.global.example.json","config/pi-sandbox.project.example.json"]) JSON.parse(require("fs").readFileSync(f, "utf8")); console.log("config JSON ok")'
+    node scripts/check-jsonc.mjs config/*.json
 
 # install packages, check out fork submodules, deploy fork sources
 install:
