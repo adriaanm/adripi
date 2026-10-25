@@ -1,0 +1,44 @@
+{
+  "subagents": {
+    "provider": "builtin"
+  },
+  "filesystem": {
+    "allowUserTemp": true,
+    "additionalAllowRead": [
+      "/ABSOLUTE/HOME/go/pkg/mod",
+      "/ABSOLUTE/HOME/Library/Caches/go-build",
+      "/ABSOLUTE/HOME/Library/Application Support/go",
+      "/ABSOLUTE/HOME/Library/Developer/Xcode/DerivedData"
+    ],
+    "additionalAllowWrite": [
+      "/ABSOLUTE/HOME/go/pkg/mod",
+      "/ABSOLUTE/HOME/Library/Caches/go-build",
+      "/ABSOLUTE/HOME/Library/Application Support/go",
+      "/ABSOLUTE/HOME/Library/Developer/Xcode/DerivedData"
+    ]
+  },
+  "network": {
+    "allowedDomains": [
+      "127.0.0.1:5555",
+      "proxy.golang.org",
+      "sum.golang.org",
+      "storage.googleapis.com",
+      "registry.npmjs.org",
+      "github.com",
+      "api.github.com",
+      "codeload.github.com",
+      "objects.githubusercontent.com",
+      "formulae.brew.sh",
+      "ghcr.io",
+      "pkg-containers.githubusercontent.com"
+    ],
+    "deniedDomains": [],
+    "strictAllowlist": false
+  },
+  "hostIPC": {
+    "mode": "ask",
+    "preflightCommandPrefixes": [],
+    "allowCommandPrefixes": [],
+    "retryOnUnixSocketError": false
+  }
+}

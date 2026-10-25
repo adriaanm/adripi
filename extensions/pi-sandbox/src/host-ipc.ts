@@ -12,6 +12,13 @@ export type HostIPCTrigger =
   | {
       reason: "unix-socket-eperm";
       rule: "unix-socket-eperm";
+    }
+  | {
+      /** Model asked for one reviewed side-step via the sandbox_escalate tool. */
+      reason: "model-request";
+      rule: "model-request";
+      /** Model-supplied explanation, attached to the review request. */
+      detail?: string;
     };
 
 type CommandResult = { exitCode: number | null };
@@ -61,7 +68,10 @@ function appendBounded(current: Buffer, chunk: Buffer): Buffer {
     : combined.subarray(combined.length - MAX_STDERR_BYTES);
 }
 
-function isBuiltinSubagent(env: NodeJS.ProcessEnv | undefined): boolean {
+/** Builtin subagent workers may not forward work to the host. */
+export function isBuiltinSubagent(
+  env: NodeJS.ProcessEnv | undefined,
+): boolean {
   return Number(env?.[SUBAGENT_DEPTH_ENV] ?? process.env[SUBAGENT_DEPTH_ENV]) > 0;
 }
 

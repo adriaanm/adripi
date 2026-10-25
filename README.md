@@ -40,13 +40,50 @@ Then:
 - `hostIPC.allowCommandPrefixes` for permanent host execution;
 - an **Always allow "<prefix>" for this project** approval choice;
 - `.pi/extensions/pi-sandbox/approvals.json` persistence, loaded at startup
-  and added to the sandbox `denyWrite` set.
+  and added to the sandbox `denyWrite` set;
+- `filesystem.allowUserTemp` (default on): the current macOS user's private
+  temp/cache dirs are writable, so `xcodebuild`/Swift/Clang caches work;
+- `sandbox_escalate`: a model-facing, reviewed one-shot side-step. `paths`
+  grants those literal paths to one sandboxed re-run; omitting `paths` asks
+  for host execution. Both are decided by pi-auto-review (or the human on
+  defer), never by the sandbox itself.
 
 The two current permanent prefixes are `just ios-bindings-test` and
-`just ios-device-logs`; everything else still prompts once.
+`just ios-device-logs`; everything else still prompts once. `just ios-build-check`
+and `just ios-interptest` are in the project example's review-only preflight
+list, so they run on the host after auto-review rather than failing on
+`/var/folders` cache writes.
 
 ## Updating the fork
 
 `patches/` and `extensions/pi-sandbox/` must move together. After changing the
 fork, regenerate the incremental patch against
-`upstream@0.27.0 + patches/pi-sandbox-allow.patch`, then re-run `install.sh`.
+`upstream@0.27.0 + patches/pi-sandbox-allow.patch +
+patches/pi-sandbox-permanent-approvals.patch`, then re-run `install.sh`.
+
+## Sandbox side-steps
+
+When a sandboxed command fails with `Operation not permitted` for a benign
+build/tool cache, the agent can call `sandbox_escalate` instead of changing
+policy:
+
+- `paths: ["/absolute/cache/dir"]` re-runs the exact command sandboxed with
+  those paths readable+writable **for that run only**;
+- no `paths` requests a one-shot host run (requires `hostIPC.mode: "ask"`).
+
+Both modes are reviewed by pi-auto-review; a defer prompts the human, and a
+denial is final. Nothing is persisted. Prefer the path mode: it keeps the
+network and filesystem sandbox in place.
+
+The permission policy allows the tool (`sandbox_escalate: allow`) so the
+boundary review is the single gate. Outside the working tree it also allows
+`external_directory_write` under `/var/folders/*`, `/private/var/folders/*`,
+`~/Library/Caches/*` and `~/Library/Developer/Xcode/*`, so the path argument
+reaches the escalation review instead of prompting twice.
+
+## Maintain
+
+```sh
+just check    # bash -n install.sh
+just commit   # stage and commit the current setup
+```

@@ -1,5 +1,6 @@
 {
   "filesystem": {
+    "allowUserTemp": true,
     "additionalAllowRead": [
       "/tmp/sgo-501",
       "/private/tmp/sgo-501"
@@ -23,6 +24,8 @@
   "hostIPC": {
     "mode": "ask",
     "preflightCommandPrefixes": [
+      "just ios-build-check",
+      "just ios-interptest",
       "just ios-device",
       "just ios-device-build",
       "just ios-device-brews",

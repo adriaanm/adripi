@@ -9,7 +9,9 @@ fi
 
 echo "== standard packages"
 while IFS= read -r pkg; do
-  case "$pkg" in ""|\#*) continue ;; esac
+  case "$pkg" in
+    ""|"#"*) continue ;;
+  esac
   pi install "$pkg"
 done < packages.txt
 

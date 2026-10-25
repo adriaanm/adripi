@@ -1,5 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, parse } from "node:path";
 
 export type RuntimeProcess = {
@@ -58,6 +59,103 @@ function runtimeReadPath(execPath: string): string {
 function runtimeWritePath(execPath: string): string {
   const directory = dirname(execPath);
   return basename(directory) === "bin" ? directory : execPath;
+}
+
+/** Only the current user's private darwin dirs may be granted automatically. */
+const DARWIN_USER_DIR_PREFIXES = [
+  "/var/folders/",
+  "/private/var/folders/",
+] as const;
+
+function normalizeUserDir(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim().replace(/\/+$/, "");
+  if (!trimmed.startsWith("/")) return undefined;
+  if (trimmed === "/var/folders" || trimmed === "/private/var/folders") {
+    return undefined;
+  }
+  return DARWIN_USER_DIR_PREFIXES.some((prefix) => trimmed.startsWith(prefix))
+    ? trimmed
+    : undefined;
+}
+
+/**
+ * `getconf` is the authoritative source for confstr paths; `$TMPDIR` can be
+ * overridden (including by this extension's own per-command temp dir), so it
+ * is only a fallback. Returns undefined when the value is unavailable or does
+ * not name a per-user darwin directory (e.g. a custom TMPDIR below $HOME,
+ * which the sandbox deliberately keeps denied).
+ */
+function confstrDirectory(name: string): string | undefined {
+  try {
+    const value = execFileSync("/usr/bin/getconf", [name], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2_000,
+    });
+    return normalizeUserDir(value);
+  } catch {
+    return undefined;
+  }
+}
+
+const macUserTempDirCache = new Map<string, string[]>();
+
+/**
+ * The current user's private macOS temp and cache directories: the confstr
+ * `DARWIN_USER_TEMP_DIR` / `DARWIN_USER_CACHE_DIR` paths (what `$TMPDIR` and
+ * most of `~/Library/Caches` resolve to).
+ *
+ * Build tools such as `xcodebuild` and the Swift/Clang toolchain ask confstr
+ * directly instead of honouring the command's `TMPDIR`, so a sandbox that only
+ * grants its own per-command temp directory fails them with `Operation not
+ * permitted` under `/var/folders/...`. Granting these two per-user directories
+ * (never the shared `/tmp` root) makes ordinary Apple-toolchain builds work.
+ *
+ * Empty on non-darwin platforms: there the shared temp root is world-writable
+ * and is not granted automatically. The per-command temp directory still is.
+ */
+export function macUserTempDirs(
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  const cached = macUserTempDirCache.get(platform);
+  if (cached !== undefined) return cached;
+
+  const paths = new Set<string>();
+  if (platform === "darwin") {
+    const temp = confstrDirectory("DARWIN_USER_TEMP_DIR");
+    const cache = confstrDirectory("DARWIN_USER_CACHE_DIR");
+    if (temp !== undefined) paths.add(temp);
+    if (cache !== undefined) paths.add(cache);
+    if (temp === undefined && cache === undefined) {
+      // launchd sets $TMPDIR to <user temp dir>/T. Derive the sibling cache
+      // dir only when the shape matches; never widen a custom TMPDIR.
+      const fallback = normalizeUserDir(tmpdir());
+      if (fallback !== undefined) {
+        paths.add(fallback);
+        if (basename(fallback) === "T") {
+          paths.add(join(dirname(fallback), "C"));
+        }
+      }
+    }
+  }
+
+  // `/var` is a symlink to `/private/var` on macOS. Sandbox Runtime resolves
+  // spellings, but granting both keeps the policy readable and robust.
+  const bothSpellings = new Set<string>();
+  for (const path of paths) {
+    if (path.startsWith("/private/var/folders/")) {
+      bothSpellings.add(path.slice("/private".length));
+      bothSpellings.add(path);
+    } else if (path.startsWith("/var/folders/")) {
+      bothSpellings.add(path);
+      bothSpellings.add(`/private${path}`);
+    }
+  }
+
+  const result = [...bothSpellings];
+  macUserTempDirCache.set(platform, result);
+  return result;
 }
 
 export function runtimeFilesystemPaths(

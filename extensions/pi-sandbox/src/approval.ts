@@ -80,12 +80,17 @@ export async function approveHostIPCExecution(
       rule:
         trigger.reason === "preflight-prefix"
           ? `preflight-prefix:${trigger.rule}`
-          : "unix-socket-eperm",
+          : trigger.reason === "model-request"
+            ? "model-request"
+            : "unix-socket-eperm",
     },
     toolInputPreview:
-      trigger.reason === "unix-socket-eperm"
-        ? "The sandboxed attempt failed and may already have had partial side effects."
-        : "A configured prefix requested approval before sandbox execution.",
+      trigger.reason === "model-request"
+        ? (trigger.detail ??
+          "A model-requested one-shot side-step. The original sandboxed command was denied by policy.")
+        : trigger.reason === "unix-socket-eperm"
+          ? "The sandboxed attempt failed and may already have had partial side effects."
+          : "A configured prefix requested approval before sandbox execution.",
     agentName: context.agentName,
   };
   return approveBoundaryRequest(request, context);
@@ -168,15 +173,24 @@ async function approveBoundaryRequest(
   };
 }
 
+export type SandboxTrapApprovalOptions = {
+  /** Model-visible explanation attached to the review request. */
+  toolInputPreview?: string;
+};
+
 export async function approveSandboxTrap(
   trap: SandboxApprovalTrap,
   context: TrapApprovalContext,
+  options: SandboxTrapApprovalOptions = {},
 ): Promise<TrapApprovalResult> {
   const request = sandboxTrapToBoundaryRequest(trap, {
     command: context.command,
     cwd: context.cwd,
     agentName: context.agentName,
   });
+  if (options.toolInputPreview !== undefined) {
+    request.toolInputPreview = options.toolInputPreview;
+  }
 
   if (trap.kind === "network") {
     return {

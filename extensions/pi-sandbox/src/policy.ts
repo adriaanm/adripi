@@ -10,7 +10,7 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
-import { runtimeFilesystemPaths } from "./runtime.ts";
+import { macUserTempDirs, runtimeFilesystemPaths } from "./runtime.ts";
 import {
   PROJECT_PI_SANDBOX_CONFIG_PATH,
   type NetworkConfig,
@@ -126,6 +126,12 @@ export type SandboxPolicy = {
 export type CreateDefaultPolicyOptions = {
   additionalAllowRead?: readonly string[];
   additionalAllowWrite?: readonly string[];
+  /**
+   * Grant the current user's private macOS temp and cache directories. This is
+   * what lets `xcodebuild`, Swift/Clang and other confstr-based tools write
+   * their caches. Defaults to true; the shared temp root is never granted.
+   */
+  allowUserTemp?: boolean;
   network?: NetworkConfig;
 };
 
@@ -235,6 +241,8 @@ export function createDefaultPolicy(
   const home = resolve(homedir());
   const runtimePaths = runtimeFilesystemPaths();
   const denyRead = home === parse(home).root ? [] : [home];
+  const userTempPaths =
+    (options.allowUserTemp ?? true) ? macUserTempDirs() : [];
   const packageRelative = relative(workspace, PACKAGE_ROOT);
   const packageIsInWorkspace =
     packageRelative === "" ||
@@ -250,11 +258,13 @@ export function createDefaultPolicy(
         join(home, ".config", "git", "config"),
         "/dev/null",
         ...(options.additionalAllowRead ?? []),
+        ...userTempPaths,
       ],
       allowWrite: [
         workspace,
         "/dev/null",
         ...(options.additionalAllowWrite ?? []),
+        ...userTempPaths,
       ],
       denyWrite: [
         join(workspace, ".pi", "pi-auto-review.json"),

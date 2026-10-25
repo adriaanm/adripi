@@ -50,6 +50,8 @@ export type PiSandboxConfig = {
   filesystem: {
     additionalAllowRead: readonly string[];
     additionalAllowWrite: readonly string[];
+    /** Grant the current user's private macOS temp and cache dirs. */
+    allowUserTemp: boolean;
   };
   network: NetworkConfig & { readonly strictAllowlist: boolean };
   hostIPC: HostIPCConfig;
@@ -71,6 +73,7 @@ export const DEFAULT_PI_SANDBOX_CONFIG: Readonly<PiSandboxConfig> = Object.freez
     filesystem: Object.freeze({
       additionalAllowRead: Object.freeze([]),
       additionalAllowWrite: Object.freeze([]),
+      allowUserTemp: true,
     }),
     network: Object.freeze({
       allowedDomains: Object.freeze([]),
@@ -162,6 +165,7 @@ export type PartialPiSandboxConfig = {
   filesystem?: {
     additionalAllowRead?: readonly string[];
     additionalAllowWrite?: readonly string[];
+    allowUserTemp?: boolean;
   };
   network?: Partial<NetworkConfig>;
   hostIPC?: Partial<HostIPCConfig>;
@@ -252,7 +256,7 @@ export function parsePiSandboxConfigRaw(value: unknown): PartialPiSandboxConfig 
     }
     rejectUnknownKeys(
       value.filesystem,
-      ["additionalAllowRead", "additionalAllowWrite"],
+      ["additionalAllowRead", "additionalAllowWrite", "allowUserTemp"],
       "filesystem",
     );
     const normalizePathList = (
@@ -277,9 +281,17 @@ export function parsePiSandboxConfigRaw(value: unknown): PartialPiSandboxConfig 
     };
     const additionalAllowRead = normalizePathList("additionalAllowRead");
     const additionalAllowWrite = normalizePathList("additionalAllowWrite");
+    const allowUserTemp = (value.filesystem as Record<string, unknown>)
+      .allowUserTemp;
+    if (allowUserTemp !== undefined && typeof allowUserTemp !== "boolean") {
+      throw new Error(
+        "invalid pi-sandbox configuration: filesystem.allowUserTemp must be a boolean",
+      );
+    }
     parsedFilesystem = {
       ...(additionalAllowRead !== undefined ? { additionalAllowRead } : {}),
       ...(additionalAllowWrite !== undefined ? { additionalAllowWrite } : {}),
+      ...(allowUserTemp !== undefined ? { allowUserTemp } : {}),
     };
   }
 
@@ -512,6 +524,9 @@ function resolvePiSandboxConfig(raw: PartialPiSandboxConfig): PiSandboxConfig {
         ...(raw.filesystem?.additionalAllowWrite ??
           DEFAULT_PI_SANDBOX_CONFIG.filesystem.additionalAllowWrite),
       ],
+      allowUserTemp:
+        raw.filesystem?.allowUserTemp ??
+        DEFAULT_PI_SANDBOX_CONFIG.filesystem.allowUserTemp,
     },
     network: {
       strictAllowlist: raw.network?.strictAllowlist ?? false,
@@ -563,6 +578,8 @@ function defaultPiSandboxConfig(): PiSandboxConfig {
       additionalAllowWrite: [
         ...DEFAULT_PI_SANDBOX_CONFIG.filesystem.additionalAllowWrite,
       ],
+      allowUserTemp:
+        DEFAULT_PI_SANDBOX_CONFIG.filesystem.allowUserTemp,
     },
     network: {
       allowedDomains: [...DEFAULT_PI_SANDBOX_CONFIG.network.allowedDomains],
@@ -673,6 +690,9 @@ export function mergePiSandboxConfigs(
           ...(project.filesystem?.additionalAllowWrite ?? []),
         ]),
       ],
+      // Scalar setting: a project may override the global default.
+      allowUserTemp:
+        project.filesystem?.allowUserTemp ?? trusted.filesystem.allowUserTemp,
     },
     network: {
       // Both configuration files are trusted policy inputs. Projects may add

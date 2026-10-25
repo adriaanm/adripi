@@ -24,7 +24,9 @@ also run complete process-backed subagent trees inside independent sandboxes.
 - Filesystem access is a static policy: reads outside the allowed regions and
   writes outside the workspace fail closed. Runtime filesystem denials are not
   converted into dynamic grants because Sandbox Runtime does not expose a
-  trustworthy filesystem ask callback.
+  trustworthy filesystem ask callback. The model may instead request a
+  reviewed, explicit one-shot re-run with extra paths (`sandbox_escalate`),
+  which updates nothing and keeps every other sandbox rule in force.
 - Network policy is evaluated as static deny, then static allow, then dynamic
   review. Each unmatched public destination is sent to `pi-auto-review` as a
   canonical hostname and concrete port. An approval applies only to that
@@ -40,6 +42,16 @@ also run complete process-backed subagent trees inside independent sandboxes.
   is removed when the command exits. If the host temp directory is unavailable
   (e.g. a read-only `/tmp`) the command degrades to the previous denied-temp
   behaviour rather than failing.
+- On macOS, `filesystem.allowUserTemp` (default `true`) also grants the current
+  user's private confstr temp and cache directories (`DARWIN_USER_TEMP_DIR`,
+  `DARWIN_USER_CACHE_DIR`). `xcodebuild` and the Swift/Clang toolchain ask
+  confstr directly instead of honouring `TMPDIR`, so without these grants they
+  fail with `Operation not permitted` under `/var/folders`. Only that user's
+  directories are granted; the shared temp root and other users' folders stay
+  read-only. Set `"allowUserTemp": false` to restore the narrower policy.
+- A model-facing `sandbox_escalate` tool provides a reviewed, one-shot
+  side-step (see below). Filesystem misses still fail closed; nothing is ever
+  auto-granted at runtime.
 - Project and global Pi security configuration, the trusted extensions tree,
   the installed package, Git hooks, and other Sandbox Runtime mandatory paths
   remain write-protected.
@@ -284,6 +296,38 @@ effects. Successful, timed-out, or aborted commands are never retried.
 
 Host forwarding is intentionally unavailable inside built-in subagents in
 this version. It is also incompatible with `network.strictAllowlist: true`.
+
+## Reviewed model-requested side-steps
+
+When a sandboxed command fails for a benign reason outside the static policy
+(a build cache, a toolchain temp dir, or a device socket), the model can call
+the `sandbox_escalate` tool instead of asking the operator to edit config:
+
+```json
+{
+  "command": "just ios-build-check",
+  "paths": ["/var/folders/xx/yyy/C"],
+  "reason": "xcodebuild writes its module cache here; the command is a build"
+}
+```
+
+- With `paths`, the exact command is re-run **inside** the sandbox with those
+  literal absolute paths added to read and write for that run only. The
+  network policy and every other deny stay in place.
+- Without `paths`, the command is re-run on the **host** after approval, with
+  the same review surface as a preflight prefix; this requires
+  `hostIPC.mode: "ask"`.
+
+Every path is submitted to `pi-auto-review` as a one-shot
+`filesystem-write` boundary request; a defer asks the human, and a denial is
+final. Nothing is persisted and no policy file changes. Local guards reject
+`/`, the home directory or workspace ancestors, globs, and protected
+config/credential paths before review, and pi-auto-review's protected-write
+hard deny still applies on top.
+
+When a sandboxed Bash command fails with `Operation not permitted`, pi-sandbox
+appends a short hint pointing at this tool, so the model does not have to guess
+at the policy.
 
 ## Additional trusted read paths
 

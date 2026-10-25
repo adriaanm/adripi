@@ -74,14 +74,26 @@
 
     // --- CWD boundary -----------------------------------------------------
     // Reaching outside the working tree prompts, except for scratch space.
+    // The trailing * is greedy, so it covers every path below the directory.
     "external_directory": {
       "*": "ask",
       "/tmp": "allow",
-      "/tmp/*": "allow"
+      "/tmp/*": "allow",
+      "/var/folders/*": "allow",
+      "/private/var/folders/*": "allow"
     },
     "external_directory_read": {
       "~/.agents/skills/*": "allow",
       "~/.pi/agent/skills/*": "allow"
+    },
+    // Build caches live outside the working tree. Grants stay per-user (never
+    // the shared temp root) so xcodebuild/Go writes do not prompt on every run.
+    "external_directory_write": {
+      "/tmp/*": "allow",
+      "/var/folders/*": "allow",
+      "/private/var/folders/*": "allow",
+      "~/Library/Caches/*": "allow",
+      "~/Library/Developer/Xcode/*": "allow"
     },
 
     // --- Bash: read-only allowlist ---------------------------------------
@@ -212,6 +224,12 @@
     // pi-sandbox registers a process-backed subagent tool and sandboxes each
     // worker tree, so the tool itself is allowed.
     "subagent": "allow",
+
+    // pi-sandbox's model-facing, one-shot side-step request. It cannot grant
+    // anything itself: every call goes to pi-auto-review's boundary broker
+    // (or the human on defer), and a denial is final. Keeping this allowed
+    // avoids a duplicate permission-system prompt in front of that review.
+    "sandbox_escalate": "allow",
 
     // Inert on macOS, but gate it rather than trusting it.
     "powershell": "ask"

@@ -22,8 +22,10 @@ import {
   type NetworkConfig,
   type SubagentProvider,
 } from "./config.ts";
-import { runCommandWithHostIPC } from "./host-ipc.ts";
+import { isBuiltinSubagent, runCommandWithHostIPC } from "./host-ipc.ts";
 import { addProjectApproval, loadProjectApprovals } from "./approvals.ts";
+import { homedir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
 import {
   runSandboxedCommand,
   type SandboxCommandOptions,
@@ -113,6 +115,10 @@ function humanApproval(ctx: ExtensionContext): HumanApproval {
           request.destination ??
           request.operation;
     const suffix = reason ? `\n${reason}` : "";
+    const commandLine =
+      request.matchedPolicy?.rule === "sandbox-escalation" && request.command
+        ? `\nCommand: ${request.command}`
+        : "";
     const hostWarning =
       request.surface === "host-ipc"
         ? request.matchedPolicy?.rule === "unix-socket-eperm"
@@ -120,7 +126,7 @@ function humanApproval(ctx: ExtensionContext): HumanApproval {
           : "\nWarning: this command will run on the host outside the OS sandbox."
         : "";
     const selected = await ctx.ui.select(
-      `Sandbox approval required: ${request.operation} ${target}${hostWarning}${suffix}`,
+      `Sandbox approval required: ${request.operation} ${target}${commandLine}${hostWarning}${suffix}`,
       ["Allow this exact operation once", "Deny"],
       { signal },
     );
@@ -166,19 +172,36 @@ function hostIpcHumanApproval(
   };
 }
 
+type SandboxOperationsOptions = {
+  /** Extra paths granted read+write for this run only (already reviewed). */
+  extraWritablePaths?: readonly string[];
+  /** Run in the sandbox only; never consider host execution. */
+  sandboxOnly?: boolean;
+};
+
+const SANDBOX_DENIAL_HINT =
+  "\npi-sandbox: outside-policy access was denied (Operation not permitted). " +
+  "If this is a benign build or tool cache path, call sandbox_escalate with " +
+  "that absolute path and a short reason: it re-runs this exact command after " +
+  "review. Do not edit sandbox or permission configuration, and do not " +
+  "escalate credential paths.\n";
+
 function sandboxOperations(
   ctx: ExtensionContext,
   turnIndex: () => number,
   additionalAllowRead: readonly string[],
   additionalAllowWrite: readonly string[],
+  allowUserTemp: boolean,
   network: NetworkConfig,
   hostIPC: HostIPCConfig,
   sandbox?: PiSandboxExtensionOptions["sandbox"],
+  extra: SandboxOperationsOptions = {},
 ): BashOperations {
   return {
     exec(command, cwd, options) {
       const currentSessionId = sessionId(ctx);
       const shellPath = SettingsManager.create(cwd).getShellPath();
+      const extraWritablePaths = extra.extraWritablePaths ?? [];
       const approvalContext = {
         broker: getBoundaryBroker(),
         command,
@@ -189,6 +212,64 @@ function sandboxOperations(
         humanApproval: humanApproval(ctx),
       };
       const local = createLocalBashOperations({ shellPath });
+      let sandboxHintSent = false;
+      const runSandbox = (onStderr: ((data: Buffer) => void) | undefined) =>
+        runSandboxedCommand({
+          command,
+          cwd,
+          env: options.env,
+          signal: options.signal,
+          timeout: options.timeout,
+          ...sandbox,
+          onData: options.onData,
+          onStderr: (data) => {
+            onStderr?.(data);
+            if (
+              !sandboxHintSent &&
+              /operation not permitted/i.test(data.toString("utf8"))
+            ) {
+              sandboxHintSent = true;
+              options.onData(Buffer.from(SANDBOX_DENIAL_HINT, "utf8"));
+            }
+          },
+          shellPath,
+          policy: createDefaultPolicy(cwd, {
+            additionalAllowRead: [
+              ...additionalAllowRead,
+              ...extraWritablePaths,
+            ],
+            additionalAllowWrite: [
+              ...additionalAllowWrite,
+              ...extraWritablePaths,
+            ],
+            allowUserTemp,
+            network,
+          }),
+          review: async (trap) => {
+            const result = await approveSandboxTrap(trap, approvalContext);
+            if (result.action === "deny" && result.reason) {
+              if (ctx.hasUI) {
+                ctx.ui.notify(`Sandbox denied: ${result.reason}`, "warning");
+              }
+            }
+            return result.action;
+          },
+          reviewDomain: async (endpoint) => {
+            const result = await approveDomainEndpoint(
+              endpoint,
+              approvalContext,
+            );
+            if (result.action === "deny" && result.reason && ctx.hasUI) {
+              ctx.ui.notify(`Domain proxy denied: ${result.reason}`, "warning");
+            }
+            return result.action;
+          },
+        });
+
+      if (extra.sandboxOnly) {
+        return runSandbox(undefined);
+      }
+
       return runCommandWithHostIPC({
         command,
         cwd,
@@ -220,47 +301,126 @@ function sandboxOperations(
             ...options,
             timeout,
           }),
-        runSandbox: (onStderr) =>
-          runSandboxedCommand({
-            command,
-            cwd,
-            env: options.env,
-            signal: options.signal,
-            timeout: options.timeout,
-            ...sandbox,
-            onData: options.onData,
-            onStderr,
-            shellPath,
-            policy: createDefaultPolicy(cwd, {
-              additionalAllowRead,
-              additionalAllowWrite,
-              network,
-            }),
-            review: async (trap) => {
-              const result = await approveSandboxTrap(trap, approvalContext);
-              if (result.action === "deny" && result.reason) {
-                if (ctx.hasUI) {
-                  ctx.ui.notify(`Sandbox denied: ${result.reason}`, "warning");
-                }
-              }
-              return result.action;
-            },
-            reviewDomain: async (endpoint) => {
-              const result = await approveDomainEndpoint(
-                endpoint,
-                approvalContext,
-              );
-              if (result.action === "deny" && result.reason && ctx.hasUI) {
-                ctx.ui.notify(
-                  `Domain proxy denied: ${result.reason}`,
-                  "warning",
-                );
-              }
-              return result.action;
-            },
-          }),
+        runSandbox,
       });
     },
+  };
+}
+
+const ESCALATION_MAX_PATHS = 8;
+const ESCALATION_MAX_PATH_LENGTH = 512;
+const ESCALATION_MAX_COMMAND_LENGTH = 16_384;
+const ESCALATION_MAX_REASON_LENGTH = 2_000;
+const ESCALATION_MAX_OUTPUT_CHARS = 64 * 1024;
+const ESCALATION_TIMEOUT_SECONDS = 1_800;
+
+/**
+ * Paths a model-initiated grant may never name, before any reviewer sees it.
+ * This is defence in depth: pi-auto-review's protected-write hard deny also
+ * rejects grants over its own controls.
+ */
+function escalationForbiddenPaths(cwd: string): string[] {
+  const home = resolve(homedir());
+  return [
+    join(home, ".pi"),
+    join(home, ".ssh"),
+    join(home, ".aws"),
+    join(home, ".azure"),
+    join(home, ".kube"),
+    join(home, ".gnupg"),
+    join(home, ".docker"),
+    join(home, ".config", "gcloud"),
+    join(home, ".config", "gh"),
+    join(home, ".git-credentials"),
+    join(home, ".netrc"),
+    join(home, ".npmrc"),
+    join(cwd, ".pi"),
+    "/etc",
+    "/private/etc",
+    "/System",
+    "/private/System",
+    "/Library/Keychains",
+  ];
+}
+
+/**
+ * Normalize the paths a model asked to grant. Rejects broad or security-
+ * relevant targets locally; the reviewer still decides whether the remaining
+ * narrow paths are benign.
+ */
+function normalizeEscalationPaths(
+  requested: readonly string[] | undefined,
+  cwd: string,
+): string[] {
+  const requestedPaths = requested ?? [];
+  if (requestedPaths.length > ESCALATION_MAX_PATHS) {
+    throw new Error(
+      `${EXTENSION_NAME}: sandbox_escalate accepts at most ${ESCALATION_MAX_PATHS} paths`,
+    );
+  }
+  const home = resolve(homedir());
+  const workspace = resolve(cwd);
+  const forbidden = escalationForbiddenPaths(workspace);
+  const paths: string[] = [];
+  for (const value of requestedPaths) {
+    const raw = value.trim();
+    if (raw === "" || raw.length > ESCALATION_MAX_PATH_LENGTH) {
+      throw new Error(
+        `${EXTENSION_NAME}: sandbox_escalate paths must be non-empty and at most ${ESCALATION_MAX_PATH_LENGTH} characters`,
+      );
+    }
+    if (!isAbsolute(raw)) {
+      throw new Error(
+        `${EXTENSION_NAME}: sandbox_escalate paths must be absolute: ${raw}`,
+      );
+    }
+    if (/[*?[\]]/.test(raw)) {
+      throw new Error(
+        `${EXTENSION_NAME}: sandbox_escalate paths must be literal, not globs: ${raw}`,
+      );
+    }
+    const path = resolve(raw);
+    if (path === "/" || path === home || home.startsWith(`${path}/`)) {
+      throw new Error(
+        `${EXTENSION_NAME}: sandbox_escalate refuses ${path}: it would grant the home directory or an ancestor of it`,
+      );
+    }
+    if (workspace === path || workspace.startsWith(`${path}/`)) {
+      throw new Error(
+        `${EXTENSION_NAME}: sandbox_escalate refuses ${path}: it is the workspace or an ancestor of it, which is already allowed`,
+      );
+    }
+    if (
+      forbidden.some(
+        (protectedPath) =>
+          path === protectedPath ||
+          path.startsWith(`${protectedPath}/`) ||
+          protectedPath.startsWith(`${path}/`),
+      )
+    ) {
+      throw new Error(
+        `${EXTENSION_NAME}: sandbox_escalate refuses ${path}: it overlaps protected configuration or credential paths`,
+      );
+    }
+    if (!paths.includes(path)) paths.push(path);
+  }
+  return paths;
+}
+
+function escalationDenied(reason: string | undefined): {
+  content: Array<{ type: "text"; text: string }>;
+  details: Record<string, unknown>;
+} {
+  return {
+    content: [
+      {
+        type: "text",
+        text: `${EXTENSION_NAME}: sandbox_escalate denied${
+          reason ? `: ${reason}` : ""
+        }. The command was not re-run.`,
+      },
+    ],
+    details: { sandbox: "denied" },
   };
 }
 
@@ -304,6 +464,7 @@ async function performRegistration(
     : undefined;
   const additionalAllowRead = config.filesystem.additionalAllowRead;
   const additionalAllowWrite = config.filesystem.additionalAllowWrite;
+  const allowUserTemp = config.filesystem.allowUserTemp;
   const network = config.network;
   const subagents =
     subagentProvider === "builtin"
@@ -329,12 +490,160 @@ async function performRegistration(
           () => currentTurn,
           additionalAllowRead,
           additionalAllowWrite,
+          allowUserTemp,
           network,
           hostIPC,
           options.sandbox,
         ),
       });
       return tool.execute(id, params, signal, onUpdate, ctx);
+    },
+  });
+
+  pi.registerTool({
+    name: "sandbox_escalate",
+    label: "Sandbox escalation (reviewed, one-shot)",
+    description:
+      "Request one reviewed, one-shot sandbox side-step after a command failed with 'Operation not permitted'. With `paths`, the exact command is re-run inside the sandbox with those absolute paths readable and writable for that run only (use this for benign build/tool caches such as /var/folders/... or ~/Library/Developer/Xcode). Without `paths`, the command is re-run on the host outside the OS sandbox (requires hostIPC.mode=\"ask\"). pi-auto-review, or the human when it defers, decides; a denial is final for this request. Never use it for credential paths, security configuration, or to retry an action the reviewer denied.",
+    parameters: Type.Object({
+      command: Type.String({
+        description: "Exact command to re-run, unchanged.",
+      }),
+      reason: Type.String({
+        description:
+          "Why the sandbox denied it and why this exact action is benign.",
+      }),
+      paths: Type.Optional(
+        Type.Array(Type.String(), {
+          description:
+            "Absolute paths to grant read+write for this one run (max 8). Omit to request host execution instead.",
+        }),
+      ),
+    }),
+    async execute(_id, params, signal, onUpdate, ctx) {
+      const command = params.command?.trim() ?? "";
+      if (command === "" || command.length > ESCALATION_MAX_COMMAND_LENGTH) {
+        throw new Error(
+          `${EXTENSION_NAME}: sandbox_escalate requires a command of at most ${ESCALATION_MAX_COMMAND_LENGTH} characters`,
+        );
+      }
+      const reason = params.reason?.trim() ?? "";
+      if (reason === "" || reason.length > ESCALATION_MAX_REASON_LENGTH) {
+        throw new Error(
+          `${EXTENSION_NAME}: sandbox_escalate requires a reason of at most ${ESCALATION_MAX_REASON_LENGTH} characters`,
+        );
+      }
+      if (isBuiltinSubagent(process.env)) {
+        throw new Error(
+          `${EXTENSION_NAME}: sandbox_escalate is unavailable inside builtin subagents`,
+        );
+      }
+      const paths = normalizeEscalationPaths(params.paths, ctx.cwd);
+      if (paths.length === 0 && hostIPC.mode !== "ask") {
+        throw new Error(
+          `${EXTENSION_NAME}: host execution requires hostIPC.mode=\"ask\"; supply paths for a sandboxed re-run instead`,
+        );
+      }
+
+      const shellPath = SettingsManager.create(ctx.cwd).getShellPath();
+      const approvalContext = {
+        broker: getBoundaryBroker(),
+        command,
+        cwd: ctx.cwd,
+        sessionId: sessionId(ctx),
+        scopeKey: `${sessionId(ctx)}:turn:${currentTurn}`,
+        agentName: "sandbox-escalation",
+        signal,
+        humanApproval: humanApproval(ctx),
+      };
+      let output = "";
+      let truncated = false;
+      const onData = (data: Buffer) => {
+        if (truncated) return;
+        output += data.toString("utf8");
+        if (output.length > ESCALATION_MAX_OUTPUT_CHARS) {
+          output = output.slice(0, ESCALATION_MAX_OUTPUT_CHARS);
+          truncated = true;
+        }
+        onUpdate?.({
+          content: [{ type: "text", text: output }],
+          details: { sandbox: "escalation-running" },
+        });
+      };
+
+      if (paths.length > 0) {
+        for (const path of paths) {
+          const decision = await approveSandboxTrap(
+            {
+              kind: "filesystem",
+              operation: "write",
+              path,
+              requested_path: path,
+              reason: "sandbox-escalation",
+            },
+            approvalContext,
+            {
+              toolInputPreview: `sandbox_escalate: ${reason} | this one run may read and write ${path}`,
+            },
+          );
+          if (decision.action !== "allow") {
+            return escalationDenied(decision.reason);
+          }
+        }
+
+        const operations = sandboxOperations(
+          ctx,
+          () => currentTurn,
+          additionalAllowRead,
+          additionalAllowWrite,
+          allowUserTemp,
+          network,
+          hostIPC,
+          options.sandbox,
+          { extraWritablePaths: paths, sandboxOnly: true },
+        );
+        const result = await operations.exec(command, ctx.cwd, {
+          signal,
+          timeout: ESCALATION_TIMEOUT_SECONDS,
+          onData,
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: `${EXTENSION_NAME}: sandboxed re-run with ${paths.length} reviewed path grant(s); exit code ${result.exitCode}${truncated ? " (output truncated)" : ""}\n\n${output}`,
+            },
+          ],
+          details: {
+            sandbox: "sandbox-runtime-path-grant",
+            exitCode: result.exitCode,
+            grantedPaths: paths,
+          },
+        };
+      }
+
+      const decision = await approveHostIPCExecution(
+        { reason: "model-request", rule: "model-request", detail: reason },
+        approvalContext,
+      );
+      if (decision.action !== "allow") {
+        return escalationDenied(decision.reason);
+      }
+      const local = createLocalBashOperations({ shellPath });
+      const result = await local.exec(command, ctx.cwd, {
+        signal,
+        timeout: ESCALATION_TIMEOUT_SECONDS,
+        onData,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${EXTENSION_NAME}: host re-run after review (outside the OS sandbox); exit code ${result.exitCode}${truncated ? " (output truncated)" : ""}\n\n${output}`,
+          },
+        ],
+        details: { sandbox: "host-escalation", exitCode: result.exitCode },
+      };
     },
   });
 
@@ -417,10 +726,13 @@ async function performRegistration(
           parentId,
           cwd: ctx.cwd,
           model: params.model,
-          tools: pi.getActiveTools().filter((name) => name !== "subagent"),
+          tools: pi.getActiveTools().filter(
+            (name) => name !== "subagent" && name !== "sandbox_escalate",
+          ),
           policy: createDefaultPolicy(ctx.cwd, {
             additionalAllowRead,
             additionalAllowWrite,
+            allowUserTemp,
             network,
           }),
           sandbox: options.sandbox,
@@ -589,6 +901,7 @@ async function performRegistration(
       () => currentTurn,
       additionalAllowRead,
       additionalAllowWrite,
+      allowUserTemp,
       network,
       hostIPC,
       options.sandbox,
