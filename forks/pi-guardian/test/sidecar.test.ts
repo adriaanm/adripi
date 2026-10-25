@@ -62,6 +62,30 @@ test("an explicit Pi executable is invoked without a shell", () => {
 	});
 });
 
+test("does not relaunch a pi-subagents runner as Pi", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "pi-guardian-subagent-runner-"));
+	const runner = join(directory, "subagent-runner-bootstrap.js");
+	await writeFile(runner, "");
+	const previousScript = process.argv[1];
+	const previousAsync = process.env.PI_ASYNC_NATIVE_RUNNER;
+	const previousBinary = process.env.PI_SUBAGENT_PI_BINARY;
+	try {
+		process.argv[1] = runner;
+		delete process.env.PI_ASYNC_NATIVE_RUNNER;
+		delete process.env.PI_SUBAGENT_PI_BINARY;
+		assert.deepEqual(getPiInvocation(["--version"]), { command: "pi", args: ["--version"] });
+
+		process.env.PI_ASYNC_NATIVE_RUNNER = "1";
+		assert.deepEqual(getPiInvocation(["--version"]), { command: "pi", args: ["--version"] });
+	} finally {
+		process.argv[1] = previousScript;
+		if (previousAsync === undefined) delete process.env.PI_ASYNC_NATIVE_RUNNER;
+		else process.env.PI_ASYNC_NATIVE_RUNNER = previousAsync;
+		if (previousBinary === undefined) delete process.env.PI_SUBAGENT_PI_BINARY;
+		else process.env.PI_SUBAGENT_PI_BINARY = previousBinary;
+	}
+});
+
 test("runs a sidecar over stdin and retries malformed structured output", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "pi-guardian-sidecar-test-"));
 	const executable = join(directory, "fake-pi.mjs");

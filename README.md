@@ -102,6 +102,12 @@ Use the vendored guardian whenever the reviewer model is reached through an
 extension. For a built-in provider, or one defined directly in `models.json`,
 `reviewer.extensions` can be empty.
 
+The fork also handles `pi-subagents` child sessions. Those children run through
+a Node runner bootstrap, not the Pi CLI. When guardian detects that runner, it
+spawns the `pi` executable for the reviewer sidecar instead of relaunching the
+bootstrap with Pi flags. A failed-closed review now reports that the review
+failed rather than presenting it as a risk judgement.
+
 ### Neuralwatt example
 
 The templates in this repository currently use this configuration. It is a

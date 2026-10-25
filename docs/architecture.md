@@ -53,6 +53,11 @@ in `forks/pi-guardian` (see `VENDOR.md`). It is required when an extension must
 be enabled to reach the reviewer model; upstream hardcodes `--no-extensions`
 without an allowlist.
 
+The fork also detects a `pi-subagents` child runner. The child runs a Node
+bootstrap rather than the Pi CLI, so guardian spawns the `pi` executable for
+the sidecar instead of passing Pi flags to the bootstrap. Failed-closed reviews
+are also reported as review failures, not risk verdicts.
+
 Guardian denials are final for the agent. A human can use `/guardian` to
 inspect status or disable review as a deliberate recovery action. The agent
 must not edit `guardian.json`, `guardian-policy.md`, or `pi-perm` config to get

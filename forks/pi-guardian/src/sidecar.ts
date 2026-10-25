@@ -19,6 +19,13 @@ interface SidecarTurnResult {
 
 export function getPiInvocation(args: string[], configuredCommand?: string): PiInvocation {
 	if (configuredCommand) return { command: configuredCommand, args };
+	// pi-subagents runs child sessions through its own Node bootstrap. That
+	// script is not the Pi CLI, so relaunching process.argv[1] with Pi flags
+	// makes the bootstrap read "--mode" as a config file. Use the Pi executable
+	// instead, while still honoring an explicit piCommand above.
+	if (isNestedSubagentProcess()) {
+		return { command: process.env.PI_SUBAGENT_PI_BINARY?.trim() || "pi", args };
+	}
 	const currentScript = process.argv[1];
 	const isBunVirtualScript = currentScript?.startsWith("/$bunfs/root/");
 	if (currentScript && !isBunVirtualScript && existsSync(currentScript)) {
@@ -29,6 +36,14 @@ export function getPiInvocation(args: string[], configuredCommand?: string): PiI
 	const isGenericRuntime = /^(node|bun)(\.exe)?$/.test(execName);
 	if (!isGenericRuntime) return { command: process.execPath, args };
 	return { command: "pi", args };
+}
+
+function isNestedSubagentProcess(): boolean {
+	if (process.env.PI_ASYNC_NATIVE_RUNNER === "1" || process.env.PI_SUBAGENT_RUNNER_CONFIG) return true;
+	const script = process.argv[1];
+	return Boolean(
+		script && /(?:^|[\\/])(?:subagent-runner(?:-bootstrap)?|binary-bootstrap|inspector-runner)\.(?:mjs|cjs|js|ts)$/i.test(script),
+	);
 }
 
 export function buildSidecarArgs(config: GuardianConfig, state: GuardianStateV1): string[] {

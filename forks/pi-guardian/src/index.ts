@@ -78,8 +78,11 @@ function denialReason(assessment: GuardianAssessment, terminate: boolean): strin
 	const circuitBreaker = terminate
 		? " Guardian rejected too many actions in this user turn, so this tool batch is being terminated."
 		: "";
+	const failedClosed = assessment.rationale.startsWith("Automatic safety review failed closed");
 	return [
-		"Guardian rejected this action due to unacceptable risk.",
+		failedClosed
+			? "Guardian could not complete the safety review, so the action was blocked."
+			: "Guardian rejected this action due to unacceptable risk.",
 		`Reason: ${assessment.rationale}${circuitBreaker}`,
 		"Do not attempt to achieve the same outcome through a workaround, indirect execution, or policy circumvention. Choose a materially safer alternative or ask the user for explicit approval after explaining the concrete risk.",
 	].join("\n");

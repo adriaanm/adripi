@@ -11,16 +11,23 @@ second local-only Git remote.
 
 ## Local change
 
-The only functional delta is `reviewer.extensions`:
+The functional deltas are:
 
 - `src/types.ts`: add `reviewerExtensions` to `GuardianConfig`.
 - `src/config.ts`: parse `reviewer.extensions`, keep package sources such as
   `npm:@aliou/pi-neuralwatt@0.18.0` intact, and resolve local filesystem paths.
 - `src/sidecar.ts`: append each configured entry as an explicit `--extension`
   argument while keeping `--no-extensions` and `--no-tools`.
+- `src/sidecar.ts`: when guardian runs inside a `pi-subagents` child runner,
+  spawn the Pi CLI instead of relaunching the runner bootstrap with Pi flags.
+  The child bootstrap expects a config path or stdin, not `--mode`, so the old
+  behavior failed with `readFileSync('--mode')` and guardian failed closed.
+- `src/index.ts`: distinguish a failed-closed review from a risk denial in the
+  tool error shown to the child.
 - `test/`: coverage for npm source preservation, local path resolution,
-  malformed entries, and sidecar argument generation.
-- `README.md`: document the new option.
+  malformed entries, sidecar argument generation, and nested subagent runner
+  detection.
+- `README.md`: document `reviewer.extensions`.
 
 This lets the reviewer sidecar use the Neuralwatt provider extension, including
 its live catalog and prices, without duplicating models in `models.json`.
