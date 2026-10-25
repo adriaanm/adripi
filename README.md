@@ -1,159 +1,195 @@
 # adripi
 
-My portable Pi coding-agent setup: pinned packages, permission/sandbox configs,
-and local forks of the security extensions.
+Portable Pi setup: an OS sandbox, a semantic reviewer for tool calls, and a
+diff-review sidekick. Workspaces are read+write; credentials and security
+configuration are denied; the agent cannot widen its own permissions.
 
-## Layout
+## Stack
 
-- `packages.txt` — npm packages installed by `pi install`. The forked packages
-  are listed here too, so Pi installs their dependencies and host-peer wiring.
-- `forks.txt` — `<package>|<fork directory>` pairs. After the npm install,
-  `install.sh` deploys each fork's `src/` over the matching managed package.
-- `forks/` — git submodules of the upstream monorepos, checked out on a
-  `personal` branch:
-  - `erichll/pi-packages` — `pi-sandbox` + `pi-auto-review`
-  - `gotgenes/pi-packages` — `pi-permission-system`
-  - `andersonbcdefg/pi-guardian` — reviewer sidecar extension allowlist
-- `config/` — shareable permission, auto-review, and project sandbox configs.
-- `docs/pi-sandbox-fork.md` — the personal delta on top of upstream.
-- `install.sh` — submodules, packages, fork deployment, global configs.
-- `justfile` — `check`, `install`, `forks`, `update`, `commit`.
+| Layer | Package | Role |
+|---|---|---|
+| OS boundary | [`pi-perm`](https://www.npmjs.com/package/pi-perm) | Workspace/network profile; bash under `srt` |
+| Semantic gate | `pi-guardian` (vendored fork) | Reviews every non-exempt tool call with `neuralwatt/nw-flash` |
+| Diff review | [`@georgedong32/pi-review`](https://www.npmjs.com/package/@georgedong32/pi-review) | Bug, security, rules, history, and comment reviewers |
+| Review workers | [`pi-subagents`](https://www.npmjs.com/package/pi-subagents) | Isolated reviewer children |
 
-## Why the fork is deployed over the npm install
+Provider: Neuralwatt, using the `@aliou/pi-neuralwatt` extension. The guardian
+sidecar loads that package explicitly; no duplicated `models.json` and no
+hardcoded model prices.
 
-`pi install ./local-package` loads a package in place and leaves its dependency
-tree to you. That breaks the security stack's wiring: `pi-sandbox` imports
-`@erichll/pi-auto-review`, and `pi-auto-review` imports
-`@gotgenes/pi-permission-system`, both of which resolve from Pi's managed npm
-tree. A local checkout would need its own production dependency install, and
-its host peers would be a second physical copy.
+See [`docs/architecture.md`](docs/architecture.md) for the call flow.
 
-So the npm package stays the dependency/peer anchor, and `install.sh` rsyncs
-the fork's `src/` over it. The fork clone is still the source of truth: changes
-are normal commits on `personal`, there are no hand-maintained patch files, and
-`install.sh` re-deploys after every change. `rsync --delete` also removes files
-the fork drops, unlike the old copy overlay.
+## Requirements
 
-## Install on a machine
+- Pi 1.4+ (`pi --version`)
+- `pnpm`, `node`, `git`, `rsync`
+- macOS or Linux
+- Network access for package install and the first reviewer-sidecar run
+- A Neuralwatt account/key
+
+## Install
 
 ```sh
-git clone <this repo> ~/g/adripi
+git clone <this-repo> ~/g/adripi
 cd ~/g/adripi
-git submodule update --init --recursive
 ./install.sh
+```
+
+`install.sh`:
+
+1. sets `npmCommand` to `pnpm` in `~/.pi/agent/settings.json`
+2. installs `@anthropic-ai/sandbox-runtime` globally if `srt` is missing
+3. installs the pinned packages in [`packages.txt`](packages.txt)
+4. deploys the vendored guardian fork over the npm-managed `pi-guardian`
+5. seeds the portable configs in [`config/`](config) without overwriting
+   existing user files
+
+If `srt` is installed but not on `PATH`:
+
+```fish
+fish_add_path (pnpm bin -g)
+```
+
+```sh
+export PATH="$(pnpm bin -g):$PATH"   # bash/zsh
+```
+
+## Sign in
+
+```sh
+pi
 ```
 
 Then:
 
-1. Set the reviewer model in
-   `~/.pi/agent/extensions/pi-auto-review/config.json`.
-2. Copy `config/pi-sandbox.project.example.json` to the project's
-   `.pi/extensions/pi-sandbox/config.json` and adjust its absolute paths,
-   domains, and host-IPC prefixes.
-3. Restart Pi (extensions and config are loaded at registration).
-
-**Local-only for now:** the submodules point at commits on the local
-`personal` branches that are not pushed anywhere. A fresh clone can only
-initialize them after the forks exist on a remote. Until then, this repo is
-portable by copying `forks/` along with it, or by publishing the forks (below).
-
-## Editing a fork
-
-```sh
-cd forks/erichll-pi-packages
-git switch personal
-# edit packages/pi-sandbox/src/... or packages/pi-auto-review/src/...
-git add -A && git commit -m "..."
-cd ../..
-./install.sh                 # deploy the new source into Pi's managed tree
-git add forks/erichll-pi-packages
-git commit -m "fork: ..."    # record the new submodule commit
+```text
+/login
 ```
 
-`just forks` shows each submodule's branch, pending changes, and HEAD.
+Choose Neuralwatt. The guardian sidecar and `pi-review` reuse the stored
+credential. No API key needs to be committed to this repo.
 
-## Updating upstream
+## Verify
 
-```sh
-just update                          # fetch tags/commits into every fork
-cd forks/erichll-pi-packages
-git rebase pi-sandbox-v0.28.1 personal
-# re-pin packages.txt to the version that tag ships, then:
-cd ../.. && ./install.sh
+```text
+/guardian status      # reviewer: neuralwatt/nw-flash
+/pi-perm              # active profile: workspace
+bash true             # first reviewed call may install the npm reviewer extension
+/review --lite        # inside a git repository
 ```
 
-The submodule records one commit for the whole monorepo. `pi-sandbox` and
-`pi-auto-review` share it, so pin `packages.txt` to the versions that commit
-contains. The current base is `pi-auto-review-v0.27.2`, which ships
-`pi-sandbox@0.27.0` and `pi-auto-review@0.27.2`.
+The first reviewed tool call after install may take a few seconds while the
+reviewer sidecar installs/caches `npm:@aliou/pi-neuralwatt@0.18.0` under
+`~/.pi/agent/tmp/extensions/`.
 
-## Publishing the forks
+## Configuration
 
-When you want GitHub forks:
+`install.sh` copies these only if the destination does not exist. Edit the live
+copies, not the templates.
 
-```sh
-# in each fork submodule
-git remote add mine git@github.com:<you>/pi-packages.git
-git push -u mine personal
+| Template | Live path | Purpose |
+|---|---|---|
+| `config/guardian.json` | `~/.pi/agent/guardian.json` | Reviewer model, explicit reviewer extensions, exemptions |
+| `config/guardian-policy.md` | `~/.pi/agent/guardian-policy.md` | Semantic allow/deny policy |
+| `config/pi-perm.config.json` | `~/.pi/agent/extensions/pi-perm/config.json` | Workspace, filesystem, network, SRT policy |
+| `config/pi-review.json` | `~/.pi/agent/pi-review.json` | Review gate and reviewer models |
 
-# in adripi
-git submodule set-url forks/erichll-pi-packages https://github.com/<you>/pi-packages
-git submodule set-url forks/gotgenes-pi-packages https://github.com/<you>/pi-packages
-git add .gitmodules && git commit -m "forks: point submodules at my forks"
-```
-
-Then a fresh checkout can `git submodule update --init` the pushed commits.
-
-## Guardian reviewer extensions
-
-The `pi-guardian` fork adds `reviewer.extensions` to `guardian.json`.
-Entries are passed to the reviewer sidecar as explicit `--extension` arguments
-while the sidecar keeps `--no-tools` and `--no-extensions`. Package sources
-are supported, so the Neuralwatt provider can be named by coordinate instead
-of by a machine-specific path:
+### Guardian config
 
 ```json
-"reviewer": {
-  "model": "neuralwatt/nw-flash",
-  "extensions": ["npm:@aliou/pi-neuralwatt@0.18.0"]
+{
+  "enabled": true,
+  "reviewer": {
+    "model": "neuralwatt/nw-flash",
+    "extensions": ["npm:@aliou/pi-neuralwatt@0.18.0"],
+    "thinking": "low",
+    "timeoutMs": 90000,
+    "maxAttempts": 3
+  },
+  "exemptTools": ["read", "grep", "find", "ls"],
+  "policyPath": "~/.pi/agent/guardian-policy.md"
 }
 ```
 
-Only listed extensions load; Pi's discovery of all other user/project
-extensions stays disabled. This is intended for provider-only extensions.
+`reviewer.extensions` is only supported by the vendored guardian fork. It
+accepts local paths and package sources (`npm:...`). The sidecar still runs
+with `--no-tools` and `--no-extensions`; only the listed package extensions
+load. The Neuralwatt package declares its provider and two quota helpers; none
+of them add tools.
 
-## Sandbox side-steps
+### Allow another directory
 
-There are two reviewed tools, both decided by pi-auto-review (or the human on
-defer):
+Workspace roots are read+write. Add another repository with an absolute subpath
+table in `pi-perm.config.json`:
 
-- `sandbox_escalate` re-runs one exact command. With `paths`, the re-run stays
-  inside the sandbox with those paths readable+writable for that run only;
-  without `paths`, the command runs on the host (requires `hostIPC.mode:
-  "ask"`).
-- `sandbox_request_access` adds an exact path to the sandbox policy **for the
-  rest of the session**, covering both sandboxed Bash and the write/edit
-  tools. Use it for an authorized work area such as a new repository outside
-  the workspace. A human can choose "always allow for this project", which is
-  the only way the grant is persisted (`approvals.json`). The agent cannot
-  persist a grant on its own.
+```json
+"/Users/you/g/other-repo": {
+  ".": "write"
+}
+```
 
-`/sandbox-grants` lists session and persisted path grants;
-`/sandbox-grants revoke <path>` drops a session grant. A denial is final and
-nothing changes. Prefer the path-grant modes: they keep the network and
-filesystem sandbox in place.
+Use exact absolute paths. Do not add a home-directory-wide or wildcard grant.
+See [`config/README.md`](config/README.md).
 
-The built-in `write` and `edit` tools are now guarded by the same write policy
-as the sandbox, so they cannot rewrite security configuration or secrets the
-OS sandbox protects from Bash. This is a policy check in the Pi process, not a
-kernel boundary; reads remain governed by the permission system's path gate.
+### Why JSON for pi-perm
 
-## Maintain
+`pi-perm@0.1.8` rejects nested TOML filesystem tables (null-prototype
+`smol-toml` tables fail its plain-object check). The JSON profile works. If an
+old `config.toml` exists, `install.sh` moves it to `config.toml.bak` before
+installing `config.json`.
+
+## Layout
+
+```text
+adripi/
+  install.sh
+  packages.txt              # pinned npm packages
+  forks.txt                 # npm package -> vendored fork
+  config/                   # portable config templates
+  docs/architecture.md
+  forks/pi-guardian/        # vendored fork; reviewer.extensions patch
+  scripts/
+    check-configs.mjs
+    set-npm-command.mjs
+```
+
+## Updating
+
+Packages are pinned. To update:
+
+1. bump the version in `packages.txt`
+2. run `./install.sh`
+3. test `/guardian status`, a reviewed `bash` call, and `/review --lite`
+
+The guardian fork is vendored from upstream
+`andersonbcdefg/pi-guardian@49f28fc` (0.1.0). See
+[`forks/pi-guardian/VENDOR.md`](forks/pi-guardian/VENDOR.md) for the patch and
+the upstream-update procedure.
+
+## Security notes
+
+- `pi-perm` is the OS boundary. `pi-guardian` is a semantic gate, not a
+  sandbox replacement.
+- Guardian failures are fail-closed denials.
+- The agent must not edit permission, guardian, reviewer, or sandbox config to
+  bypass a denial. Human recovery paths are `/guardian` and explicit config
+  edits.
+- `pi-review` is advisory code review; it does not replace the guardian or the
+  sandbox.
+- The guardian sidecar sends the retained transcript and exact action to
+  Neuralwatt. Read `guardian-policy.md` and keep secrets out of the transcript.
+
+## Retired
+
+The previous `pi-permission-system` + `pi-auto-review` + `pi-sandbox` stack and
+the `pi-behave` bundle are no longer part of this setup. Their submodules,
+project sandbox config, and documentation were removed. This repo now installs
+only the `pi-perm` + `pi-guardian` + `pi-review` stack.
+
+## Maintenance
 
 ```sh
-just check    # bash -n install.sh + config JSON validation
-just install  # ./install.sh
-just forks    # submodule branch/status
-just update   # fetch upstream into the fork clones
-just commit   # stage and commit the current setup
+just check    # bash -n + config template validation
+just install  # run install.sh
+just commit   # check, stage, commit
 ```

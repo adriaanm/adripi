@@ -1,47 +1,48 @@
 # config
 
-- `pi-permission-system.json` — the shareable permission/auto-review policy.
-  `install.sh` copies it only when the destination is missing.
-- `pi-auto-review.example.json` — reviewer settings. **Set `model`** to a
-  provider/model your machine can reach (`"current"` uses the active session
-  model). `install.sh` copies it only when the destination is missing.
-- `pi-sandbox.project.example.json` — per-project sandbox policy. Copy it to
-  `<project>/.pi/extensions/pi-sandbox/config.json` and adjust:
-  - absolute `additionalAllowRead`/`additionalAllowWrite` paths;
-  - `filesystem.allowUserTemp` (default `true`): writable per-user macOS
-    temp/cache dirs;
-  - `network.allowedDomains` and `allowUnixSockets` for local simulators;
-  - `hostIPC.preflightCommandPrefixes` (one-shot, goes to auto-review before
-    the sandbox) and `hostIPC.allowCommandPrefixes` (permanent host execution).
-- `pi-sandbox.global.example.json` — optional global pi-sandbox policy.
-  Replace `/ABSOLUTE/HOME` with your home directory. The Go and Xcode cache
-  paths are needed for Sgola/iOS builds; drop them on machines that do not
-  build those. The domain list covers Go modules, npm, GitHub and Homebrew;
-  tighten or extend it for your own build graph.
+Templates installed by `install.sh` into `~/.pi/agent`. Existing files are kept,
+so you can customize them on each machine.
 
-`hostIPC.allowCommandPrefixes` runs a command **outside the OS sandbox** with
-no prompt. Keep that list to exact, trusted prefixes.
+- `guardian.json` — semantic reviewer settings. It uses
+  `neuralwatt/nw-flash` and explicitly loads the Neuralwatt provider extension
+  inside the reviewer sidecar:
+  `"extensions": ["npm:@aliou/pi-neuralwatt@0.18.0"]`.
+- `guardian-policy.md` — the reviewer policy. It is intentionally generic:
+  workspace-local work is allowed, credentials and security configuration are
+  denied, and uncertainty fails closed.
+- `pi-perm.config.json` — the OS sandbox profile. `:workspace_roots` is the
+  active project; `.git`, `.codex`, and `.agents` are read-only; `.env` files,
+  `.git/hooks`, and the usual dangerous shell prefixes are denied.
+- `pi-review.json` — the diff-review gate and reviewer models. All models are
+  Neuralwatt models available through the `neuralwatt` provider.
 
-`hostIPC.preflightCommandPrefixes` is the reviewed alternative: a matching
-command goes to pi-auto-review (and to you only if the reviewer defers) before
-it runs, and is not remembered. The project example routes
-`just ios-build-check` and `just ios-interptest` that way.
+## Allowing another directory
 
-## Sandbox side-steps
+`pi-perm` treats workspaces as read+write and other directories as external
+grants. To make a second repository writable on this machine, add an absolute
+subpath table under `permissions.workspace.filesystem`:
 
-Build tools that insist on caches outside the workspace can hit
-`Operation not permitted`. Two reviewed tools are available, both decided by
-pi-auto-review (or a human on defer):
+```json
+"/Users/you/g/other-repo": {
+  ".": "write"
+}
+```
 
-- `sandbox_escalate` re-runs one exact command with the path readable+writable
-  for that run only; omitting `paths` requests host execution instead
-  (requires `hostIPC.mode: "ask"`).
-- `sandbox_request_access` grants an exact path to the sandbox for the rest of
-  the session, covering sandboxed Bash and the guarded write/edit tools. Use it
-  for an authorized work area such as a new repository. A human may persist the
-  grant ("always allow this path for this project"); reviewer approval never
-  persists. `/sandbox-grants` lists and revokes session grants.
+Use an absolute path. Do not add a wildcard or a home-directory-wide grant.
 
-The permission policy allows both tools so the boundary review is the only
-gate. The write/edit tools enforce the same write policy, so they cannot write
-security configuration or secrets that the sandbox protects.
+## Why JSON, not TOML
+
+`pi-perm@0.1.8` parses TOML with `smol-toml`, whose nested tables have a null
+prototype. Its validator only accepts plain `Object.prototype` objects, so
+nested TOML filesystem tables are rejected at startup. The JSON form works and
+is what this repo installs. If you have an old `config.toml`, `install.sh`
+renames it to `config.toml.bak` and installs the JSON template when no
+`config.json` exists.
+
+## Guardian reviewer extensions
+
+The vendored guardian fork adds `reviewer.extensions`. Only the entries in that
+array are loaded by the reviewer sidecar. The sidecar still uses `--no-tools`
+and `--no-extensions`; it cannot call tools and no other user/project extension
+is loaded. The Neuralwatt package is a provider-only dependency for review; it
+does not need to be duplicated in `models.json`.

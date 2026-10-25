@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "reviewer": {
+    "model": "neuralwatt/nw-flash",
+    "extensions": [
+      "npm:@aliou/pi-neuralwatt@0.18.0"
+    ],
+    "thinking": "low",
+    "timeoutMs": 90000,
+    "maxAttempts": 3
+  },
+  "exemptTools": [
+    "read",
+    "grep",
+    "find",
+    "ls"
+  ],
+  "policyPath": "~/.pi/agent/guardian-policy.md"
+}

@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# npm pack output
+*.tgz
+
+# Logs
+npm-debug.log*
+pnpm-debug.log*
+
+# Secrets and local credentials
+.env
+.env.*
+!.env.example
+!.env.sample
+.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Coding-agent state and transcripts
+AGENTS.md
+.agents/
+.codex/
+.claude/
+.cursor/
+.pi/
+guardian-sessions/
+*.jsonl
+
+# OS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+*.swp

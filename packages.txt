@@ -1,14 +1,14 @@
-# Standard Pi packages, installed in this order.
+# Pi packages installed by install.sh.
 #
-# The forked packages are still installed from npm: Pi then wires their
-# dependencies and host peers into the managed install. install.sh afterwards
-# deploys the fork source over each one (see forks.txt). Keep the pinned
-# versions in sync with the fork base tags recorded in forks.txt.
-npm:@juicesharp/rpiv-todo
-npm:pi-web-access
-npm:@narumitw/pi-goal
-npm:@aliou/pi-neuralwatt@0.18.0
+# Versions are pinned to the set tested with this setup. Update deliberately:
+# bump the version here, run install.sh, then exercise /guardian, /review, and
+# a sandboxed bash command.
+npm:pi-subagents@0.81.0
+npm:pi-perm@0.1.8
 npm:pi-guardian@0.1.0
-npm:@gotgenes/pi-permission-system@41.0.0
-npm:@erichll/pi-auto-review@0.27.2
-npm:@erichll/pi-sandbox@0.27.0
+npm:@georgedong32/pi-review@0.8.6
+npm:@aliou/pi-neuralwatt@0.18.0
+npm:@juicesharp/rpiv-todo@2.15.0
+npm:pi-web-access@0.44.0
+npm:@narumitw/pi-goal@0.54.13
+npm:@bukutsu/pi-ping@1.3.6

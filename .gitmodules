@@ -1,9 +1,0 @@
-[submodule "forks/erichll-pi-packages"]
-	path = forks/erichll-pi-packages
-	url = https://github.com/erichll/pi-packages
-[submodule "forks/gotgenes-pi-packages"]
-	path = forks/gotgenes-pi-packages
-	url = https://github.com/gotgenes/pi-packages
-[submodule "forks/andersonbcdefg-pi-guardian"]
-	path = forks/andersonbcdefg-pi-guardian
-	url = https://github.com/andersonbcdefg/pi-guardian

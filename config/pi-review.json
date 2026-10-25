@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "gate": {
+    "model": "deepseek-v4.1-flash",
+    "thinking": "low",
+    "enabled": true,
+    "threshold": 8,
+    "verdictPolicy": "strict"
+  },
+  "reviewers": {
+    "bugbot": { "model": "glm-5.3-flash", "thinking": "max", "enabled": true },
+    "security-review": { "model": "glm-5.3", "thinking": "high", "enabled": true },
+    "rulesheriff": { "model": "glm-5.3-flash", "thinking": "high", "enabled": true },
+    "history-context": { "model": "deepseek-v4.1-flash", "thinking": "low", "enabled": true },
+    "code-comments": { "model": "deepseek-v4.1-flash", "thinking": "low", "enabled": true }
+  }
+}

@@ -1,13 +1,8 @@
-# <npm package>|<fork package directory>
+# <npm package>|<vendored fork directory>
 #
-# install.sh deploys each fork's src/ over the npm-managed install after the
-# packages in packages.txt are installed. The npm install supplies dependencies
-# and host peer wiring; the fork supplies the code.
+# install.sh installs the npm package first (dependencies and host-peer wiring),
+# then rsyncs the fork's src/ over the managed install.
 #
-# The forks are submodules on a `personal` branch. A fresh clone needs the fork
-# commits to be pushed to a remote (or the local commits copied) before
-# `git submodule update` can check them out.
-@erichll/pi-sandbox|forks/erichll-pi-packages/packages/pi-sandbox
-@erichll/pi-auto-review|forks/erichll-pi-packages/packages/pi-auto-review
-@gotgenes/pi-permission-system|forks/gotgenes-pi-packages/packages/pi-permission-system
-pi-guardian|forks/andersonbcdefg-pi-guardian
+# The guardian fork is vendored in this repository so a fresh clone can install
+# on another machine without a private Git remote.
+pi-guardian|forks/pi-guardian
