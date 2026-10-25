@@ -34,7 +34,8 @@ objects. The JSON config avoids that bug.
 
 Every non-exempt tool call is reviewed before it runs.
 
-- The reviewer is an independent Pi sidecar using `neuralwatt/nw-flash`.
+- The reviewer is an independent Pi sidecar using the configured
+  `reviewer.model`. The included template uses `neuralwatt/nw-flash`.
 - It receives the retained transcript, the exact tool input, and
   `guardian-policy.md`.
 - It returns `allow` or `deny`; malformed output or sidecar failure is a
@@ -42,12 +43,15 @@ Every non-exempt tool call is reviewed before it runs.
 - `read`, `grep`, `find`, and `ls` are exempt.
 - The sidecar runs with `--no-tools`, `--no-extensions`, `--no-skills`,
   `--no-context-files`, and `--no-prompt-templates`.
-- The one exception to `--no-extensions` is `reviewer.extensions`. In this
-  setup it names `npm:@aliou/pi-neuralwatt@0.18.0`, so the sidecar gets the
-  provider's live model catalog and prices without a `models.json` copy.
+- The one exception to `--no-extensions` is `reviewer.extensions`. When the
+  reviewer model is supplied by an extension, this lists just that extension
+  so the sidecar can reach the model without a `models.json` copy. Built-in
+  providers and providers defined in `models.json` leave it empty.
 
 The fork adds `reviewer.extensions` to `guardian.json`; the patch is vendored
-in `forks/pi-guardian` (see `VENDOR.md`).
+in `forks/pi-guardian` (see `VENDOR.md`). It is required when an extension must
+be enabled to reach the reviewer model; upstream hardcodes `--no-extensions`
+without an allowlist.
 
 Guardian denials are final for the agent. A human can use `/guardian` to
 inspect status or disable review as a deliberate recovery action. The agent
@@ -62,21 +66,23 @@ around a denial.
 - `bugbot`, `security-review`, `rulesheriff`, `history-context`, and
   `code-comments`
 - a strict gate at threshold 8
-- Neuralwatt models for every role
+- reviewer models configured in `pi-review.json`
 
-Configuration: `~/.pi/agent/pi-review.json`.
+Configuration: `~/.pi/agent/pi-review.json`. The included template uses
+Neuralwatt models; replace them for another provider.
 
 ## 4. `pi-subagents`
 
 `pi-review` depends on `pi-subagents` for isolated reviewer children. It is not
 a security boundary; the guardian still reviews the parent tools.
 
-## Why not `models.json`?
+## Why not `models.json` for extension providers?
 
-`models.json` would duplicate the Neuralwatt catalog, including prices, and
-would go stale when `nw-flash` moves or the provider refreshes `/v1/models`.
-Loading the provider extension in the reviewer sidecar keeps one source of
-truth and still prevents the sidecar from loading any other extension.
+A `models.json` entry would duplicate the provider's catalog, including prices,
+and can go stale when the provider refreshes its model list. Loading the
+provider extension in the reviewer sidecar keeps one source of truth and still
+prevents the sidecar from loading any other extension. For built-in providers,
+no extension is necessary.
 
 ## Why not a `piCommand` wrapper?
 

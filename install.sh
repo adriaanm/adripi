@@ -104,13 +104,13 @@ fi
 cat <<'NOTE'
 
 == sign in
-Start Pi and run `/login`, then choose Neuralwatt. The guardian reviewer
-sidecar and pi-review use the same stored Neuralwatt credential.
+Start Pi and run `/login`, then choose the provider you want to use for the
+reviewer and pi-review. They use the same stored credential.
 
 == verify
-  /guardian status      # reviewer: neuralwatt/nw-flash
+  /guardian status      # prints the configured reviewer model
   /pi-perm              # active profile: workspace
-  bash true             # first reviewed call may install the npm reviewer extension
+  bash true             # a reviewed call; must be allowed
   /review --lite        # in a git repository
 
 == project directories

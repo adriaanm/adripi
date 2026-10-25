@@ -9,13 +9,12 @@ configuration are denied; the agent cannot widen its own permissions.
 | Layer | Package | Role |
 |---|---|---|
 | OS boundary | [`pi-perm`](https://www.npmjs.com/package/pi-perm) | Workspace/network profile; bash under `srt` |
-| Semantic gate | `pi-guardian` (vendored fork) | Reviews every non-exempt tool call with `neuralwatt/nw-flash` |
+| Semantic gate | `pi-guardian` (vendored fork) | Reviews every non-exempt tool call with the configured reviewer model |
 | Diff review | [`@georgedong32/pi-review`](https://www.npmjs.com/package/@georgedong32/pi-review) | Bug, security, rules, history, and comment reviewers |
 | Review workers | [`pi-subagents`](https://www.npmjs.com/package/pi-subagents) | Isolated reviewer children |
 
-Provider: Neuralwatt, using the `@aliou/pi-neuralwatt` extension. The guardian
-sidecar loads that package explicitly; no duplicated `models.json` and no
-hardcoded model prices.
+The sandbox and review configuration are provider-independent. See
+[Configure a provider](#configure-a-provider) for choosing the reviewer model.
 
 See [`docs/architecture.md`](docs/architecture.md) for the call flow.
 
@@ -24,8 +23,8 @@ See [`docs/architecture.md`](docs/architecture.md) for the call flow.
 - Pi 1.4+ (`pi --version`)
 - `pnpm`, `node`, `git`, `rsync`
 - macOS or Linux
-- Network access for package install and the first reviewer-sidecar run
-- A Neuralwatt account/key
+- Network access for package install
+- Credentials for your chosen model provider
 
 ## Install
 
@@ -54,33 +53,92 @@ fish_add_path (pnpm bin -g)
 export PATH="$(pnpm bin -g):$PATH"   # bash/zsh
 ```
 
-## Sign in
+## Configure a provider
 
-```sh
-pi
-```
-
-Then:
+Authenticate with Pi first:
 
 ```text
 /login
 ```
 
-Choose Neuralwatt. The guardian sidecar and `pi-review` reuse the stored
-credential. No API key needs to be committed to this repo.
+Choose your provider. Then set the reviewer model in
+`~/.pi/agent/guardian.json`:
+
+```json
+{
+  "reviewer": {
+    "model": "<provider>/<model>",
+    "extensions": []
+  }
+}
+```
+
+Set `reviewer.extensions` only when the model is provided by a Pi extension.
+For a built-in provider, or a provider defined in `models.json`, leave it empty.
+The extension must be available to the reviewer sidecar; package sources are
+accepted:
+
+```json
+"extensions": ["npm:@scope/provider-extension@1.2.3"]
+```
+
+The `pi-review` reviewer models in `~/.pi/agent/pi-review.json` must also be
+reachable through the authenticated provider. Replace the model IDs in that
+file with models your provider exposes.
+
+### Why the vendored guardian is needed for extension-provided models
+
+Upstream `pi-guardian` runs its reviewer sidecar with `--no-extensions` and
+`--no-tools`. That is the right default: the reviewer must not load arbitrary
+extensions or call tools. But it also means a provider supplied only by a Pi
+extension is not registered in the sidecar, so `reviewer.model` cannot resolve.
+
+The vendored fork adds `reviewer.extensions`. Pi still loads explicitly listed
+`--extension` paths when `--no-extensions` is set, so the sidecar can load only
+the provider extension while keeping `--no-tools` and keeping every
+auto-discovered extension disabled.
+
+Use the vendored guardian whenever the reviewer model is reached through an
+extension. For a built-in provider, or one defined directly in `models.json`,
+`reviewer.extensions` can be empty.
+
+### Neuralwatt example
+
+The templates in this repository currently use this configuration. It is a
+working example, not a requirement. If you use Neuralwatt, the provider is
+supplied by the `@aliou/pi-neuralwatt` extension:
+
+```json
+{
+  "enabled": true,
+  "reviewer": {
+    "model": "neuralwatt/nw-flash",
+    "extensions": ["npm:@aliou/pi-neuralwatt@0.18.0"],
+    "thinking": "low",
+    "timeoutMs": 90000,
+    "maxAttempts": 3
+  },
+  "exemptTools": ["read", "grep", "find", "ls"],
+  "policyPath": "~/.pi/agent/guardian-policy.md"
+}
+```
+
+The npm coordinate is resolved by the reviewer sidecar and cached under
+`~/.pi/agent/tmp/extensions/`; the first reviewed call may take a few seconds.
+The package declares its provider and two quota helpers; none of them add
+tools. The sidecar still runs with `--no-tools`.
+
+The default `pi-review.json` also uses Neuralwatt models. Replace those IDs if
+you use a different provider.
 
 ## Verify
 
 ```text
-/guardian status      # reviewer: neuralwatt/nw-flash
+/guardian status      # prints the configured reviewer model
 /pi-perm              # active profile: workspace
-bash true             # first reviewed call may install the npm reviewer extension
+bash true             # a reviewed call; must be allowed
 /review --lite        # inside a git repository
 ```
-
-The first reviewed tool call after install may take a few seconds while the
-reviewer sidecar installs/caches `npm:@aliou/pi-neuralwatt@0.18.0` under
-`~/.pi/agent/tmp/extensions/`.
 
 ## Configuration
 
@@ -100,8 +158,8 @@ copies, not the templates.
 {
   "enabled": true,
   "reviewer": {
-    "model": "neuralwatt/nw-flash",
-    "extensions": ["npm:@aliou/pi-neuralwatt@0.18.0"],
+    "model": "<provider>/<model>",
+    "extensions": [],
     "thinking": "low",
     "timeoutMs": 90000,
     "maxAttempts": 3
@@ -111,11 +169,9 @@ copies, not the templates.
 }
 ```
 
-`reviewer.extensions` is only supported by the vendored guardian fork. It
-accepts local paths and package sources (`npm:...`). The sidecar still runs
-with `--no-tools` and `--no-extensions`; only the listed package extensions
-load. The Neuralwatt package declares its provider and two quota helpers; none
-of them add tools.
+`reviewer.extensions` accepts local paths and package sources (`npm:...`). The
+sidecar runs with `--no-tools` and `--no-extensions`; only the listed package
+extensions load.
 
 ### Allow another directory
 
@@ -134,9 +190,7 @@ See [`config/README.md`](config/README.md).
 ### Why JSON for pi-perm
 
 `pi-perm@0.1.8` rejects nested TOML filesystem tables (null-prototype
-`smol-toml` tables fail its plain-object check). The JSON profile works. If an
-old `config.toml` exists, `install.sh` moves it to `config.toml.bak` before
-installing `config.json`.
+`smol-toml` tables fail its plain-object check). The JSON profile works.
 
 ## Layout
 
@@ -176,34 +230,9 @@ the upstream-update procedure.
   edits.
 - `pi-review` is advisory code review; it does not replace the guardian or the
   sandbox.
-- The guardian sidecar sends the retained transcript and exact action to
-  Neuralwatt. Read `guardian-policy.md` and keep secrets out of the transcript.
-
-## Retired
-
-The previous `pi-permission-system` + `pi-auto-review` + `pi-sandbox` stack and
-the `pi-behave` bundle are no longer part of this setup. Their submodules,
-project sandbox config, and documentation were removed. This repo now installs
-only the `pi-perm` + `pi-guardian` + `pi-review` stack.
-
-On a machine that still has the old stack, remove the packages and stale
-extension config directories before installing:
-
-```sh
-pi remove npm:@gotgenes/pi-permission-system
-pi remove npm:@erichll/pi-auto-review
-pi remove npm:@erichll/pi-sandbox
-rm -rf ~/.pi/agent/extensions/pi-auto-review \
-       ~/.pi/agent/extensions/pi-permission-system \
-       ~/.pi/agent/extensions/pi-sandbox \
-       ~/.pi/agent/extensions/pi-behave
-```
-
-`install.sh` keeps existing `guardian.json`, `guardian-policy.md`, and
-`pi-perm` config files. On this machine those can remain; on a fresh machine
-the portable templates are installed automatically. To adopt the templates on
-an existing machine, compare them and copy them manually (the agent is
-intentionally not allowed to overwrite live security configuration).
+- The guardian sidecar sends the retained transcript and exact action to the
+  configured provider. Read `guardian-policy.md` and keep secrets out of the
+  transcript.
 
 ## Maintenance
 

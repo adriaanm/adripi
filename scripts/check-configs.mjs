@@ -14,11 +14,11 @@ function read(name) {
 }
 
 const guardian = read("guardian.json");
-if (guardian.reviewer?.model !== "neuralwatt/nw-flash") {
-  throw new Error("config/guardian.json: reviewer.model must be neuralwatt/nw-flash");
+if (typeof guardian.reviewer?.model !== "string" || !guardian.reviewer.model.includes("/")) {
+  throw new Error("config/guardian.json: reviewer.model must be a provider/model string");
 }
-if (!Array.isArray(guardian.reviewer?.extensions) || guardian.reviewer.extensions.length === 0) {
-  throw new Error("config/guardian.json: reviewer.extensions must list the Neuralwatt provider");
+if (!Array.isArray(guardian.reviewer?.extensions)) {
+  throw new Error("config/guardian.json: reviewer.extensions must be an array");
 }
 if (guardian.policyPath !== "~/.pi/agent/guardian-policy.md") {
   throw new Error("config/guardian.json: policyPath must point at the portable guardian policy");
