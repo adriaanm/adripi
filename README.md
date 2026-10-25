@@ -186,6 +186,25 @@ the `pi-behave` bundle are no longer part of this setup. Their submodules,
 project sandbox config, and documentation were removed. This repo now installs
 only the `pi-perm` + `pi-guardian` + `pi-review` stack.
 
+On a machine that still has the old stack, remove the packages and stale
+extension config directories before installing:
+
+```sh
+pi remove npm:@gotgenes/pi-permission-system
+pi remove npm:@erichll/pi-auto-review
+pi remove npm:@erichll/pi-sandbox
+rm -rf ~/.pi/agent/extensions/pi-auto-review \
+       ~/.pi/agent/extensions/pi-permission-system \
+       ~/.pi/agent/extensions/pi-sandbox \
+       ~/.pi/agent/extensions/pi-behave
+```
+
+`install.sh` keeps existing `guardian.json`, `guardian-policy.md`, and
+`pi-perm` config files. On this machine those can remain; on a fresh machine
+the portable templates are installed automatically. To adopt the templates on
+an existing machine, compare them and copy them manually (the agent is
+intentionally not allowed to overwrite live security configuration).
+
 ## Maintenance
 
 ```sh
