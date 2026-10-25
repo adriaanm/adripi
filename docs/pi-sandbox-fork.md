@@ -42,6 +42,28 @@ git diff pi-sandbox-v0.27.0..personal -- packages/pi-sandbox
    review; pi-auto-review's protected-write hard deny still applies.
 7. Sandboxed Bash prints a hint pointing at `sandbox_escalate` when a command
    fails with `Operation not permitted`.
+8. `sandbox_request_access` (tool) + `SessionAccessGrants`: a reviewed,
+   session-scoped read+write grant for exact literal paths. The request goes to
+   pi-auto-review as a `filesystem-write` boundary request with the model's
+   reason; the reviewer sees the conversation, so an explicit user
+   authorization is usable evidence while model-authored text cannot forge it.
+   On allow, the path is merged into every subsequent sandboxed Bash command
+   and every guarded write/edit; on defer the human chooses session-only or
+   "always allow for this project". Grants are in-memory, cleared at session
+   shutdown, and listed/revoked with `/sandbox-grants`. Reviewer approval never
+   persists; only a human choice writes `.pi/extensions/pi-sandbox/approvals.json`
+   (`allowPaths`, alongside `allowCommandPrefixes`). Local guards reject `/`,
+   home/workspace ancestors, globs, and protected config/credential paths.
+9. The built-in `write` and `edit` tools are re-registered with the sandbox
+   write policy (`assertWriteAllowed`): allow roots = workspace, `/dev/null`,
+   configured extra paths, per-user temp, project approvals, session grants;
+   deny roots = the same `denyWrite` list the OS sandbox uses, secret basenames
+   and `secrets/` directories, resolving symlinks and missing path tails. This
+   closes the previous bypass where the write tool could rewrite security
+   configuration that the OS sandbox protected from Bash. It is a policy check
+   in the Pi process, not a kernel boundary; reads remain governed by the
+   permission system's path gate (the OS denyRead still applies to Bash and
+   subagent processes).
 
 The command still runs **outside the OS sandbox** when allowed by item 1 or 6.
 A permanent approval is a policy decision, not a weaker sandbox.

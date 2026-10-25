@@ -233,6 +233,11 @@
     // avoids a duplicate permission-system prompt in front of that review.
     "sandbox_escalate": "allow",
 
+    // Reviewed session-scoped read+write path grant. Same review pipeline as
+    // sandbox_escalate; approval applies to sandboxed Bash and to the
+    // sandbox-guarded write/edit tools until the session ends.
+    "sandbox_request_access": "allow",
+
     // Inert on macOS, but gate it rather than trusting it.
     "powershell": "ask"
   }

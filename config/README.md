@@ -30,8 +30,18 @@ it runs, and is not remembered. The project example routes
 ## Sandbox side-steps
 
 Build tools that insist on caches outside the workspace can hit
-`Operation not permitted`. The agent can call pi-sandbox's `sandbox_escalate`
-tool with the absolute path and a reason; pi-auto-review then decides whether
-to re-run that exact command once with the path granted. Omitting `paths`
-requests host execution instead (requires `hostIPC.mode: "ask"`). The
-permission policy allows the tool so the boundary review is the only gate.
+`Operation not permitted`. Two reviewed tools are available, both decided by
+pi-auto-review (or a human on defer):
+
+- `sandbox_escalate` re-runs one exact command with the path readable+writable
+  for that run only; omitting `paths` requests host execution instead
+  (requires `hostIPC.mode: "ask"`).
+- `sandbox_request_access` grants an exact path to the sandbox for the rest of
+  the session, covering sandboxed Bash and the guarded write/edit tools. Use it
+  for an authorized work area such as a new repository. A human may persist the
+  grant ("always allow this path for this project"); reviewer approval never
+  persists. `/sandbox-grants` lists and revokes session grants.
+
+The permission policy allows both tools so the boundary review is the only
+gate. The write/edit tools enforce the same write policy, so they cannot write
+security configuration or secrets that the sandbox protects.

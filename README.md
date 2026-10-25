@@ -105,24 +105,29 @@ Then a fresh checkout can `git submodule update --init` the pushed commits.
 
 ## Sandbox side-steps
 
-When a sandboxed command fails with `Operation not permitted` for a benign
-build/tool cache, the agent can call `sandbox_escalate` instead of changing
-policy:
+There are two reviewed tools, both decided by pi-auto-review (or the human on
+defer):
 
-- `paths: ["/absolute/cache/dir"]` re-runs the exact command sandboxed with
-  those paths readable+writable **for that run only**;
-- no `paths` requests a one-shot host run (requires `hostIPC.mode: "ask"`).
+- `sandbox_escalate` re-runs one exact command. With `paths`, the re-run stays
+  inside the sandbox with those paths readable+writable for that run only;
+  without `paths`, the command runs on the host (requires `hostIPC.mode:
+  "ask"`).
+- `sandbox_request_access` adds an exact path to the sandbox policy **for the
+  rest of the session**, covering both sandboxed Bash and the write/edit
+  tools. Use it for an authorized work area such as a new repository outside
+  the workspace. A human can choose "always allow for this project", which is
+  the only way the grant is persisted (`approvals.json`). The agent cannot
+  persist a grant on its own.
 
-Both modes are reviewed by pi-auto-review; a defer prompts the human, and a
-denial is final. Nothing is persisted. Prefer the path mode: it keeps the
-network and filesystem sandbox in place.
+`/sandbox-grants` lists session and persisted path grants;
+`/sandbox-grants revoke <path>` drops a session grant. A denial is final and
+nothing changes. Prefer the path-grant modes: they keep the network and
+filesystem sandbox in place.
 
-`filesystem.allowUserTemp` (default on) already grants the current macOS user's
-private temp/cache dirs, so `xcodebuild`/Swift/Clang caches work without an
-escalation. The permission policy allows `sandbox_escalate` so the boundary
-review is the single gate, and allows `external_directory_write` under
-`/var/folders/*`, `~/Library/Caches/*`, and `~/Library/Developer/Xcode/*` so a
-path grant does not prompt twice.
+The built-in `write` and `edit` tools are now guarded by the same write policy
+as the sandbox, so they cannot rewrite security configuration or secrets the
+OS sandbox protects from Bash. This is a policy check in the Pi process, not a
+kernel boundary; reads remain governed by the permission system's path gate.
 
 ## Maintain
 
