@@ -1,0 +1,12 @@
+# <npm package>|<fork package directory>
+#
+# install.sh deploys each fork's src/ over the npm-managed install after the
+# packages in packages.txt are installed. The npm install supplies dependencies
+# and host peer wiring; the fork supplies the code.
+#
+# The forks are submodules on a `personal` branch. A fresh clone needs the fork
+# commits to be pushed to a remote (or the local commits copied) before
+# `git submodule update` can check them out.
+@erichll/pi-sandbox|forks/erichll-pi-packages/packages/pi-sandbox
+@erichll/pi-auto-review|forks/erichll-pi-packages/packages/pi-auto-review
+@gotgenes/pi-permission-system|forks/gotgenes-pi-packages/packages/pi-permission-system
