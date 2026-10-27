@@ -19,12 +19,18 @@ need rsync
 export PI_AGENT_DIR="${PI_AGENT_DIR:-$HOME/.pi/agent}"
 NPM_ROOT="$PI_AGENT_DIR/npm/node_modules"
 
+echo "adripi: close any running Pi before installing; this rewrites its settings"
 echo "== pnpm"
 node scripts/set-npm-command.mjs "$PI_AGENT_DIR"
 
 echo "== sandbox runtime"
 if ! command -v srt >/dev/null 2>&1; then
-  pnpm add -g @anthropic-ai/sandbox-runtime@0.0.81
+  # Only install when nothing is on PATH; never downgrade a newer global install.
+  if pnpm ls -g --depth 0 @anthropic-ai/sandbox-runtime >/dev/null 2>&1; then
+    echo "   sandbox-runtime is installed globally but srt is not on PATH"
+  else
+    pnpm add -g @anthropic-ai/sandbox-runtime@0.0.81
+  fi
 fi
 if ! command -v srt >/dev/null 2>&1; then
   PNPM_BIN="$(pnpm bin -g)"
@@ -74,8 +80,9 @@ if node - "$PI_AGENT_DIR/settings.json" <<'NODE'
 const fs = require("node:fs");
 const file = process.argv[2];
 const settings = JSON.parse(fs.readFileSync(file, "utf8"));
+if (!Array.isArray(settings.packages)) process.exit(1);
 const before = settings.packages.length;
-settings.packages = settings.packages.filter((entry) => !entry.startsWith("npm:pi-perm"));
+settings.packages = settings.packages.filter((entry) => !/^npm:pi-perm(@|$)/.test(entry));
 if (settings.packages.length === before) process.exit(1);
 fs.writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`);
 NODE
@@ -83,7 +90,12 @@ then
   echo "   removed pi-perm from settings.json"
 fi
 if [ -d "$PI_AGENT_DIR/extensions/pi-perm" ]; then
-  echo "   left $PI_AGENT_DIR/extensions/pi-perm in place (unused; delete it when convenient)"
+  # Keep the data (audit log, old profile) but move it out of the discovery path
+  # so the retired extension cannot load or fight pi-sbx for the bash tool.
+  retired="$PI_AGENT_DIR/extensions/pi-perm.retired"
+  if [ -e "$retired" ]; then retired="$retired.$(date +%s)"; fi
+  mv "$PI_AGENT_DIR/extensions/pi-perm" "$retired"
+  echo "   retired old pi-perm data to $retired"
 fi
 
 mkdir -p "$PI_AGENT_DIR/extensions"

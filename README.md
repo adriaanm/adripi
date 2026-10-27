@@ -223,15 +223,18 @@ Packages are pinned. To update:
 2. run `./install.sh`
 3. test `/guardian status`, a reviewed `bash` call, and `/review --lite`
 
-The guardian fork is vendored from upstream
-`andersonbcdefg/pi-guardian@49f28fc` (0.1.0). See
+The guardian fork is vendored from upstream `andersonbcdefg/pi-guardian`
+commit `c8d688a` (0.2.0). npm's newest *published* release is 0.1.0, so
+`packages.txt` pins that and `install.sh` rsyncs the fork's source over it. See
 [`forks/pi-guardian/VENDOR.md`](forks/pi-guardian/VENDOR.md) for the patch and
-the upstream-update procedure.
+the upstream-update procedure; the sandbox fork is documented in
+[`forks/pi-sbx/VENDOR.md`](forks/pi-sbx/VENDOR.md).
 
 ## Security notes
 
-- `pi-perm` is the OS boundary. `pi-guardian` is a semantic gate, not a
-  sandbox replacement.
+- The vendored `pi-sbx` fork is the OS boundary; `pi-guardian` is the semantic
+  gate and the sandbox broker. Guardian decides exceptions and cannot widen the
+  sandbox itself; a human decides `forever` cases.
 - Guardian failures are fail-closed denials.
 - The agent must not edit permission, guardian, reviewer, or sandbox config to
   bypass a denial. Human recovery paths are `/guardian` and explicit config

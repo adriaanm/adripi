@@ -365,13 +365,14 @@ only holds after a fork that inlines the adapter.
   session and the command re-ran inside the sandbox). Trap hints replace
   auto-retry (§4.5), `once` grants expire after the next command (verified), and
   the tool's human-defer branch is covered by `planExceptionOutcome` tests.
-  Remaining: W5 swap, W6 docs.
-- [ ] **W5 — Swap.** `packages.txt` / `forks.txt` / `install.sh` /
-  `config/` / `check-configs.mjs` updated; `pi-perm` removed from
-  `~/.pi/agent/settings.json`; fresh-session smoke on this machine. Exit:
-  `just check` green and a new session runs with no `srt-settings.json` errors.
-- [ ] **W6 — Docs.** `docs/architecture.md` layers 1-2 rewritten, README stack
-  table updated, this plan's status set to "implemented".
+- [x] **W5 — Swap.** `packages.txt`, `forks.txt`, `install.sh`, `config/` and
+  `check-configs.mjs` updated; `pi-perm` removed from `~/.pi/agent/settings.json`
+  and its data directory retired; both forks deployed; verified on the installed
+  stack (sandboxed bash, `once` exception granted then expired, default model
+  resolving through `defaultProvider`).
+- [x] **W6 — Docs.** `docs/architecture.md` layers 1-2 rewritten, README stack,
+  verify steps, path guidance and security notes updated, `config/README.md`
+  rewritten, plan status set to implemented.
 - [x] **W7 — Follow-ups (decisions recorded).**
   - **Static template entries:** `~/.gradle` and other caches stay *out* of the
     static profile. They are per-machine and occasionally need to be shared with

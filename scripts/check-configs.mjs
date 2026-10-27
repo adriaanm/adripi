@@ -33,12 +33,23 @@ if (!Array.isArray(fsPolicy.allowWrite) || !fsPolicy.allowWrite.includes(".")) {
   throw new Error("config/sandbox.json: workspace must be writable");
 }
 // The host temp root stays read-only; the session scratchpad is added at runtime.
-if (fsPolicy.allowWrite.some((entry) => !entry.startsWith(".") && /^\/(private\/)?tmp$/.test(entry))) {
+const SHARED_TEMP = new Set(["/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp"]);
+if (
+  fsPolicy.allowWrite.some((entry) => {
+    if (typeof entry !== "string" || entry.startsWith(".")) return false;
+    return SHARED_TEMP.has(entry.replace(/\/+$/, ""));
+  })
+) {
   throw new Error("config/sandbox.json: do not allowWrite the shared temp root");
 }
-for (const secret of ["~/.ssh", "~/.aws", "~/.gnupg"]) {
+for (const secret of ["~/.ssh", "~/.aws", "~/.gnupg", "~/.config/gh"]) {
   if (!Array.isArray(fsPolicy.denyRead) || !fsPolicy.denyRead.includes(secret)) {
     throw new Error(`config/sandbox.json: denyRead must include ${secret}`);
+  }
+}
+for (const pattern of ["**/.env", "**/*.pem", "**/*.key"]) {
+  if (!Array.isArray(fsPolicy.denyWrite) || !fsPolicy.denyWrite.includes(pattern)) {
+    throw new Error(`config/sandbox.json: denyWrite must include ${pattern}`);
   }
 }
 if (!Array.isArray(sandbox.network?.allowedDomains) || sandbox.network.allowedDomains.length === 0) {
