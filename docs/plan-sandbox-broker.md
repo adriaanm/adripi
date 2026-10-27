@@ -72,6 +72,7 @@ policy.
 | R6 | Scopes: `once` (single call), `session` (in-memory overlay), `forever` (human-only, persisted) |
 | R7 | Every request, verdict, grant and consumption is auditable from guardian's side |
 | R8 | The old stack keeps working until the swap phase lands |
+| R9 | A per-session scratchpad is writable inside the sandbox without any exception, and its path is advertised to the model |
 
 ## 4. Design
 
@@ -197,6 +198,21 @@ per-command override hook already exists in the chosen substrate
 - An unavailable sandbox still prompts before running bash (substrate
   behaviour) — exceptions cannot be used to bypass a missing sandbox.
 
+### 4.8 Scratchpad (policy, not an exception)
+
+The agent needs somewhere to put temporary files that does not cost a reviewed
+exception. Each session gets one directory under the host temp tree
+(`pi-sbx-scratch-*`), created at `session_start` and added to the effective
+runtime profile's `allowRead`/`allowWrite` only — never to the persisted config.
+The path is exported to sandboxed commands as `PI_SANDBOX_SCRATCH`, named in the
+bash tool's prompt guidelines, removed at `session_shutdown`, and stale
+directories are swept by age (24 h) on the next start.
+
+Properties: nothing else under the temp root becomes writable; the profile is
+recomputed per reload from the user's layer plus the scratch dir, so a config
+reload cannot persist or widen the grant; and an exception is never needed for
+scratch work, which keeps the reviewer focused on real boundary crossings.
+
 ### 4.7 Audit
 
 Guardian appends an assessment record for every request (`origin`, `surface`,
@@ -226,6 +242,7 @@ config layer, and isolates escalation in one module.
 
 | File | Purpose |
 |---|---|
+| `src/scratch.ts` | **done** — session scratchpad (`withScratchpad`, create, sweep, `PI_SANDBOX_SCRATCH`) |
 | `src/broker.ts` | client, human fallback, `defer` routing |
 | `src/index.ts` | register `request_sandbox_exception`; route `prompts.requestUnsandboxed` / `requestNetwork` through the broker; widen-and-rerun on traps |
 | `src/prompts.ts` | human prompt kept, only reached via `defer` |
@@ -286,6 +303,9 @@ published:
 5. guardian `defer` case → human prompt appears, deny path stays denied;
 6. `forever` scope is refused when requested by the model, offered only by the
    human prompt.
+7. Scratchpad: `printf hi > "$PI_SANDBOX_SCRATCH/p" && cat "$PI_SANDBOX_SCRATCH/p"`
+   succeeds inside the sandbox with no prompt; a write to the host temp root
+   outside the scratch dir still fails; the directory is gone after shutdown.
 
 **Matrix** is recorded per phase; each phase's exit criteria are listed in §9.
 
@@ -323,7 +343,8 @@ only holds after a fork that inlines the adapter.
 - [ ] **W4 — Sandbox fork.** `forks/pi-sbx` with `src/broker.ts`,
   `request_sandbox_exception`, reroute of the two prompt sites, widen-and-rerun
   on traps, session overlays. Exit: §8 steps 1-5 pass end to end with guardian
-  driving.
+  driving. Landed so far: session scratchpad (§4.8) verified on macOS, and the
+  fork's devDeps fixed so `pnpm typecheck`/`pnpm test` run (44 tests green).
 - [ ] **W5 — Swap.** `packages.txt` / `forks.txt` / `install.sh` /
   `config/` / `check-configs.mjs` updated; `pi-perm` removed from
   `~/.pi/agent/settings.json`; fresh-session smoke on this machine. Exit:

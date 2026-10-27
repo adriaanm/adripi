@@ -1,0 +1,53 @@
+{
+  "name": "pi-sbx",
+  "version": "0.1.3",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm test && npm run typecheck"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.74",
+    "minimatch": "10.2.5"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@earendil-works/pi-tui": "1.4.0",
+    "@types/node": "22.19.19",
+    "typebox": "1.4.2",
+    "typescript": "5.9.3",
+    "vitest": "4.1.9"
+  },
+  "description": "Hardened OS sandbox extension for Pi coding agent",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RiverAi7z/pi-sbx.git"
+  },
+  "homepage": "https://github.com/RiverAi7z/pi-sbx#readme",
+  "bugs": {
+    "url": "https://github.com/RiverAi7z/pi-sbx/issues"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "pi",
+    "sandbox",
+    "security",
+    "coding-agent"
+  ]
+}

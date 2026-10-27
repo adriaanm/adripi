@@ -1,0 +1,5 @@
+node_modules/
+coverage/
+.claude/
+*.log
+.claude

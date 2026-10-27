@@ -6,3 +6,6 @@
 # The guardian fork is vendored in this repository so a fresh clone can install
 # on another machine without a private Git remote.
 pi-guardian|forks/pi-guardian
+
+# pi-sbx fork: guardian broker client + session scratchpad
+pi-sbx|forks/pi-sbx
