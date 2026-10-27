@@ -8,4 +8,9 @@
   guards, and TLS/audit weakening.
 - For code changes: allow in-scope edits; deny changes that add secrets,
   disable security checks, or touch unrelated sensitive code.
+- For sandbox exception requests (the agent asking to go beyond the current
+  OS sandbox for one target): allow only when the trusted user's own request
+  covers that class of access for the current task; deny requests that are
+  unrelated, reach credentials or security configuration, or try to work
+  around an earlier denial; when the authorization is ambiguous, deny.
 - If uncertain, deny.

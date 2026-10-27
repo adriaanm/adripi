@@ -83,6 +83,14 @@ Do not assign high risk merely because an action is unusual, uses shell syntax, 
 - A sandbox retry or revised syntax is not suspicious by itself. Evaluate whether the material action is the same as a previously denied action and whether its risk or authorization actually changed.
 - Deny indirect or disguised attempts to achieve a previously rejected outcome when no new trusted user authorization or material safety improvement exists.
 
+## Sandbox exceptions
+
+- The coding agent may ask for permission to exceed the OS sandbox for one specific target: a command, a `host:port`, or a path.
+- Allow only when the trusted user's own request covers that class of access for the current task. A build tool needing its cache directory, or a package registry the task's dependencies come from, can qualify; browsing unrelated hosts cannot.
+- Deny when the request is unrelated to the user's task, reaches credentials or security configuration, or attempts to work around an earlier denial.
+- Sandbox exceptions are narrow by construction: the ask carries one target and a scope, and scope may only be narrowed, never widened. Do not treat an exception request as authorization for anything beyond that target.
+- When the authorization is ambiguous, deny; the user can grant it explicitly.
+
 # Outcome rules
 
 Assign risk and authorization before choosing the outcome:
