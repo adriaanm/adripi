@@ -4,38 +4,42 @@ The setup is four layers, in order:
 
 ```text
 tool call
-  -> pi-perm        filesystem/network/command policy + SRT OS sandbox
+  -> pi-sbx (fork)  OS sandbox for bash; session scratchpad; trap hints
   -> pi-guardian    semantic review of the exact action by a separate model
-  -> tool executes  (bash inside SRT; write/edit under the permission profile)
+  -> tool executes  (bash inside SRT; write/edit inside the session profile)
   -> pi-review      separate diff review after code changes
+
+sandbox exception (model-asked, or a blocked command)
+  -> pi-guardian sandbox broker -> reviewer -> allow / deny / defer
+  -> defer -> human prompt; allow -> widen the session profile, re-run inside it
 ```
 
-> **Planned replacement.** Layer 1 (`pi-perm`) is being replaced by an
-> SRT substrate whose every escalation is decided by `pi-guardian`, with the
-> model able to request exceptions. Design, rationale and progress:
-> [`plan-sandbox-broker.md`](plan-sandbox-broker.md).
+Design, rationale and progress: [`plan-sandbox-broker.md`](plan-sandbox-broker.md).
 
-## 1. `pi-perm`: OS boundary
+## 1. `pi-sbx` (vendored fork): OS boundary
 
-`pi-perm` owns the sandbox and the structured profile in
-`~/.pi/agent/extensions/pi-perm/config.json`.
+`pi-sbx` replaces Pi's bash tool. Every command runs under
+`@anthropic-ai/sandbox-runtime` (Seatbelt on macOS, bubblewrap on Linux) with the
+profile in `~/.pi/agent/extensions/sandbox.json`.
 
-- `:workspace_roots` is read+write; `.git`, `.codex`, and `.agents` are
-  read-only; `.env` files, `.git/hooks`, and dangerous prefixes are denied.
-- Network is enabled for package installs and API calls.
-- Bash runs under `srt` (`@anthropic-ai/sandbox-runtime`).
-- The profile is `workspace`; additional repositories require an explicit
-  absolute subpath grant.
-- `defaultAction: "allow"` is intentional: the OS boundary plus the semantic
-  reviewer are the gate, not a pile of regexes.
+- Project writes are allowed; the shared temp root is not.
+- `~/.ssh`, `~/.aws`, `~/.gnupg` and `~/.config/gh` are unreadable; `.env`,
+  key and pem writes are denied.
+- Network is a static allowlist (npm, GitHub, PyPI, Maven, Gradle) plus a
+  per-connection review for anything else.
+- Each session gets a private scratch directory exported as
+  `PI_SANDBOX_SCRATCH`; it is added to the effective profile only, removed at
+  shutdown, and needs no exception.
+- A command blocked by the sandbox returns its normal error plus a hint naming
+  the exact path and `request_sandbox_exception`.
+- The agent cannot widen this by editing files: the profile is the user's, the
+  agent directory is denied by guardian's rules, and the sandbox's own hardening
+  list covers the configuration, the installed package and .git/hooks.
 
-`pi-perm` cannot be widened by the agent. Only a human edits the profile.
+The fork adds the broker client, the exception tool, `once`-grant expiry and the
+scratchpad on top of `pi-sbx@0.1.3`; see `forks/pi-sbx/VENDOR.md`.
 
-Why JSON: `pi-perm@0.1.8` rejects nested TOML filesystem tables because
-`smol-toml` returns null-prototype objects and the validator only accepts plain
-objects. The JSON config avoids that bug.
-
-## 2. `pi-guardian`: semantic gate
+## 2. `pi-guardian`: semantic gate and sandbox broker
 
 Every non-exempt tool call is reviewed before it runs.
 
@@ -43,30 +47,36 @@ Every non-exempt tool call is reviewed before it runs.
   `reviewer.model`. The included template uses `neuralwatt/nw-flash`.
 - It receives the retained transcript, the exact tool input, and
   `guardian-policy.md`.
-- It returns `allow` or `deny`; malformed output or sidecar failure is a
-  fail-closed denial.
-- `read`, `grep`, `find`, and `ls` are exempt.
+- Deterministic `permissions.deny`/`allow` rules run before any model call.
+- It returns `allow` or `deny`; malformed output, a timeout, or a sidecar
+  failure is a fail-closed denial.
+- `read`, `grep`, `find`, `ls` and `tool_search` are exempt.
 - The sidecar runs with `--no-tools`, `--no-extensions`, `--no-skills`,
-  `--no-context-files`, and `--no-prompt-templates`.
-- The one exception to `--no-extensions` is `reviewer.extensions`. When the
-  reviewer model is supplied by an extension, this lists just that extension
-  so the sidecar can reach the model without a `models.json` copy. Built-in
-  providers and providers defined in `models.json` leave it empty.
+  `--no-context-files` and `--no-prompt-templates`; `reviewer.extensions` is the
+  only allowlist, for provider extensions.
 
-The fork adds `reviewer.extensions` to `guardian.json`; the patch is vendored
-in `forks/pi-guardian` (see `VENDOR.md`). It is required when an extension must
-be enabled to reach the reviewer model; upstream hardcodes `--no-extensions`
-without an allowlist.
+**Sandbox broker.** At `session_start` guardian publishes a broker on a
+`Symbol.for` slot. The sandbox asks it about every exception: a model-asked
+`request_sandbox_exception`, a blocked network destination, or a model request to
+run unsandboxed.
 
-The fork also detects a `pi-subagents` child runner. The child runs a Node
-bootstrap rather than the Pi CLI, so guardian spawns the `pi` executable for
-the sidecar instead of passing Pi flags to the bootstrap. Failed-closed reviews
-are also reported as review failures, not risk verdicts.
+1. Always-deny classes (credentials, the agent directory, secret writes,
+   hook directories) are refused without a model call.
+2. `sandboxExceptions.defer` rules route a class to the human.
+3. `sandboxExceptions.allow` rules answer without a model call.
+4. Otherwise guardian reviews against the **full** transcript — a delta would
+   hide the user's authorization, which the tool call that is asking has already
+   advanced past — and returns allow, deny, or defer.
+5. Scope can only narrow: a `session` grant needs `user_authorization: high` and
+   non-high risk, otherwise it becomes `once`.
+6. Consecutive denials trip a breaker, so a model cannot spin on the reviewer.
 
-Guardian denials are final for the agent. A human can use `/guardian` to
-inspect status or disable review as a deliberate recovery action. The agent
-must not edit `guardian.json`, `guardian-policy.md`, or `pi-perm` config to get
-around a denial.
+A failed review, an absent broker, or no UI all resolve to denial. `defer` is
+the only path to a human prompt.
+
+The fork adds `reviewer.extensions`, the subagents child-runner detection, the
+broker, and the sandbox-exception policy clause; see
+`forks/pi-guardian/VENDOR.md`.
 
 ## 3. `pi-review`: diff sidekick
 

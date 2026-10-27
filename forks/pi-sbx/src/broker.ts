@@ -197,3 +197,17 @@ export function withoutSessionException(
 	else delete next.excludedCommands;
 	return next;
 }
+
+/** Whether the session layer already grants this surface/target. */
+export function hasSessionException(layer: SessionLayer, surface: SandboxSurface, target: string): boolean {
+	if (surface === "write" || surface === "read") {
+		const key = surface === "write" ? "allowWrite" : "allowRead";
+		const list = layer.filesystem?.[key];
+		return Array.isArray(list) && list.includes(target);
+	}
+	if (surface === "network") {
+		const list = layer.network?.allowedDomains;
+		return Array.isArray(list) && list.includes(target);
+	}
+	return Array.isArray(layer.excludedCommands) && layer.excludedCommands.includes(target);
+}

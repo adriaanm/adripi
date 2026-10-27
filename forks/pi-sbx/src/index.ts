@@ -33,6 +33,7 @@ import {
   decideSandboxException,
   type SandboxScope,
   type SandboxSurface,
+  hasSessionException,
   type SessionLayer,
   withSessionException,
   withoutSessionException,
@@ -105,7 +106,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
   let config: EffectiveSandboxConfig | undefined;
   let scratchpad: Scratchpad | undefined;
   /** `once` grants expire after the next sandboxed command (network: next connection). */
-  let pendingOnceGrants: Array<{ surface: SandboxSurface; target: string }> = [];
+  let pendingOnceGrants: Array<{ surface: SandboxSurface; target: string; grantedByToolCallId: string }> = [];
   const pendingNetworkOnce = new Set<string>();
   let configError: string | undefined;
   let sessionEnabled = false;
@@ -450,14 +451,6 @@ export default function sandboxExtension(pi: ExtensionAPI) {
 
       if (controller.canRunSandboxed()) {
         const sandboxedResult = await sandboxedTool(ctx.cwd).execute(id, input, signal, onUpdate, ctx);
-        if (pendingOnceGrants.length > 0) {
-          const expiring = pendingOnceGrants;
-          pendingOnceGrants = [];
-          for (const grant of expiring) {
-            sessionConfig = withoutSessionException(sessionConfig as SessionLayer, grant.surface, grant.target) as typeof sessionConfig;
-          }
-          await reloadConfig(ctx, false);
-        }
         // A denied command names the exact path; tell the model how to ask for it.
         return withTrapHint(sandboxedResult, resultText(sandboxedResult), {
           cwd: ctx.cwd,
@@ -573,7 +566,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
         description: "Why this exception is needed for the user's current task.",
       }),
     }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
+    async execute(id, params, _signal, _onUpdate, ctx) {
       currentContext = ctx;
       const surface = params.surface as SandboxSurface;
       const scope = params.scope as SandboxScope;
@@ -606,12 +599,19 @@ export default function sandboxExtension(pi: ExtensionAPI) {
         }
       }
       const grantedScope = decision.kind === "allow" ? decision.scope : "session";
+      const preexisting = hasSessionException(sessionConfig as SessionLayer, surface, params.target);
       if (grantedScope === "once" && surface === "network") {
         // A one-shot connection grant: the proxy asks again for the next one.
         pendingNetworkOnce.add(params.target);
       } else {
         await applySessionGrant(ctx, surface, params.target);
-        if (grantedScope === "once") pendingOnceGrants.push({ surface, target: params.target });
+        // Expiry is keyed to the tool-call boundary: the grant survives the call
+        // that granted it, is usable by the next tool call (bash, write, edit,
+        // read...), and is removed once that call returns. A target that already
+        // had a session grant stays granted.
+        if (grantedScope === "once" && !preexisting) {
+          pendingOnceGrants.push({ surface, target: params.target, grantedByToolCallId: id });
+        }
       }
       const rationale = decision.review.rationale;
       return {
@@ -624,6 +624,20 @@ export default function sandboxExtension(pi: ExtensionAPI) {
         details: { decision },
       };
     },
+  });
+
+  pi.on("tool_result", async (event, ctx) => {
+    // `once` grants live for exactly one tool call: not the call that granted
+    // them, the next one. Expiring here (not only after sandboxed bash) covers
+    // write/edit/read and the excluded/unsandboxed bash paths too.
+    const expiring = pendingOnceGrants.filter((grant) => grant.grantedByToolCallId !== event.toolCallId);
+    pendingOnceGrants = pendingOnceGrants.filter((grant) => grant.grantedByToolCallId === event.toolCallId);
+    pendingNetworkOnce.clear();
+    if (expiring.length === 0) return;
+    for (const grant of expiring) {
+      sessionConfig = withoutSessionException(sessionConfig as SessionLayer, grant.surface, grant.target) as typeof sessionConfig;
+    }
+    if (ctx) await reloadConfig(ctx, false);
   });
 
   pi.on("session_start", async (_event, ctx) => {

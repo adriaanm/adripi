@@ -163,3 +163,20 @@ describe("withoutSessionException", () => {
 		expect(layer.filesystem?.allowWrite).toEqual(["."]);
 	});
 });
+
+describe("hasSessionException", () => {
+	it("reports membership per surface", async () => {
+		const { hasSessionException } = await import("../src/broker.ts");
+		const layer = {
+			filesystem: { allowWrite: ["/a"], allowRead: ["/b"] },
+			network: { allowedDomains: ["h:443"] },
+			excludedCommands: ["make"],
+		};
+		expect(hasSessionException(layer, "write", "/a")).toBe(true);
+		expect(hasSessionException(layer, "write", "/b")).toBe(false);
+		expect(hasSessionException(layer, "read", "/b")).toBe(true);
+		expect(hasSessionException(layer, "network", "h:443")).toBe(true);
+		expect(hasSessionException(layer, "command", "make")).toBe(true);
+		expect(hasSessionException(layer, "command", "other")).toBe(false);
+	});
+});

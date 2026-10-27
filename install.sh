@@ -65,21 +65,19 @@ while IFS='|' read -r pkg dir; do
 done < forks.txt
 
 echo "== config"
-PI_PERM_DIR="$PI_AGENT_DIR/extensions/pi-perm"
-mkdir -p "$PI_PERM_DIR"
-
-# pi-perm 0.1.8 rejects nested TOML tables because smol-toml tables have a null
-# prototype. Its loader prefers config.toml over config.json, so retire any
-# TOML file before installing the JSON profile.
-if [ -f "$PI_PERM_DIR/config.toml" ]; then
-  mv "$PI_PERM_DIR/config.toml" "$PI_PERM_DIR/config.toml.bak"
-  echo "   moved pi-perm config.toml to config.toml.bak"
+# pi-perm is retired: the OS boundary is the vendored pi-sbx fork plus the
+# guardian sandbox broker. Remove the package if an older install still has it.
+pi remove npm:pi-perm >/dev/null 2>&1 || true
+if [ -d "$PI_AGENT_DIR/extensions/pi-perm" ]; then
+  echo "   left $PI_AGENT_DIR/extensions/pi-perm in place (unused; delete it when convenient)"
 fi
-if [ ! -f "$PI_PERM_DIR/config.json" ]; then
-  cp config/pi-perm.config.json "$PI_PERM_DIR/config.json"
-  echo "   installed pi-perm config.json"
+
+mkdir -p "$PI_AGENT_DIR/extensions"
+if [ ! -f "$PI_AGENT_DIR/extensions/sandbox.json" ]; then
+  cp config/sandbox.json "$PI_AGENT_DIR/extensions/sandbox.json"
+  echo "   installed extensions/sandbox.json"
 else
-  echo "   kept existing pi-perm config.json"
+  echo "   kept existing extensions/sandbox.json"
 fi
 
 if [ ! -f "$PI_AGENT_DIR/guardian.json" ]; then
@@ -109,14 +107,15 @@ reviewer and pi-review. They use the same stored credential.
 
 == verify
   /guardian status      # prints the configured reviewer model
-  /pi-perm              # active profile: workspace
-  bash true             # a reviewed call; must be allowed
-  /review --lite        # in a git repository
+  /sandbox              # sandbox state and effective policy
+  bash true             # a reviewed call; must be allowed inside the sandbox
 
-== project directories
-Workspace roots are read+write. To authorize another directory, add an
-absolute subpath table in ~/.pi/agent/extensions/pi-perm/config.json; see
-config/README.md.
+== sandbox policy
+The OS boundary is the vendored pi-sbx fork. Project writes are allowed; the
+hidden temp root is not, and each session gets a private scratch directory
+(PI_SANDBOX_SCRATCH). Paths outside the project need a reviewed exception: the
+agent calls request_sandbox_exception, guardian decides, and you are asked when
+guardian defers. See config/README.md and docs/plan-sandbox-broker.md.
 
 == done
 Restart Pi after installing or updating extensions.

@@ -213,3 +213,20 @@ test("repeated denials trip the breaker without consulting the reviewer", async 
 	assert.match(tripped.kind === "deny" ? tripped.reason : "", /consecutive denials/);
 	assert.equal(reviews, 2);
 });
+
+test("a portless network rule matches host:port and the reverse", () => {
+	const portless = { allow: [], defer: [], deny: ["network:evil.example"] };
+	const trap = request({ surface: "network", target: "evil.example:443", scope: "once" });
+	assert.equal(evaluateSandboxRules(portless, trap, agentDir).outcome, "deny");
+
+	const ported = { allow: [], defer: [], deny: ["network:evil.example:443"] };
+	const codeless = request({ surface: "network", target: "evil.example", scope: "once" });
+	assert.equal(evaluateSandboxRules(ported, codeless, agentDir).outcome, "deny");
+});
+
+test("repository config and HEAD are never grantable", () => {
+	const rules = { allow: [] as string[], defer: [] as string[], deny: builtinSandboxDenyRules(agentDir) };
+	for (const target of ["/repo/.git/config", "/repo/.git/HEAD"]) {
+		assert.equal(evaluateSandboxRules(rules, request({ target }), agentDir).outcome, "deny");
+	}
+});

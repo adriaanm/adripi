@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
@@ -24,17 +24,32 @@ if (guardian.policyPath !== "~/.pi/agent/guardian-policy.md") {
   throw new Error("config/guardian.json: policyPath must point at the portable guardian policy");
 }
 
-const permission = read("pi-perm.config.json");
-if (permission.version !== 1 || permission.activePermissionProfile !== "workspace") {
-  throw new Error("config/pi-perm.config.json: expected version 1 with the workspace profile");
+const sandbox = read("sandbox.json");
+if (sandbox.enabled !== true || sandbox.failIfUnavailable !== true) {
+  throw new Error("config/sandbox.json: expected enabled and failIfUnavailable");
 }
-const workspace = permission.permissions?.workspace;
-if (!workspace?.filesystem?.[":workspace_roots"]) {
-  throw new Error("config/pi-perm.config.json: missing :workspace_roots");
+const fsPolicy = sandbox.filesystem ?? {};
+if (!Array.isArray(fsPolicy.allowWrite) || !fsPolicy.allowWrite.includes(".")) {
+  throw new Error("config/sandbox.json: workspace must be writable");
 }
-if (workspace.filesystem[":workspace_roots"]["."] !== "write") {
-  throw new Error("config/pi-perm.config.json: workspace root must be writable");
+// The host temp root stays read-only; the session scratchpad is added at runtime.
+if (fsPolicy.allowWrite.some((entry) => !entry.startsWith(".") && /^\/(private\/)?tmp$/.test(entry))) {
+  throw new Error("config/sandbox.json: do not allowWrite the shared temp root");
 }
+for (const secret of ["~/.ssh", "~/.aws", "~/.gnupg"]) {
+  if (!Array.isArray(fsPolicy.denyRead) || !fsPolicy.denyRead.includes(secret)) {
+    throw new Error(`config/sandbox.json: denyRead must include ${secret}`);
+  }
+}
+if (!Array.isArray(sandbox.network?.allowedDomains) || sandbox.network.allowedDomains.length === 0) {
+  throw new Error("config/sandbox.json: network.allowedDomains must name the package hosts");
+}
+if (existsSync(join(configDir, "pi-perm.config.json"))) {
+  throw new Error("config/pi-perm.config.json is obsolete; the stack uses config/sandbox.json");
+}
+const pkg = readFileSync(join(configDir, "..", "packages.txt"), "utf8");
+if (pkg.includes("pi-perm")) throw new Error("packages.txt still installs pi-perm");
+if (!pkg.includes("pi-sbx@")) throw new Error("packages.txt must install pi-sbx");
 
 const review = read("pi-review.json");
 if (review.schemaVersion !== 1 || !review.gate || !review.reviewers) {

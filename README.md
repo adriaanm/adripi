@@ -2,14 +2,15 @@
 
 Portable Pi setup: an OS sandbox, a semantic reviewer for tool calls, and a
 diff-review sidekick. Workspaces are read+write; credentials and security
-configuration are denied; the agent cannot widen its own permissions.
+configuration are denied; the agent cannot widen its own permissions, and every
+sandbox exception is reviewed by the semantic gate (or by you, when it defers).
 
 ## Stack
 
 | Layer | Package | Role |
 |---|---|---|
-| OS boundary | [`pi-perm`](https://www.npmjs.com/package/pi-perm) | Workspace/network profile; bash under `srt` |
-| Semantic gate | `pi-guardian` (vendored fork) | Reviews every non-exempt tool call with the configured reviewer model |
+| OS boundary | `pi-sbx` (vendored fork) | Bash under `@anthropic-ai/sandbox-runtime`; session scratchpad; reviewed exceptions |
+| Semantic gate | `pi-guardian` (vendored fork) | Reviews every non-exempt tool call, and brokers every sandbox exception |
 | Diff review | [`@georgedong32/pi-review`](https://www.npmjs.com/package/@georgedong32/pi-review) | Bug, security, rules, history, and comment reviewers |
 | Review workers | [`pi-subagents`](https://www.npmjs.com/package/pi-subagents) | Isolated reviewer children |
 
@@ -39,7 +40,7 @@ cd ~/g/adripi
 1. sets `npmCommand` to `pnpm` in `~/.pi/agent/settings.json`
 2. installs `@anthropic-ai/sandbox-runtime` globally if `srt` is missing
 3. installs the pinned packages in [`packages.txt`](packages.txt)
-4. deploys the vendored guardian fork over the npm-managed `pi-guardian`
+4. deploys the vendored `pi-guardian` and `pi-sbx` forks over their npm installs
 5. seeds the portable configs in [`config/`](config) without overwriting
    existing user files
 
@@ -141,8 +142,8 @@ you use a different provider.
 
 ```text
 /guardian status      # prints the configured reviewer model
-/pi-perm              # active profile: workspace
-bash true             # a reviewed call; must be allowed
+/sandbox              # sandbox state and effective policy
+bash true             # a reviewed call; must be allowed inside the sandbox
 /review --lite        # inside a git repository
 ```
 
@@ -155,7 +156,7 @@ copies, not the templates.
 |---|---|---|
 | `config/guardian.json` | `~/.pi/agent/guardian.json` | Reviewer model, explicit reviewer extensions, exemptions |
 | `config/guardian-policy.md` | `~/.pi/agent/guardian-policy.md` | Semantic allow/deny policy |
-| `config/pi-perm.config.json` | `~/.pi/agent/extensions/pi-perm/config.json` | Workspace, filesystem, network, SRT policy |
+| `config/sandbox.json` | `~/.pi/agent/extensions/sandbox.json` | Filesystem, network and command policy for the OS sandbox |
 | `config/pi-review.json` | `~/.pi/agent/pi-review.json` | Review gate and reviewer models |
 
 ### Guardian config
@@ -179,24 +180,18 @@ copies, not the templates.
 sidecar runs with `--no-tools` and `--no-extensions`; only the listed package
 extensions load.
 
-### Allow another directory
+### Paths outside the project
 
-Workspace roots are read+write. Add another repository with an absolute subpath
-table in `pi-perm.config.json`:
+Project writes run inside the sandbox with no prompt; each session also gets a
+private scratch directory (`PI_SANDBOX_SCRATCH`). Anything else is a reviewed
+exception: the agent calls `request_sandbox_exception` with one target and a
+reason, `pi-guardian` decides, and you are asked only when it defers. Grants
+last for one command (`once`) or the session, in memory only.
 
-```json
-"/Users/you/g/other-repo": {
-  ".": "write"
-}
-```
-
-Use exact absolute paths. Do not add a home-directory-wide or wildcard grant.
-See [`config/README.md`](config/README.md).
-
-### Why JSON for pi-perm
-
-`pi-perm@0.1.8` rejects nested TOML filesystem tables (null-prototype
-`smol-toml` tables fail its plain-object check). The JSON profile works.
+To make a path permanently writable, add it to `filesystem.allowWrite` in
+`sandbox.json` yourself; for a host, add it to `network.allowedDomains`. Prefer
+narrow entries. See [`config/README.md`](config/README.md) and
+[`docs/plan-sandbox-broker.md`](docs/plan-sandbox-broker.md).
 
 ## Layout
 
@@ -207,7 +202,8 @@ adripi/
   forks.txt                 # npm package -> vendored fork
   config/                   # portable config templates
   docs/architecture.md
-  forks/pi-guardian/        # vendored fork; reviewer.extensions patch
+  forks/pi-guardian/        # vendored fork; reviewer.extensions + sandbox broker
+  forks/pi-sbx/             # vendored fork; scratchpad, broker client, exception tool
   scripts/
     check-configs.mjs
     set-npm-command.mjs

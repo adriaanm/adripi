@@ -61,6 +61,10 @@ export function builtinSandboxDenyRules(agentDir: string): string[] {
 		"write:**/.env",
 		"write:**/.env.*",
 		"write:**/.git/hooks/**",
+		// A repo config can point core.fsmonitor/core.editor at an arbitrary
+		// command, which is RCE-equivalent to a hook.
+		"write:**/.git/config",
+		"write:**/.git/HEAD",
 		"write:**/*.pem",
 		"write:**/*.key",
 		"write:**/*.p12",
@@ -101,7 +105,13 @@ export function evaluateSandboxRules(
 function targetSpellings(request: SandboxExceptionRequest): string[] {
 	const target = request.target.trim();
 	if (target === "") return [];
-	if (request.surface === "network") return [target.toLowerCase()];
+	if (request.surface === "network") {
+		// Match both `host:port` (what a trap reports) and the portless spelling a
+		// user writes, so `network:evil.com` covers `evil.com:443` and `evil.com:*`.
+		const lower = target.toLowerCase();
+		const hostOnly = lower.replace(/:\d+$/, "").replace(/:\*$/, "");
+		return [...new Set([lower, hostOnly])];
+	}
 	if (request.surface === "command") return [target];
 	const expanded = expandHome(target);
 	const absolute = isAbsolute(expanded) ? expanded : resolve(request.cwd, expanded);
@@ -111,8 +121,16 @@ function targetSpellings(request: SandboxExceptionRequest): string[] {
 }
 
 function matches(rule: ParsedSandboxRule, target: string, request: SandboxExceptionRequest): boolean {
-	if (rule.surface === "network" || rule.surface === "command") {
-		// Network and command patterns are plain strings: `*` crosses separators.
+	if (rule.surface === "network") {
+		// Match `host`, `host:port` and `host:*` in either direction: a rule may be
+		// written portless while the trap reports a port, or the reverse.
+		const pattern = rule.pattern.toLowerCase();
+		const hostPattern = pattern.replace(/:\d+$/, "").replace(/:\*$/, "");
+		const lowerTarget = target.toLowerCase();
+		return [pattern, hostPattern].some((candidate) => globToRegExp(candidate, false).test(lowerTarget));
+	}
+	if (rule.surface === "command") {
+		// Command patterns are plain strings: `*` crosses separators.
 		return globToRegExp(rule.pattern.toLowerCase(), false).test(target.toLowerCase());
 	}
 	const pattern = expandHome(rule.pattern);
