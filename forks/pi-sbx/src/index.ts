@@ -29,6 +29,13 @@ import { registerFileGate } from "./file-gate.ts";
 import { buildHardeningPaths } from "./hardening.ts";
 import { SandboxController, RuntimeSandboxManager } from "./manager.ts";
 import { createScratchpad, SCRATCH_ENV, type Scratchpad, sweepScratchpads, withScratchpad } from "./scratch.ts";
+import {
+  decideSandboxException,
+  type SandboxScope,
+  type SandboxSurface,
+  type SessionLayer,
+  withSessionException,
+} from "./broker.ts";
 import { applyAfterPersist } from "./overlay.ts";
 import { createFilePolicy } from "./path-policy.ts";
 import { PromptCoordinator } from "./prompts.ts";
@@ -159,7 +166,28 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     await reloadConfig(ctx, false);
   };
 
-  const networkAsk = (host: NetworkHostPattern) => prompts.requestNetwork(host, persistDomain);
+  const networkAsk = async (host: NetworkHostPattern) => {
+    const target = `${host.host}:${host.port ?? "*"}`;
+    const decision = await decideSandboxException({
+      surface: "network",
+      target,
+      scope: "session",
+      origin: "trap",
+      violation: "network destination is not in the static allowlist",
+      cwd: currentContext?.cwd ?? process.cwd(),
+    });
+    if (decision.kind === "allow") {
+      if (decision.scope === "session") {
+        sessionConfig = withSessionException(sessionConfig as SessionLayer, "network", target) as typeof sessionConfig;
+      }
+      return true;
+    }
+    if (decision.kind === "deny") {
+      currentContext?.ui.notify(`Sandbox network denied: ${decision.reason}`, "warning");
+      return false;
+    }
+    return prompts.requestNetwork(host, persistDomain);
+  };
 
   async function resolveProjectApproval(ctx: ExtensionContext): Promise<boolean> {
     if (!hasProjectConfig(ctx.cwd, getAgentDir(), CONFIG_DIR_NAME)) return false;
@@ -310,6 +338,30 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     ));
   };
 
+  /** Apply a session-scope grant to the in-memory layer and refresh the runtime. */
+  const applySessionGrant = async (
+    ctx: ExtensionContext,
+    surface: SandboxSurface,
+    target: string,
+  ): Promise<void> => {
+    sessionConfig = withSessionException(sessionConfig as SessionLayer, surface, target) as typeof sessionConfig;
+    await reloadConfig(ctx, false);
+  };
+
+  /** Human fallback, reached only when guardian defers or is absent. */
+  const askHumanForException = async (
+    ctx: ExtensionContext,
+    surface: SandboxSurface,
+    target: string,
+  ): Promise<boolean> => {
+    if (!ctx.hasUI) return false;
+    const choice = await ctx.ui.select(`Allow a sandbox exception for ${surface} ${target}?`, [
+      "Allow for this session",
+      "Deny",
+    ]);
+    return choice === "Allow for this session";
+  };
+
   function localTool(cwd: string) {
     return createBashToolDefinition(cwd);
   }
@@ -368,8 +420,25 @@ export default function sandboxExtension(pi: ExtensionAPI) {
 
       if (params.dangerouslyDisableSandbox) {
         if (!config.allowUnsandboxedCommands) throw new Error("Unsandboxed commands are disabled by sandbox policy");
-        const decision = await prompts.requestUnsandboxed(params.command, persistExclusion);
-        if (decision === "deny") throw new Error("User denied running this command outside the sandbox");
+        const brokerDecision = await decideSandboxException({
+          surface: "command",
+          target: params.command,
+          scope: "once",
+          origin: "tool",
+          reason: "Model requested an unsandboxed retry via dangerouslyDisableSandbox.",
+          command: params.command,
+          cwd: ctx.cwd,
+        });
+        if (brokerDecision.kind === "deny") {
+          throw new Error(`Sandbox exception denied: ${brokerDecision.reason}`);
+        }
+        if (brokerDecision.kind === "defer") {
+          const human = await prompts.requestUnsandboxed(params.command, persistExclusion);
+          if (human === "deny") throw new Error("User denied running this command outside the sandbox");
+          if (human === "always") await applySessionGrant(ctx, "command", params.command);
+          return local.execute(id, input, signal, onUpdate, ctx);
+        }
+        if (brokerDecision.scope === "session") await applySessionGrant(ctx, "command", params.command);
         return local.execute(id, input, signal, onUpdate, ctx);
       }
 
@@ -463,6 +532,73 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       }),
       enabled: sessionEnabled,
     };
+  });
+
+  pi.registerTool({
+    name: "request_sandbox_exception",
+    label: "Request sandbox exception",
+    description:
+      "Ask for permission to do one specific thing the sandbox blocks: an exact command, a host:port, or an absolute path. One target per call. Guardian reviews the request against the conversation, and the user decides when guardian defers. Scratch files belong in PI_SANDBOX_SCRATCH and need no exception.",
+    parameters: Type.Object({
+      surface: Type.Union([
+        Type.Literal("command"),
+        Type.Literal("network"),
+        Type.Literal("read"),
+        Type.Literal("write"),
+      ]),
+      target: Type.String({
+        description: "Exact command, host:port, or absolute path. No wildcards.",
+      }),
+      scope: Type.Union([Type.Literal("once"), Type.Literal("session")]),
+      reason: Type.String({
+        description: "Why this exception is needed for the user's current task.",
+      }),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      currentContext = ctx;
+      const surface = params.surface as SandboxSurface;
+      const scope = params.scope as SandboxScope;
+      const decision = await decideSandboxException({
+        surface,
+        target: params.target,
+        scope,
+        reason: params.reason,
+        origin: "tool",
+        cwd: ctx.cwd,
+      });
+      if (decision.kind === "deny") {
+        return {
+          content: [{ type: "text" as const, text: `Sandbox exception denied. ${decision.reason}` }],
+          details: { decision },
+        };
+      }
+      if (decision.kind === "defer") {
+        const allowed = await askHumanForException(ctx, surface, params.target);
+        if (!allowed) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "The user did not allow this sandbox exception. Do not retry it or rephrase it; ask how to proceed if the step matters.",
+              },
+            ],
+            details: { decision },
+          };
+        }
+      }
+      await applySessionGrant(ctx, surface, params.target);
+      const grantedScope = decision.kind === "allow" ? decision.scope : "session";
+      const rationale = decision.review.rationale;
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Sandbox exception granted (${grantedScope}): ${surface} ${params.target}. ${rationale} Re-run the command now; it will run inside the same sandbox with this grant.`,
+          },
+        ],
+        details: { decision },
+      };
+    },
   });
 
   pi.on("session_start", async (_event, ctx) => {

@@ -156,7 +156,7 @@ export function createSandboxBroker(options: SandboxBrokerOptions): SandboxBroke
 			if (reviewed.outcome === "deny") {
 				return deny(
 					request,
-					`Sandbox exception denied. ${reviewed.rationale} Do not retry or rephrase the same target; ask the user if the step matters.`,
+					`${reviewed.rationale} Do not retry or rephrase the same target; ask the user if the step matters.`,
 					reviewed.rationale,
 					"reviewer",
 				);

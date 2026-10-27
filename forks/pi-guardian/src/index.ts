@@ -452,7 +452,10 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		if (!policyHash) throw new Error("guardian policy hash is unavailable");
 		const branch = ctx.sessionManager.getBranch();
 		const state = ensureState(branch, ctx.sessionManager.getSessionId(), config, policyHash);
-		const transcript = renderGuardianTranscript(branch, state.lastReviewedParentEntryId, config.transcript);
+		// Full transcript, not a delta: an exception request usually arrives right
+		// after guardian reviewed the tool call that is asking, which advances the
+		// cursor past the user's authorization. Authorization must be visible here.
+		const transcript = renderGuardianTranscript(branch, undefined, config.transcript);
 		const assessment = await requestGuardianAssessment(
 			config,
 			state,

@@ -26,11 +26,23 @@ whose escalation path is decided by `pi-guardian` instead of a human-only prompt
 3. **`package.json` devDependencies** — add `@earendil-works/pi-tui` and
    `typebox`. Upstream imports both (`src/settings-ui.ts`, tool schemas) without
    declaring them, so `pnpm typecheck` fails on a fresh checkout.
+4. **Guardian broker client** (`src/broker.ts`). Mirrors guardian's contract
+   (same `Symbol.for` slot), turns a missing broker into `defer`, turns a
+   throwing broker into a denial, and applies session-scope grants to the
+   in-memory session layer (`withSessionException`): write/read → filesystem
+   allow lists, network → `allowedDomains`, command → `excludedCommands`. The
+   persisted config is never touched and the layer is rebuilt on reload.
+5. **`request_sandbox_exception` tool** — one target per call, `reason`
+   required; guardian decides, the human is asked only when the broker defers
+   or is absent (no UI → deny). The network ask callback and the
+   `dangerouslyDisableSandbox` path both consult the broker first instead of
+   prompting immediately.
+6. **`test/broker.test.ts`** — slot lifecycle, defer/allow/deny passthrough,
+   broker failure → denial, request shaping, and the session-layer mapping.
 
-Pending (W4 in `docs/plan-sandbox-broker.md`): `src/broker.ts` (guardian broker
-client with human fallback), the `request_sandbox_exception` tool, routing
-`prompts.requestUnsandboxed` / `prompts.requestNetwork` through the broker, and
-widen-and-rerun on traps.
+Pending (W4 in `docs/plan-sandbox-broker.md`): widen-and-rerun on traps (grant a
+policy widening and re-run inside the sandbox instead of escalating to the
+host), and end-to-end tests for the tool's human-defer branch.
 
 ## Verified on macOS (2026-10-27)
 
@@ -39,6 +51,10 @@ widen-and-rerun on traps.
   escalation offer.
 - `printf hi > "$PI_SANDBOX_SCRATCH/probe.txt" && cat … && echo SCRATCH-OK` →
   `hiSCRATCH-OK`; no exception needed.
+- Guardian-driven exception: the model called `request_sandbox_exception` for
+  `write /Users/adriaan/.gradle` (session). Guardian allowed it, the session
+  layer reloaded, and `touch ~/.gradle/.sbx-broker-probe` ran **inside** the
+  sandbox and printed `BROKER-GRANT-OK`.
 
 ## Deploy
 

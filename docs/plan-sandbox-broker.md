@@ -163,7 +163,10 @@ Deliberate limits:
 4. **Reviewer** (guardian sidecar): reuse the durable reviewer conversation and
    the parent transcript; return `allow` (scope may only narrow), or `deny`
    (with a reason). The standard four-field assessment is used unchanged, so
-   `defer` is never a model decision.
+   `defer` is never a model decision. Sandbox reviews render the **full**
+   transcript, not a delta: the exception request normally follows guardian's
+   review of the very tool call making it, and the delta cursor would hide the
+   user's authorization.
 5. **Human** (defer above, or the sandbox's fallback when no broker is
    published): the sandbox prompt; no UI means deny.
 6. **Breaker**: consecutive exception denials in one session stop further asks
@@ -343,8 +346,11 @@ only holds after a fork that inlines the adapter.
 - [ ] **W4 — Sandbox fork.** `forks/pi-sbx` with `src/broker.ts`,
   `request_sandbox_exception`, reroute of the two prompt sites, widen-and-rerun
   on traps, session overlays. Exit: §8 steps 1-5 pass end to end with guardian
-  driving. Landed so far: session scratchpad (§4.8) verified on macOS, and the
-  fork's devDeps fixed so `pnpm typecheck`/`pnpm test` run (44 tests green).
+  driving. Landed: scratchpad (§4.8), broker client + session-layer grants, the
+  exception tool, broker-first network and `dangerouslyDisableSandbox` paths
+  (verified on macOS: guardian allowed `write /Users/adriaan/.gradle` for the
+  session and the command re-ran inside the sandbox). Remaining: widen-and-rerun
+  on traps, and a test for the tool's human-defer branch.
 - [ ] **W5 — Swap.** `packages.txt` / `forks.txt` / `install.sh` /
   `config/` / `check-configs.mjs` updated; `pi-perm` removed from
   `~/.pi/agent/settings.json`; fresh-session smoke on this machine. Exit:
