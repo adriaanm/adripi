@@ -252,7 +252,7 @@ config layer, and isolates escalation in one module.
 | Keep `pi-perm`, patch `wrapCommandWithSrt` to use `-c` | Fixes the wrapper but leaves two independent gates and no exception channel; still no model-requested exceptions |
 | Fork `pi-permission-modes` | 1651-line dispatcher monolith, weekly releases, zero seam; rebase tax dominates the ~150 LOC of glue |
 | `@erichll/pi-sandbox` with `pi-auto-review` | The broker seam is right, but `pi-auto-review` is a second model judge with its own dialogs and `/auto-review` commands; and its trap flow retries on the host |
-| `@erichll/pi-sandbox` with guardian publishing its broker | No fork needed, but the interface is theirs, grants are one-shot host retries, and there is no model-facing request tool |
+| `@erichll/pi-sandbox` with guardian publishing its broker | No fork needed in principle, but the published 0.28.1 statically imports `@erichll/pi-auto-review/broker` at load (`Cannot find module` without it), so "inert dependency" reuse means installing that pair anyway; its interface is theirs, grants are one-shot host retries, and there is no model-facing request tool |
 | Write the SRT layer from scratch | Rebuilds per-command ids, violation annotation, macOS settle handling, policy assembly and tests that `pi-sbx` already has; revisit only if the fork proves unstable |
 | `pi-sbx` as-is, guardian as a passive reviewer | No escalation channel: an SRT denial stays a dead end |
 
@@ -289,16 +289,33 @@ published:
 
 **Matrix** is recorded per phase; each phase's exit criteria are listed in §9.
 
+### Spike results (W2, macOS)
+
+Run in isolation with `pi -ne -e npm:@aliou/pi-neuralwatt -e npm:pi-sbx ...` so
+only the substrate and the provider are loaded (no `pi-perm`, no other packages):
+
+| Probe | Result |
+|---|---|
+| `touch ./sbx-probe-in-project && echo PROJECT-OK` | `PROJECT-OK` — compound command ran **inside** the sandbox as one unit |
+| `touch ~/.gradle/.sbx-probe` | `Operation not permitted` from the sandbox, reported to the model as a sandbox restriction with an explicit escalation offer |
+| `echo GUARDIAN-SBX-OK` with the guardian fork loaded too | allowed, executed; guardian's sidecar reached `neuralwatt/deepseek-v4.1-flash` through `reviewer.extensions`, confirming the 0.2.0 rebase works in a live session |
+
+Conclusions: seatbelt wrapping, violation reporting and guardian's tool review
+all work on darwin; `pi-sbx` and guardian coexist (one bash owner, one
+reviewer). Anti-conclusion: `@erichll/pi-sandbox@0.28.1` fails to load without
+`@erichll/pi-auto-review` present, so its "seam without the extension" story
+only holds after a fork that inlines the adapter.
+
 ## 9. Worklist
 
 - [x] **W1 — Guardian 0.2.0 rebase.** Port `reviewer.extensions` and the
   subagents child-runner detection onto upstream 0.2.0. Exit: `node --test`
   green, the sidecar still reaches the neuralwatt reviewer, and the fork's patch
   set is recorded in `VENDOR.md`.
-- [ ] **W2 — Substrate spike (macOS).** Install `pi-sbx` on a scratch Pi run
-  (pi-perm removed from a throwaway settings copy), confirm per-command ids,
-  violation traps, session config overlay, and the per-run `allowWrite`
-  override. Exit: the five observations in §8 are reproducible by hand.
+- [x] **W2 — Substrate spike (macOS).** Verified per-command wrapping,
+  violation reporting, in/out-of-project writes, and coexistence with the
+  guardian fork (§8). Session config overlay and the per-run `allowWrite`
+  override are exercised in W4, where the broker client lands.
 - [x] **W3 — Guardian broker.** `src/sandbox/{types,rules,broker,review}.ts`,
   slot publish/dispose, `sandboxExceptions.{allow,defer,deny}` config, policy
   clause, audit entries, tests. Exit: 62 tests green, no reviewer call on hard
