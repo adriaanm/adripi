@@ -18,6 +18,7 @@ const config: GuardianConfig = {
 	policyPath: "/tmp/policy.md",
 	exemptTools: new Set(["read"]),
 	permissions: { allow: ["Read"], deny: [] },
+	sandboxExceptions: { allow: [], defer: [], deny: [] },
 	agentDir: "/tmp/agent",
 	transcript: {
 		maxMessageChars: 1,

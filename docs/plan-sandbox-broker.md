@@ -152,19 +152,21 @@ Deliberate limits:
 
 ### 4.4 Decision order
 
-1. **Hard deny** (guardian rules, evaluated with `permissions.ts` semantics,
-   deny-first): credential stores, `~/.pi/agent/**`, the sandbox/guardian
-   configuration, `.git/hooks`, the installed package root. Never reaches the
-   reviewer, never grantable, explains why.
-2. **Policy allow** (pre-existing static allowance): no request needed; the
-   tool returns "already permitted" so the model learns the boundary.
-3. **Reviewer** (guardian sidecar): reuse the durable reviewer conversation and
-   the parent transcript; return `allow` (with the granted scope), `deny` (with
-   a reason), or `defer`.
-4. **Human** (`defer`, or guardian unavailable/failed): the sandbox's existing
-   prompt; no UI means deny.
-5. **Breaker**: repeated denials in one turn trip guardian's
-   `maxConsecutiveDenials` and terminate the tool batch.
+1. **Hard deny** (always-deny classes plus `sandboxExceptions.deny`): credential
+   stores, `~/.pi/agent/**`, `.env`/key/pem writes, `.git/hooks`. Never reaches
+   the reviewer, never grantable, explains why.
+2. **Defer** (`sandboxExceptions.defer`): classes you have named as the human's
+   own call. No reviewer, no grant — the sandbox shows its prompt.
+3. **Policy allow** (`sandboxExceptions.allow`): no request needed; the tool
+   returns "already permitted" so the model learns the boundary.
+4. **Reviewer** (guardian sidecar): reuse the durable reviewer conversation and
+   the parent transcript; return `allow` (scope may only narrow), or `deny`
+   (with a reason). The standard four-field assessment is used unchanged, so
+   `defer` is never a model decision.
+5. **Human** (defer above, or the sandbox's fallback when no broker is
+   published): the sandbox prompt; no UI means deny.
+6. **Breaker**: consecutive exception denials in one session stop further asks
+   without another reviewer call (mirrors `maxConsecutiveDenials`).
 
 ### 4.5 Widen-and-rerun, not host-retry
 
@@ -208,12 +210,13 @@ parent model's context. The sandbox side logs consumption of `once` grants.
 
 | File | Purpose |
 |---|---|
-| `src/index.ts` | rebase to 0.2.0; keep `reviewer.extensions`; publish/dispose the broker |
-| `src/sandbox/broker.ts` | slot, publish/dispose, decision mapping, audit entry |
-| `src/sandbox/review.ts` | build the reviewer action from a request; call `prepareReview`; cap scope |
-| `src/permissions.ts` | `SandboxException(...)` rule family, deny-first, checked before review |
-| `prompts/guardian-policy.md` | exceptions need user authorization in the transcript; ambiguous → `defer`; credentials/config hard-denied |
-| `test/sandbox-broker.test.ts` | allow/deny/defer, hard-deny short circuit, breaker, no-model-call paths |
+| `src/index.ts` | rebase to 0.2.0; keep `reviewer.extensions`; publish/dispose the broker; track the latest ctx for reviews |
+| `src/sandbox/types.ts` | broker contract (`SandboxExceptionRequest` / `Decision` / `Rules`), durable entry name |
+| `src/sandbox/rules.ts` | `surface:pattern` rules, always-deny classes (credentials, agent dir, secret writes), allow/defer/deny precedence |
+| `src/sandbox/broker.ts` | `Symbol.for` slot, request validation, decision mapping, scope narrowing, audit rows, denial breaker |
+| `src/sandbox/review.ts` | reviewer prompt + `sandboxOutcomeFromAssessment` (scope narrows, never widens) |
+| `prompts/guardian-policy.md` | sandbox-exception clause: trusted-user authorization only, credentials/security config denied, ambiguous → deny |
+| `test/sandbox-{broker,review}.test.ts` | allow/deny/defer/hard-deny/breaker, no reviewer call on hard deny, prompt contract, scope narrowing |
 
 ### 5.2 `forks/pi-sbx` (new vendored fork; base `pi-sbx@0.1.3`)
 
@@ -288,7 +291,7 @@ published:
 
 ## 9. Worklist
 
-- [ ] **W1 — Guardian 0.2.0 rebase.** Port `reviewer.extensions` and the
+- [x] **W1 — Guardian 0.2.0 rebase.** Port `reviewer.extensions` and the
   subagents child-runner detection onto upstream 0.2.0. Exit: `node --test`
   green, the sidecar still reaches the neuralwatt reviewer, and the fork's patch
   set is recorded in `VENDOR.md`.
@@ -296,10 +299,10 @@ published:
   (pi-perm removed from a throwaway settings copy), confirm per-command ids,
   violation traps, session config overlay, and the per-run `allowWrite`
   override. Exit: the five observations in §8 are reproducible by hand.
-- [ ] **W3 — Guardian broker.** `src/sandbox/{broker,review}.ts`, slot
-  publish/dispose, `SandboxException(...)` rules, policy text, audit entries,
-  tests. Exit: unit tests cover allow/deny/defer/hard-deny/breaker; no model
-  call on hard deny.
+- [x] **W3 — Guardian broker.** `src/sandbox/{types,rules,broker,review}.ts`,
+  slot publish/dispose, `sandboxExceptions.{allow,defer,deny}` config, policy
+  clause, audit entries, tests. Exit: 62 tests green, no reviewer call on hard
+  deny, breaker covered, scope can only narrow.
 - [ ] **W4 — Sandbox fork.** `forks/pi-sbx` with `src/broker.ts`,
   `request_sandbox_exception`, reroute of the two prompt sites, widen-and-rerun
   on traps, session overlays. Exit: §8 steps 1-5 pass end to end with guardian

@@ -75,6 +75,8 @@ export interface GuardianPermissions {
 	deny: string[];
 }
 
+import type { SandboxExceptionRules } from "./sandbox/types.ts";
+
 export interface GuardianConfig {
 	enabled: boolean;
 	reviewerModel: string;
@@ -90,6 +92,7 @@ export interface GuardianConfig {
 	piCommand?: string;
 	exemptTools: ReadonlySet<string>;
 	permissions: GuardianPermissions;
+	sandboxExceptions: SandboxExceptionRules;
 	agentDir: string;
 	transcript: TranscriptBounds;
 }

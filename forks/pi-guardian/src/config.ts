@@ -2,7 +2,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { builtInDenyRules, DEFAULT_ALLOW_RULES, normalizeTool, validateRules } from "./permissions.ts";
+import { builtinSandboxDenyRules, validateSandboxRules } from "./sandbox/rules.ts";
 import type { GuardianConfig, GuardianPermissions, TranscriptBounds } from "./types.ts";
+import type { SandboxExceptionRules } from "./sandbox/types.ts";
 
 const BARE_TOOL = /^[\w-]+$/;
 
@@ -31,6 +33,7 @@ interface GuardianConfigFile {
 	piCommand?: string;
 	exemptTools?: string[];
 	permissions?: { allow?: string[]; deny?: string[] };
+	sandboxExceptions?: { allow?: string[]; defer?: string[]; deny?: string[] };
 	transcript?: Partial<TranscriptBounds>;
 }
 
@@ -156,6 +159,7 @@ export function loadGuardianConfig(agentDir: string, bundledPolicyPath: string):
 		piCommand: file.piCommand === undefined ? undefined : nonEmptyString(file.piCommand, "", "piCommand"),
 		exemptTools: new Set(exemptTools),
 		permissions,
+		sandboxExceptions: loadSandboxExceptions(file, agentDir),
 		agentDir,
 		transcript,
 	};
@@ -187,6 +191,19 @@ function loadPermissions(file: GuardianConfigFile, agentDir: string, sessionDir:
 		allow: [...new Set([...allow, ...legacy])],
 		deny: [...new Set([...builtInDenyRules(agentDir, sessionDir), ...deny])],
 	};
+}
+
+/**
+ * Sandbox exception rules: user denies add to the always-applied built-in
+ * denies (credentials, the agent directory, secret-file writes). Allow rules
+ * short-circuit review but never override a deny.
+ */
+function loadSandboxExceptions(file: GuardianConfigFile, agentDir: string): SandboxExceptionRules {
+	const configured = file.sandboxExceptions;
+	const allow = validateSandboxRules(configured?.allow, "sandboxExceptions.allow");
+	const defer = validateSandboxRules(configured?.defer, "sandboxExceptions.defer");
+	const deny = validateSandboxRules(configured?.deny, "sandboxExceptions.deny");
+	return { allow, defer, deny: [...new Set([...builtinSandboxDenyRules(agentDir), ...deny])] };
 }
 
 export function persistGuardianEnabled(agentDir: string, enabled: boolean): void {

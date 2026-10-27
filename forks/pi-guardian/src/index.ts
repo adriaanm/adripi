@@ -12,6 +12,9 @@ import { loadGuardianConfig, persistGuardianEnabled } from "./config.ts";
 import { evaluatePermissions } from "./permissions.ts";
 import { buildReviewPrompt } from "./prompt.ts";
 import { requestGuardianAssessment } from "./sidecar.ts";
+import { createSandboxBroker, publishSandboxBroker } from "./sandbox/broker.ts";
+import { buildSandboxExceptionPrompt, sandboxOutcomeFromAssessment } from "./sandbox/review.ts";
+import { SANDBOX_EXCEPTION_ENTRY, type SandboxExceptionRequest } from "./sandbox/types.ts";
 import {
 	createGuardianState,
 	findGuardianState,
@@ -275,6 +278,10 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		appendStatus();
 		// Pi 1.0 print mode subscribes after session_start. Replay once at input.
 		replayStatus = ctx.mode === "json";
+		latestCtx = ctx;
+		// Published regardless of UI: headless sessions still escalate to the broker,
+		// and the sandbox turns a missing broker into its own human prompt or deny.
+		publishSandboxBrokerIfReady(ctx);
 		if (!ctx.hasUI) return;
 		if (config && !config.enabled) {
 			if (ctx.mode === "tui") setGuardianStatusWidget(ctx.ui, "disabled", config.reviewerModel);
@@ -293,6 +300,12 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		if (!config) return;
 		if (ctx.mode === "tui") setGuardianStatusWidget(ctx.ui, "enabled", config.reviewerModel);
 		ctx.ui.setStatus("pi-guardian", `guardian: ${config.reviewerModel}`);
+	});
+
+	pi.on("session_shutdown", () => {
+		disposeSandboxBroker?.();
+		disposeSandboxBroker = undefined;
+		latestCtx = undefined;
 	});
 
 	pi.on("input", () => {
@@ -422,6 +435,54 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		return state;
 	};
 
+	/** Latest UI-capable context; sandbox reviews can arrive during a tool call. */
+	let latestCtx: ExtensionContext | undefined;
+	let disposeSandboxBroker: (() => void) | undefined;
+
+	/**
+	 * The broker's reviewer. It reuses the durable guardian conversation and the
+	 * standard four-field contract. It deliberately does not advance guardian's
+	 * transcript cursor: a sandbox review is not a reviewed tool call, and moving
+	 * the cursor would hide context from the next tool review.
+	 */
+	const reviewSandboxException = async (request: SandboxExceptionRequest) => {
+		const ctx = latestCtx;
+		if (!ctx) throw new Error("no active Pi session context for sandbox review");
+		if (!config) throw new Error("guardian is not configured");
+		if (!policyHash) throw new Error("guardian policy hash is unavailable");
+		const branch = ctx.sessionManager.getBranch();
+		const state = ensureState(branch, ctx.sessionManager.getSessionId(), config, policyHash);
+		const transcript = renderGuardianTranscript(branch, state.lastReviewedParentEntryId, config.transcript);
+		const assessment = await requestGuardianAssessment(
+			config,
+			state,
+			buildSandboxExceptionPrompt(request, transcript.text),
+			ctx.signal,
+		);
+		return sandboxOutcomeFromAssessment(assessment, request);
+	};
+
+	const publishSandboxBrokerIfReady = (ctx: ExtensionContext) => {
+		if (!config || initializationError || !config.enabled) return;
+		disposeSandboxBroker?.();
+		disposeSandboxBroker = undefined;
+		try {
+			disposeSandboxBroker = publishSandboxBroker(
+				createSandboxBroker({
+					rules: config.sandboxExceptions,
+					agentDir: config.agentDir,
+					review: reviewSandboxException,
+					audit: (record) => pi.appendEntry(SANDBOX_EXCEPTION_ENTRY, record),
+					maxConsecutiveDenials: config.maxConsecutiveDenials,
+				}),
+			);
+		} catch (error) {
+			if (ctx.hasUI) {
+				ctx.ui.notify(`Guardian sandbox broker not published: ${conciseFailure(error)}`, "error");
+			}
+		}
+	};
+
 	const prepareReview = (
 		toolName: string,
 		toolCallId: string,
@@ -520,6 +581,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
+		latestCtx = ctx;
 		if (!config) {
 			return {
 				block: true,
