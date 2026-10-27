@@ -75,13 +75,12 @@ function cloneToolInput(input: Record<string, unknown>): Record<string, unknown>
 	return JSON.parse(serialized) as Record<string, unknown>;
 }
 
-function denialReason(assessment: GuardianAssessment, terminate: boolean): string {
+export function denialReason(assessment: GuardianAssessment, terminate: boolean, failed = false): string {
 	const circuitBreaker = terminate
 		? " Guardian rejected too many actions in this user turn, so this tool batch is being terminated."
 		: "";
-	const failedClosed = assessment.rationale.startsWith("Automatic safety review failed closed");
 	return [
-		failedClosed
+		failed
 			? "Guardian could not complete the safety review, so the action was blocked."
 			: "Guardian rejected this action due to unacceptable risk.",
 		`Reason: ${assessment.rationale}${circuitBreaker}`,
@@ -670,7 +669,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		} else {
 			if (ctx.hasUI) ctx.ui.notify(`Guardian denied ${event.toolName}: ${assessment.rationale}`, "warning");
 		}
-		const reason = decision.outcome === "deny" ? ruleDenialReason(decision.rule, terminate) : denialReason(assessment, terminate);
+		const reason = decision.outcome === "deny" ? ruleDenialReason(decision.rule, terminate) : denialReason(assessment, terminate, Boolean(failure));
 		return { block: true, reason, terminate };
 	});
 }

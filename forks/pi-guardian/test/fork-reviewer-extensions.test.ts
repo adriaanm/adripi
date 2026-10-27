@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { loadGuardianConfig } from "../src/config.ts";
+import { denialReason } from "../src/index.ts";
 import { buildSidecarArgs, getPiInvocation } from "../src/sidecar.ts";
-import type { GuardianConfig, GuardianStateV1 } from "../src/types.ts";
+import type { GuardianAssessment, GuardianConfig, GuardianStateV1 } from "../src/types.ts";
 
 // Fork-only behavior: the reviewer sidecar may load an explicit allowlist of
 // extensions (for provider extensions such as npm:@aliou/pi-neuralwatt), and a
@@ -64,6 +65,49 @@ test("loads only explicitly configured reviewer extensions", () => {
 	assert.deepEqual(configured, extensions);
 	assert.ok(args.includes("--no-extensions"));
 	assert.ok(args.includes("--no-tools"));
+});
+
+test("keeps every non-path specifier intact and resolves only paths", async () => {
+	const agentDir = await mkdtemp(join(tmpdir(), "pi-guardian-fork-config-"));
+	await writeFile(
+		join(agentDir, "guardian.json"),
+		JSON.stringify({
+			reviewer: {
+				extensions: ["builtin:x", "file:///opt/provider.ts", "https://example.com/p.git", "git:github.com/a/b", "~/local.ts"],
+			},
+		}),
+	);
+	const loaded = loadGuardianConfig(agentDir, "/bundle/policy.md");
+	assert.deepEqual(loaded.reviewerExtensions, [
+		"builtin:x",
+		"file:///opt/provider.ts",
+		"https://example.com/p.git",
+		"git:github.com/a/b",
+		join(homedir(), "local.ts"),
+	]);
+});
+
+test("failed reviews are reported as review failures, not risk denials", () => {
+	const assessment = {
+		risk_level: "critical",
+		user_authorization: "unknown",
+		outcome: "deny",
+		rationale: "Automatic safety review failed closed: sidecar exited 1",
+	} as unknown as GuardianAssessment;
+	assert.match(denialReason(assessment, false, true), /could not complete the safety review/);
+	assert.match(denialReason(assessment, false, false), /unacceptable risk/);
+	assert.doesNotMatch(denialReason(assessment, false, false), /could not complete the safety review/);
+});
+
+test("honors PI_SUBAGENT_RUNNER_CONFIG when detecting a nested runner", () => {
+	const previous = process.env.PI_SUBAGENT_RUNNER_CONFIG;
+	try {
+		process.env.PI_SUBAGENT_RUNNER_CONFIG = "{}";
+		assert.deepEqual(getPiInvocation(["--version"]), { command: "pi", args: ["--version"] });
+	} finally {
+		if (previous === undefined) delete process.env.PI_SUBAGENT_RUNNER_CONFIG;
+		else process.env.PI_SUBAGENT_RUNNER_CONFIG = previous;
+	}
 });
 
 test("does not relaunch a pi-subagents child runner as Pi", async () => {

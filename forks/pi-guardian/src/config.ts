@@ -61,11 +61,16 @@ function resolveConfiguredPath(value: string, baseDir: string): string {
 	return isAbsolute(expanded) ? expanded : resolve(baseDir, expanded);
 }
 
-const PACKAGE_SOURCE_PATTERN = /^(?:npm|git|github|https?|ssh):/i;
+/** Any `scheme:` specifier (npm:, git:, https:, builtin:, file:, …) is not a
+ * filesystem path and keeps Pi's own meaning. Only path-shaped entries resolve
+ * against the agent directory. */
+const SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
+const WINDOWS_DRIVE_PATTERN = /^[a-z]:[\\/]/i;
 
-/** Keep package sources intact; only normalize filesystem paths. */
+/** Keep package sources and URLs intact; only normalize filesystem paths. */
 function resolveReviewerExtension(value: string, baseDir: string): string {
-	return PACKAGE_SOURCE_PATTERN.test(value) ? value : resolveConfiguredPath(value, baseDir);
+	if (SCHEME_PATTERN.test(value) && !WINDOWS_DRIVE_PATTERN.test(value)) return value;
+	return resolveConfiguredPath(value, baseDir);
 }
 
 export function loadGuardianConfig(agentDir: string, bundledPolicyPath: string): GuardianConfig {

@@ -17,8 +17,9 @@ deltas are listed below; nothing else is modified.
 
 1. `src/types.ts` — `GuardianConfig` carries `reviewerExtensions`.
 2. `src/config.ts` — accepts `reviewer.extensions`, validates non-empty strings,
-   keeps package sources (`npm:`, `git:`, `github:`, `http(s):`, `ssh:`) intact
-   and resolves everything else against the agent directory.
+   and resolves only path-shaped entries against the agent directory. Any
+   `scheme:` specifier (`npm:`, `git:`, `github:`, `http(s):`, `ssh:`, `builtin:`,
+   `file:`, …) keeps Pi's own meaning; `C:\…` is still treated as a path.
 3. `src/sidecar.ts` — appends each configured entry as an explicit `--extension`
    argument after `--no-extensions`, so the reviewer sidecar can reach a model
    that is only available through a provider extension (Neuralwatt), without
@@ -28,9 +29,15 @@ deltas are listed below; nothing else is modified.
    The child bootstrap expects a config path or stdin, not `--mode`, so the old
    behaviour failed with `readFileSync('--mode')` and guardian failed closed.
    `PI_SUBAGENT_PI_BINARY` overrides the binary.
-5. `src/index.ts` — distinguish a failed-closed review from a risk denial in the
-   tool error shown to the model/child.
-6. `test/fork-reviewer-extensions.test.ts` — coverage for 1-4.
+5. `src/index.ts` — a failed-closed review is reported as a review failure, not
+   as a risk denial, and the distinction is driven by the review's `failure`
+   value rather than by matching a rationale prefix (a reviewer model could
+   quote the prefix). `denialReason` is exported for that test.
+6. `test/fork-reviewer-extensions.test.ts` — coverage for 1-5, including every
+   non-path specifier, the `PI_SUBAGENT_RUNNER_CONFIG` branch, and both denial
+   wordings.
+7. `test/state.test.ts` — one-line fixture change (`reviewerExtensions: []`),
+   required because 1 makes the field non-optional under strict `tsc`.
 
 Upstream 0.2.0 already covers the rest of what the 0.1.0 fork needed: the
 deterministic `permissions.allow` / `permissions.deny` rule family (evaluated
