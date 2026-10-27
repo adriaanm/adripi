@@ -229,6 +229,40 @@ recomputed per reload from the user's layer plus the scratch dir, so a config
 reload cannot persist or widen the grant; and an exception is never needed for
 scratch work, which keeps the reviewer focused on real boundary crossings.
 
+### 4.9 Host-command exceptions (remote git)
+
+`git push`, `git pull` and `git clone` for private remotes need the host's
+credential helper. The token must never enter the sandbox or the model context,
+and a model-authored command must never run unconstrained on the host. The
+chosen shape (decision, 2026-10-27 — no custom `git_push` tool):
+
+- the model calls `request_sandbox_exception` with `surface: "command"` and the
+exact command, for example `git push -u origin main`;
+- guardian reviews it like any other exception, with the transcript as evidence;
+- an allowed grant stores that **exact string** in a host-command store;
+- the bash tool consumes a matching string once (`once`) or for the session
+(`session`) and runs it with the host's own credential helper, so git
+authenticates normally and the token is never read into the conversation.
+
+Three properties keep this from becoming a general sandbox escape:
+
+1. **Exact match.** `hostGrants.consume(command)` compares the trimmed string
+   for equality; a granted `git push` cannot authorise `git push; …` or
+   `git push --force`.
+2. **One invocation.** `once` grants are removed by the execution that uses
+   them.
+3. **Shape eligibility plus a reviewer backstop.** The sandbox refuses
+   metacharacters (`;`, `&&`, `||`, `|`, redirects, `$(`, backticks, newlines)
+   and interpreter/wrapper prefixes (`sh`, `bash`, `env`, `sudo`, `xargs`, …)
+   before requesting a review; guardian's built-in rule list hard-denies the
+   inclusive patterns as well, so neither side is a single point of failure.
+
+Rejected alternatives: a dedicated `git_push` tool (the user prefers the
+reviewed-exception path, and it keeps one escalation mechanism), whitelisting
+`git push` in `excludedCommands` (substring matching would authorise compound
+commands), and a credential socket for the sandbox (any sandboxed process could
+ask it for the github.com credential).
+
 ### 4.7 Audit
 
 Guardian appends an assessment record for every request (`origin`, `surface`,

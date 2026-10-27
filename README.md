@@ -201,6 +201,12 @@ exception: the agent calls `request_sandbox_exception` with one target and a
 reason, `pi-guardian` decides, and you are asked only when it defers. Grants
 last for one command (`once`) or the session, in memory only.
 
+Remote git uses the same mechanism with a `command` exception: ask for the exact
+command (`git push -u origin main`), guardian reviews it, and on approval that
+string runs once on the host with your normal git credentials — the token never
+enters the sandbox or the conversation. Chained commands, redirects and
+interpreters are refused.
+
 To make a path permanently writable, add it to `filesystem.allowWrite` in
 `sandbox.json` yourself; for a host, add it to `network.allowedDomains`. Prefer
 narrow entries. See [`config/README.md`](config/README.md) and

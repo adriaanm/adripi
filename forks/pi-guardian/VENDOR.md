@@ -38,6 +38,18 @@ deltas are listed below; nothing else is modified.
    wordings.
 7. `test/state.test.ts` — one-line fixture change (`reviewerExtensions: []`),
    required because 1 makes the field non-optional under strict `tsc`.
+8. `src/sandbox/{types,rules,broker,review}.ts` — the sandbox exception broker:
+   `Symbol.for` slot published at `session_start`, request validation, always-deny
+   classes (credentials, the agent directory, secret writes, repo config and
+   HEAD), `sandboxExceptions.{allow,defer,deny}` `surface:pattern` rules,
+   reviewer prompt with scope narrowing, durable audit entries, and a denial
+   breaker. The built-in deny list also hard-denies `command:` patterns that
+   chain, redirect, substitute, or wrap in an interpreter, so a host-command
+   exception can never be a general escape.
+9. `src/sandbox/rules.ts` network matching covers `host`, `host:port` and
+   `host:*` in both directions.
+10. `test/sandbox-{broker,review}.test.ts` — decision order, scope narrowing,
+    breaker, request validation, and rule precedence.
 
 Upstream 0.2.0 already covers the rest of what the 0.1.0 fork needed: the
 deterministic `permissions.allow` / `permissions.deny` rule family (evaluated

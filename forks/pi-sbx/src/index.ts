@@ -43,6 +43,7 @@ import { createFilePolicy } from "./path-policy.ts";
 import { PromptCoordinator } from "./prompts.ts";
 import { removeSandboxViolationTags, ViolationTracker } from "./violations.ts";
 import { resultText, withTrapHint } from "./trap-hints.ts";
+import { HostCommandGrants, hostCommandRefusal } from "./host-command.ts";
 import {
   SandboxSettingsComponent,
   type RuleKind,
@@ -108,6 +109,8 @@ export default function sandboxExtension(pi: ExtensionAPI) {
   /** `once` grants expire after the next sandboxed command (network: next connection). */
   let pendingOnceGrants: Array<{ surface: SandboxSurface; target: string; grantedByToolCallId: string }> = [];
   const pendingNetworkOnce = new Set<string>();
+  /** Exact commands approved to run on the host (remote git operations). */
+  const hostGrants = new HostCommandGrants();
   let configError: string | undefined;
   let sessionEnabled = false;
   let sessionEnabledOverride: boolean | undefined;
@@ -425,6 +428,12 @@ export default function sandboxExtension(pi: ExtensionAPI) {
         return local.execute(id, input, signal, onUpdate, ctx);
       }
 
+      // Guardian-approved host execution: exact command only, consumed here, so a
+      // granted `git push` can never authorise `git push; something-else`.
+      if (hostGrants.consume(params.command)) {
+        return local.execute(id, input, signal, onUpdate, ctx);
+      }
+
       if (params.dangerouslyDisableSandbox) {
         if (!config.allowUnsandboxedCommands) throw new Error("Unsandboxed commands are disabled by sandbox policy");
         const brokerDecision = await decideSandboxException({
@@ -550,7 +559,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     name: "request_sandbox_exception",
     label: "Request sandbox exception",
     description:
-      "Ask for permission to do one specific thing the sandbox blocks: an exact command, a host:port, or an absolute path. One target per call. Guardian reviews the request against the conversation, and the user decides when guardian defers. Scratch files belong in PI_SANDBOX_SCRATCH and need no exception.",
+      "Ask for permission to do one specific thing the sandbox blocks: an exact command, a host:port, or an absolute path. One target per call. A `command` exception runs that exact command on the host (for remote git operations such as push/clone/pull); it must be a single plain command with no chaining, redirection, or interpreter. Guardian reviews the request against the conversation, and the user decides when guardian defers. Scratch files belong in PI_SANDBOX_SCRATCH and need no exception.",
     parameters: Type.Object({
       surface: Type.Union([
         Type.Literal("command"),
@@ -599,6 +608,33 @@ export default function sandboxExtension(pi: ExtensionAPI) {
         }
       }
       const grantedScope = decision.kind === "allow" ? decision.scope : "session";
+      if (surface === "command") {
+        // Host execution, exact match only. Refuse shapes that could run a
+        // second command before spending a review on them.
+        const refusal = hostCommandRefusal(params.target);
+        if (refusal) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Sandbox exception refused: ${refusal}. Ask for one plain command (for example \`git push -u origin main\`) without chaining, redirection, or an interpreter.`,
+              },
+            ],
+            details: { refusal },
+          };
+        }
+        hostGrants.grant(params.target, grantedScope);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Host execution granted (${grantedScope}) for exactly: ${params.target.trim()}. Run that command unchanged as the next bash call; it will not run inside the sandbox. ${decision.review.rationale}`,
+            },
+          ],
+          details: { decision },
+        };
+      }
+
       const preexisting = hasSessionException(sessionConfig as SessionLayer, surface, params.target);
       if (grantedScope === "once" && surface === "network") {
         // A one-shot connection grant: the proxy asks again for the next one.
@@ -670,6 +706,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     await controller.reset();
     pendingOnceGrants = [];
     pendingNetworkOnce.clear();
+    hostGrants.clear();
     await scratchpad?.dispose();
     scratchpad = undefined;
   });

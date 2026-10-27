@@ -50,6 +50,10 @@ whose escalation path is decided by `pi-guardian` instead of a human-only prompt
    command (or the next network connection) and removed afterwards via
    `withoutSessionException` + reload. Verified: command A allowed, command B
    denied in the same session.
+9. **Host-command exceptions** (`src/host-command.ts`). `surface: "command"`
+   grants run one exact command on the host (remote git), exact-match and
+   single-use, with metacharacter/interpreter shapes refused before review.
+   `test/host-command.test.ts` covers eligibility and the grant store.
 
 Remaining (W5-W6 in `docs/plan-sandbox-broker.md`): the stack swap and the
 architecture/README rewrite.

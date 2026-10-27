@@ -59,7 +59,6 @@ Every non-exempt tool call is reviewed before it runs.
 `Symbol.for` slot. The sandbox asks it about every exception: a model-asked
 `request_sandbox_exception`, a blocked network destination, or a model request to
 run unsandboxed.
-
 1. Always-deny classes (credentials, the agent directory, secret writes,
    hook directories) are refused without a model call.
 2. `sandboxExceptions.defer` rules route a class to the human.
@@ -73,6 +72,22 @@ run unsandboxed.
 
 A failed review, an absent broker, or no UI all resolve to denial. `defer` is
 the only path to a human prompt.
+
+**Host-command exceptions.** A `command` exception runs one exact command on the
+host instead of in the sandbox. It exists for remote git: `git push`, `git pull`
+and `git clone` need the host's credential helper, and the token must never enter
+the sandbox or the model's context. Three properties keep it narrow:
+
+1. exact match — the executed string must equal the approved string, so a
+granted `git push` cannot authorise `git push; something-else`;
+2. single invocation — `once` grants are consumed by one execution;
+3. shape eligibility — the sandbox refuses metacharacters (`;`, `&&`, `|`,
+redirects, command substitution, newlines) and interpreter/wrapper prefixes
+(`sh`, `bash`, `env`, `sudo`, `xargs`, …) before a review is even requested,
+and the guardian rule layer hard-denies the inclusive patterns as a backstop.
+
+Only the command string is granted; the token stays with the host's credential
+helper and never appears in a tool result.
 
 The fork adds `reviewer.extensions`, the subagents child-runner detection, the
 broker, and the sandbox-exception policy clause; see

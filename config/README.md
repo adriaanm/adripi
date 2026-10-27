@@ -44,6 +44,17 @@ To make a path permanently writable, add it to `filesystem.allowWrite` in
 `network.allowedDomains`. Prefer narrow entries (`~/.gradle/caches`) over
 `~/.gradle`.
 
+### Remote git
+
+`git push`, `git pull` and clones of private repositories need the host's
+credential helper, so they cannot run inside the sandbox. Ask for a `command`
+exception with the exact command — for example `git push -u origin main`.
+Guardian reviews it; on approval that exact string runs once on the host with
+your normal git credentials, and the token never enters the sandbox or the
+conversation. Chained commands, redirects, command substitution and interpreter
+wrappers are refused by the sandbox before review and hard-denied by guardian's
+rules.
+
 ## Why JSON, not TOML
 
 `sandbox.json` is the shape `@anthropic-ai/sandbox-runtime` validates
