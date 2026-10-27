@@ -5,7 +5,7 @@ check:
     bash -n install.sh
     node scripts/check-configs.mjs
 
-# install packages, deploy the guardian fork, and seed configs
+# install packages, deploy both vendored forks, and seed configs
 install:
     ./install.sh
 

@@ -398,7 +398,22 @@ only holds after a fork that inlines the adapter.
    the review for that call. Verified: the tool call is no longer denied by the
    generic tool gate before the broker sees it.
 
-## 11. Known gaps
+## 11. Review rounds
+
+Two independent reviews of the finished work (glm-5.3) drove the last three
+commits:
+
+- broker/W4b: `once` grants expired only after sandboxed bash (a single-use
+grant could cover unlimited file writes), the network one-shot never expired,
+`.git/config` was grantable, and network deny rules missed `host` vs
+`host:port` spellings. All fixed with tests.
+- W5 swap: `check-configs` did not enforce `~/.config/gh` or the denyWrite
+globs and missed `/var/tmp`; `install.sh` could downgrade a global `srt`,
+matched `pi-perm-*` names, and left the retired extension in the discovery
+path; README still called `pi-perm` the boundary and pinned the wrong guardian
+commit. All fixed.
+
+## 12. Known gaps
 
 - The tool wiring itself (expiry at the tool-call boundary, the human-defer
   branch, `networkAsk` routing) is covered by pure-helper tests plus end-to-end

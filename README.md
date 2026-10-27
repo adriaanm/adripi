@@ -23,7 +23,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the call flow.
 
 - Pi 1.4+ (`pi --version`)
 - `pnpm`, `node`, `git`, `rsync`
-- macOS or Linux
+- macOS, or Linux/WSL2 (Linux also needs `bubblewrap`, `socat`, `ripgrep`)
 - Network access for package install
 - Credentials for your chosen model provider
 
@@ -35,6 +35,8 @@ cd ~/g/adripi
 ./install.sh
 ```
 
+Close any running Pi first: `install.sh` rewrites its settings.
+
 `install.sh`:
 
 1. sets `npmCommand` to `pnpm` in `~/.pi/agent/settings.json`
@@ -43,6 +45,11 @@ cd ~/g/adripi
 4. deploys the vendored `pi-guardian` and `pi-sbx` forks over their npm installs
 5. seeds the portable configs in [`config/`](config) without overwriting
    existing user files
+
+Upgrading an older checkout that still used `pi-perm` needs no manual step: the
+script installs `pi-sbx`, deploys both forks, removes any `pi-perm` entry from
+`settings.json`, and moves the old extension data directory to `pi-perm.retired`.
+Restart Pi afterwards.
 
 If `srt` is installed but not on `PATH`:
 
