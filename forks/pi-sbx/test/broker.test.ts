@@ -124,3 +124,18 @@ describe("withSessionException", () => {
 		expect(base.excludedCommands).toEqual(["make"]);
 	});
 });
+
+describe("planExceptionOutcome", () => {
+	it("maps allow to a grant, deny to a message, defer to the human", async () => {
+		const { planExceptionOutcome } = await import("../src/broker.ts");
+		expect(
+			planExceptionOutcome({ kind: "allow", scope: "session", review: { rationale: "ok", source: "reviewer" } }),
+		).toEqual({ action: "grant", scope: "session" });
+		expect(
+			planExceptionOutcome({ kind: "deny", reason: "no", review: { rationale: "no", source: "reviewer" } }),
+		).toEqual({ action: "deny", message: "no" });
+		expect(planExceptionOutcome({ kind: "defer", review: { rationale: "unsure", source: "rule" } })).toEqual({
+			action: "ask-human",
+		});
+	});
+});

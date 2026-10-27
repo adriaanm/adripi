@@ -145,3 +145,19 @@ export function withSessionException(
 	next.excludedCommands = addUnique(layer.excludedCommands, target);
 	return next;
 }
+
+export type ExceptionPlan =
+	| { action: "grant"; scope: SandboxScope }
+	| { action: "deny"; message: string }
+	| { action: "ask-human" };
+
+/**
+ * What the caller should do with a broker decision. Kept pure so the tool path
+ * (allow → grant, deny → tell the model, defer → ask the human) is testable
+ * without a Pi runtime.
+ */
+export function planExceptionOutcome(decision: SandboxExceptionDecision): ExceptionPlan {
+	if (decision.kind === "allow") return { action: "grant", scope: decision.scope };
+	if (decision.kind === "deny") return { action: "deny", message: decision.reason };
+	return { action: "ask-human" };
+}
