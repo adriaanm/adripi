@@ -40,9 +40,19 @@ whose escalation path is decided by `pi-guardian` instead of a human-only prompt
 6. **`test/broker.test.ts`** — slot lifecycle, defer/allow/deny passthrough,
    broker failure → denial, request shaping, and the session-layer mapping.
 
-Pending (W4 in `docs/plan-sandbox-broker.md`): widen-and-rerun on traps (grant a
-policy widening and re-run inside the sandbox instead of escalating to the
-host), and end-to-end tests for the tool's human-defer branch.
+7. **Trap hints** (`src/trap-hints.ts`). A sandboxed command that fails with
+   `Operation not permitted` / `Permission denied` gets an extra text block
+   naming the exact denied path and telling the model to call
+   `request_sandbox_exception` for it. No automatic retry: the surface cannot be
+   inferred reliably from the violation log, and the retry must stay a reviewed
+   decision.
+8. **`once` scope** is real: the grant is applied for exactly the next sandboxed
+   command (or the next network connection) and removed afterwards via
+   `withoutSessionException` + reload. Verified: command A allowed, command B
+   denied in the same session.
+
+Remaining (W5-W6 in `docs/plan-sandbox-broker.md`): the stack swap and the
+architecture/README rewrite.
 
 ## Verified on macOS (2026-10-27)
 

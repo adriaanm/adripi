@@ -176,12 +176,25 @@ Deliberate limits:
 
 `@erichll/pi-sandbox` reacts to a trap with a one-shot grant and re-runs the
 command **on the host, outside the sandbox** (documented: "the first sandboxed
-attempt may already have had partial side effects"). We do the opposite:
+attempt may already have had partial side effects"). We never do that: an
+approved exception widens the profile and the command re-runs **inside** it.
 
-- `write` → add the exact path to that run's `allowWrite`;
-- `network` → add `host:port` to that run's `allowedDomains`;
-- `command` → add the exact command to the session exclusion list (this is the
-  one case that runs unsandboxed, and it is human-only).
+- `write`/`read` → the exact path joins the run's (or session's) allow list;
+- `network` → `host:port` joins `allowedDomains` (or a one-shot connection);
+- `command` → the exact command joins the session exclusion list. This is the
+  only grant that runs unsandboxed, and it requires a human ("Allow for this
+  session" in the existing prompt), never the broker alone.
+
+**Decision (W4b): a denial produces a hint, not an automatic retry.** The
+reliable signal is the command's own text (`Operation not permitted`); SRT's
+violation log is asynchronous and on macOS reports unrelated probes
+(`deny(1) sysctl-read`) before, or instead of, the file operation. Inferring the
+surface from that would either widen the wrong dimension or spend a review on a
+mislabelled request. So the sandbox appends the exact denied path plus the
+instruction to call `request_sandbox_exception`, and the retry happens under the
+normal reviewed decision. Verified end to end on macOS: denial → hint → model
+asks → guardian allows → re-run succeeds; a `once` grant is consumed by that one
+command and the next identical command is denied again.
 
 Rationale: an exception must never silently downgrade the whole command out of
 the sandbox, and a partial-effects retry is worse than a policy widening. The
@@ -349,8 +362,10 @@ only holds after a fork that inlines the adapter.
   driving. Landed: scratchpad (§4.8), broker client + session-layer grants, the
   exception tool, broker-first network and `dangerouslyDisableSandbox` paths
   (verified on macOS: guardian allowed `write /Users/adriaan/.gradle` for the
-  session and the command re-ran inside the sandbox). Remaining: widen-and-rerun
-  on traps, and a test for the tool's human-defer branch.
+  session and the command re-ran inside the sandbox). Trap hints replace
+  auto-retry (§4.5), `once` grants expire after the next command (verified), and
+  the tool's human-defer branch is covered by `planExceptionOutcome` tests.
+  Remaining: W5 swap, W6 docs.
 - [ ] **W5 — Swap.** `packages.txt` / `forks.txt` / `install.sh` /
   `config/` / `check-configs.mjs` updated; `pi-perm` removed from
   `~/.pi/agent/settings.json`; fresh-session smoke on this machine. Exit:

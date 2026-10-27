@@ -35,11 +35,13 @@ import {
   type SandboxSurface,
   type SessionLayer,
   withSessionException,
+  withoutSessionException,
 } from "./broker.ts";
 import { applyAfterPersist } from "./overlay.ts";
 import { createFilePolicy } from "./path-policy.ts";
 import { PromptCoordinator } from "./prompts.ts";
 import { removeSandboxViolationTags, ViolationTracker } from "./violations.ts";
+import { resultText, withTrapHint } from "./trap-hints.ts";
 import {
   SandboxSettingsComponent,
   type RuleKind,
@@ -102,6 +104,9 @@ export default function sandboxExtension(pi: ExtensionAPI) {
   let currentContext: ExtensionContext | undefined;
   let config: EffectiveSandboxConfig | undefined;
   let scratchpad: Scratchpad | undefined;
+  /** `once` grants expire after the next sandboxed command (network: next connection). */
+  let pendingOnceGrants: Array<{ surface: SandboxSurface; target: string }> = [];
+  const pendingNetworkOnce = new Set<string>();
   let configError: string | undefined;
   let sessionEnabled = false;
   let sessionEnabledOverride: boolean | undefined;
@@ -168,6 +173,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
 
   const networkAsk = async (host: NetworkHostPattern) => {
     const target = `${host.host}:${host.port ?? "*"}`;
+    if (pendingNetworkOnce.delete(target)) return true;
     const decision = await decideSandboxException({
       surface: "network",
       target,
@@ -443,7 +449,20 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       }
 
       if (controller.canRunSandboxed()) {
-        return sandboxedTool(ctx.cwd).execute(id, input, signal, onUpdate, ctx);
+        const sandboxedResult = await sandboxedTool(ctx.cwd).execute(id, input, signal, onUpdate, ctx);
+        if (pendingOnceGrants.length > 0) {
+          const expiring = pendingOnceGrants;
+          pendingOnceGrants = [];
+          for (const grant of expiring) {
+            sessionConfig = withoutSessionException(sessionConfig as SessionLayer, grant.surface, grant.target) as typeof sessionConfig;
+          }
+          await reloadConfig(ctx, false);
+        }
+        // A denied command names the exact path; tell the model how to ask for it.
+        return withTrapHint(sandboxedResult, resultText(sandboxedResult), {
+          cwd: ctx.cwd,
+          scratchDir: scratchpad?.dir,
+        });
       }
       if (config.failIfUnavailable) {
         throw new Error(`Sandbox required but unavailable: ${controller.getError() ?? "not initialized"}`);
@@ -586,8 +605,14 @@ export default function sandboxExtension(pi: ExtensionAPI) {
           };
         }
       }
-      await applySessionGrant(ctx, surface, params.target);
       const grantedScope = decision.kind === "allow" ? decision.scope : "session";
+      if (grantedScope === "once" && surface === "network") {
+        // A one-shot connection grant: the proxy asks again for the next one.
+        pendingNetworkOnce.add(params.target);
+      } else {
+        await applySessionGrant(ctx, surface, params.target);
+        if (grantedScope === "once") pendingOnceGrants.push({ surface, target: params.target });
+      }
       const rationale = decision.review.rationale;
       return {
         content: [
@@ -629,6 +654,8 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     sessionEnabledOverride = undefined;
     sessionStarted = false;
     await controller.reset();
+    pendingOnceGrants = [];
+    pendingNetworkOnce.clear();
     await scratchpad?.dispose();
     scratchpad = undefined;
   });

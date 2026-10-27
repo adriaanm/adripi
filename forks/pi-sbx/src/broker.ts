@@ -161,3 +161,39 @@ export function planExceptionOutcome(decision: SandboxExceptionDecision): Except
 	if (decision.kind === "deny") return { action: "deny", message: decision.reason };
 	return { action: "ask-human" };
 }
+
+function removeValue(existing: unknown, value: string): string[] | undefined {
+	const list = Array.isArray(existing) ? existing.filter((item): item is string => typeof item === "string") : [];
+	const next = list.filter((item) => item !== value);
+	return next.length > 0 ? next : undefined;
+}
+
+/** Inverse of `withSessionException`, used to expire `once` grants. */
+export function withoutSessionException(
+	layer: SessionLayer,
+	surface: SandboxSurface,
+	target: string,
+): SessionLayer {
+	const next: SessionLayer = {
+		...layer,
+		filesystem: { ...(layer.filesystem ?? {}) },
+		network: { ...(layer.network ?? {}) },
+	};
+	if (surface === "write" || surface === "read") {
+		const key = surface === "write" ? "allowWrite" : "allowRead";
+		const remaining = removeValue(next.filesystem?.[key], target);
+		if (remaining) next.filesystem = { ...next.filesystem, [key]: remaining };
+		else if (next.filesystem) delete next.filesystem[key];
+		return next;
+	}
+	if (surface === "network") {
+		const remaining = removeValue(next.network?.allowedDomains, target);
+		if (remaining) next.network = { ...next.network, allowedDomains: remaining };
+		else if (next.network) delete next.network.allowedDomains;
+		return next;
+	}
+	const remaining = removeValue(layer.excludedCommands, target);
+	if (remaining) next.excludedCommands = remaining;
+	else delete next.excludedCommands;
+	return next;
+}

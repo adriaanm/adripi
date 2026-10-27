@@ -139,3 +139,27 @@ describe("planExceptionOutcome", () => {
 		});
 	});
 });
+
+describe("withoutSessionException", () => {
+	it("removes a grant and drops empty containers", async () => {
+		const { withoutSessionException } = await import("../src/broker.ts");
+		const layer = {
+			filesystem: { allowWrite: ["."], allowRead: ["."] },
+			network: { allowedDomains: ["example.com"] },
+			excludedCommands: ["make"],
+		};
+		const removedWrite = withoutSessionException(layer, "write", ".");
+		expect(removedWrite.filesystem?.allowWrite).toBeUndefined();
+		expect(removedWrite.filesystem?.allowRead).toEqual(["."]);
+
+		const removedNetwork = withoutSessionException(layer, "network", "example.com");
+		expect(removedNetwork.network?.allowedDomains).toBeUndefined();
+
+		const removedCommand = withoutSessionException(layer, "command", "make");
+		expect(removedCommand.excludedCommands).toBeUndefined();
+
+		// Unrelated targets are left alone, and the input is not mutated.
+		expect(withoutSessionException(layer, "write", "/elsewhere").filesystem?.allowWrite).toEqual(["."]);
+		expect(layer.filesystem?.allowWrite).toEqual(["."]);
+	});
+});
