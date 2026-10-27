@@ -53,3 +53,12 @@ export function failedClosedAssessment(reason: string): GuardianAssessment {
 		rationale: `Automatic safety review failed closed: ${reason}`,
 	};
 }
+
+export function ruleDeniedAssessment(rule: string): GuardianAssessment {
+	return {
+		risk_level: "high",
+		user_authorization: "unknown",
+		outcome: "deny",
+		rationale: `Denied by rule ${rule}`,
+	};
+}

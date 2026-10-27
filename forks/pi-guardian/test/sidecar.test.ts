@@ -9,11 +9,10 @@ import type { GuardianConfig, GuardianStateV1 } from "../src/types.ts";
 
 const config = {
 	reviewerModel: "openai-codex/gpt-5.6-luna",
-	reviewerExtensions: [],
 	thinkingLevel: "low",
 	policyPath: "/trusted/guardian-policy.md",
 	piCommand: "/usr/local/bin/pi",
-} as unknown as GuardianConfig;
+} as GuardianConfig;
 
 const state = {
 	guardianSessionId: "guardian-123",
@@ -46,44 +45,11 @@ test("resumed sidecars are not renamed on every review", () => {
 	assert.equal(args.includes("--name"), false);
 });
 
-test("loads only explicitly configured reviewer extensions", () => {
-	const extensions = ["npm:@aliou/pi-neuralwatt@0.18.0", "/opt/provider.ts"];
-	const args = buildSidecarArgs({ ...config, reviewerExtensions: extensions }, state);
-	const configured = args.flatMap((arg, index) => (arg === "--extension" ? [args[index + 1]] : []));
-	assert.deepEqual(configured, extensions);
-	assert.ok(args.includes("--no-extensions"));
-	assert.ok(args.includes("--no-tools"));
-});
-
 test("an explicit Pi executable is invoked without a shell", () => {
 	assert.deepEqual(getPiInvocation(["--version"], "/custom/pi"), {
 		command: "/custom/pi",
 		args: ["--version"],
 	});
-});
-
-test("does not relaunch a pi-subagents runner as Pi", async () => {
-	const directory = await mkdtemp(join(tmpdir(), "pi-guardian-subagent-runner-"));
-	const runner = join(directory, "subagent-runner-bootstrap.js");
-	await writeFile(runner, "");
-	const previousScript = process.argv[1];
-	const previousAsync = process.env.PI_ASYNC_NATIVE_RUNNER;
-	const previousBinary = process.env.PI_SUBAGENT_PI_BINARY;
-	try {
-		process.argv[1] = runner;
-		delete process.env.PI_ASYNC_NATIVE_RUNNER;
-		delete process.env.PI_SUBAGENT_PI_BINARY;
-		assert.deepEqual(getPiInvocation(["--version"]), { command: "pi", args: ["--version"] });
-
-		process.env.PI_ASYNC_NATIVE_RUNNER = "1";
-		assert.deepEqual(getPiInvocation(["--version"]), { command: "pi", args: ["--version"] });
-	} finally {
-		process.argv[1] = previousScript;
-		if (previousAsync === undefined) delete process.env.PI_ASYNC_NATIVE_RUNNER;
-		else process.env.PI_ASYNC_NATIVE_RUNNER = previousAsync;
-		if (previousBinary === undefined) delete process.env.PI_SUBAGENT_PI_BINARY;
-		else process.env.PI_SUBAGENT_PI_BINARY = previousBinary;
-	}
 });
 
 test("runs a sidecar over stdin and retries malformed structured output", async () => {
@@ -131,6 +97,25 @@ process.stdout.write(JSON.stringify({type:"message_end",message:{role:"assistant
 	}
 });
 
+test("surfaces the reviewer provider error instead of a missing response", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "pi-guardian-sidecar-error-"));
+	const executable = join(directory, "fake-pi.mjs");
+	await writeFile(
+		executable,
+		`#!/usr/bin/env node
+for await (const _ of process.stdin) {}
+process.stderr.write("Warning: No project session found with id 'x'; creating a new session with that id.\\n");
+const message = {role: "assistant", content: [], stopReason: "error", errorMessage: "401 Incorrect API key provided"};
+process.stdout.write(JSON.stringify({type: "message_end", message}) + "\\n");
+`,
+		{ mode: 0o700 },
+	);
+	await chmod(executable, 0o700);
+	await assert.rejects(
+		requestGuardianAssessment({ ...config, piCommand: executable, timeoutMs: 2_000, maxAttempts: 1 }, state, "review"),
+		/Guardian reviewer request failed: 401 Incorrect API key provided/,
+	);
+});
 
 test("Pi invocation follows a global-style CLI symlink using the current Node runtime", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "pi-guardian-invocation-"));

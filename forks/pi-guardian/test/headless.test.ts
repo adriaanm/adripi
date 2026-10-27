@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { hashText } from "../src/state.ts";
 import { spawn } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -11,6 +12,7 @@ test("real Pi 1.0 CLI emits status and nested assessments in JSON no-session mod
 	const directory = await mkdtemp(join(tmpdir(), "pi-guardian-headless-"));
 	let requests = 0;
 	let reviews = 0;
+	let ruleSmoke = false;
 	const server = createServer(async (request, response) => {
 		let body = "";
 		for await (const chunk of request) body += chunk;
@@ -24,7 +26,12 @@ test("real Pi 1.0 CLI emits status and nested assessments in JSON no-session mod
 		}) } : first ? {
 			role: "assistant",
 			tool_calls: [{ index: 0, id: "smoke-root", type: "function", function: {
-				name: "codemode", arguments: JSON.stringify({ code: 'text(await tools.bash({command: "echo guardian-smoke"}));' }),
+				name: ruleSmoke ? "read" : "codemode",
+				arguments: JSON.stringify(
+					ruleSmoke
+						? { path: "~/.codex/auth.json" }
+						: { code: 'text(await tools.bash({command: "echo guardian-smoke"}));' },
+				),
 			} }],
 		} : { role: "assistant", content: "Smoke complete." };
 		response.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -73,14 +80,34 @@ test("real Pi 1.0 CLI emits status and nested assessments in JSON no-session mod
 		assert.equal(status.data.enabled, true);
 		assert.equal(status.data.configError, null);
 		assert.match(status.data.policySha256, /^[a-f0-9]{64}$/);
+		assert.equal(status.data.permissionsSha256, hashText(JSON.stringify(status.data.permissions)));
 		const assessments = entries.filter((entry) => entry.customType === GUARDIAN_ASSESSMENT_ENTRY);
 		assert.deepEqual(assessments.map((entry) => entry.data.toolName), ["codemode", "bash"]);
 		assert.equal(assessments[1].data.parentToolCallId, "smoke-root");
-		assert.ok(assessments.every((entry) => entry.data.assessment.outcome === "allow"));
+		assert.ok(assessments.every((entry) => entry.data.assessment.outcome === "allow" && entry.data.source === "reviewer"));
 		assert.ok(events.some((event) => event.type === "tool_execution_end" && event.toolName === "bash" && !event.isError));
 		await writeFile(join(directory, "stdout.jsonl"), result.stdout);
 		console.log(`Headless smoke JSONL: ${join(directory, "stdout.jsonl")}`);
 		for (const entry of [status, ...assessments]) console.log(JSON.stringify({ type: "entry_appended", entry }));
+		ruleSmoke = true;
+		await writeFile(join(directory, "guardian.json"), JSON.stringify({
+			permissions: { deny: ["Read(~/.codex/**)"] },
+			reviewer: { model: "guardian-smoke/test" },
+		}));
+		const deniedResult = await run();
+		assert.equal(deniedResult.code, 0, deniedResult.stderr);
+		assert.equal(reviews, 2, "Fixed deny must not call the reviewer");
+		const deniedEvents = deniedResult.stdout.trim().split("\n").map((line) => JSON.parse(line));
+		const ruleRecord = deniedEvents.find((event) => event.type === "entry_appended" && event.entry.customType === GUARDIAN_ASSESSMENT_ENTRY);
+		assert.ok(ruleRecord, deniedResult.stdout);
+		assert.equal(ruleRecord.entry.data.source, "rule");
+		assert.equal(ruleRecord.entry.data.rule, "Read(~/.codex/**)");
+		assert.equal(ruleRecord.entry.data.assessment.outcome, "deny");
+		assert.ok(deniedEvents.some((event) => event.type === "tool_execution_end" && event.toolName === "read" && event.isError));
+		await writeFile(join(directory, "rule-deny.jsonl"), deniedResult.stdout);
+		console.log(`Rule-deny smoke JSONL: ${join(directory, "rule-deny.jsonl")}`);
+		console.log(JSON.stringify(ruleRecord));
+		ruleSmoke = false;
 		// Misconfigured and disabled runs must still advertise that Guardian loaded.
 		for (const [contents, enabled, error] of [["{", true, true], ['{"enabled":false}', false, false]] as const) {
 			await writeFile(join(directory, "guardian.json"), contents);

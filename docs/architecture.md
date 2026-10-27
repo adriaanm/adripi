@@ -10,6 +10,11 @@ tool call
   -> pi-review      separate diff review after code changes
 ```
 
+> **Planned replacement.** Layer 1 (`pi-perm`) is being replaced by an
+> SRT substrate whose every escalation is decided by `pi-guardian`, with the
+> model able to request exceptions. Design, rationale and progress:
+> [`plan-sandbox-broker.md`](plan-sandbox-broker.md).
+
 ## 1. `pi-perm`: OS boundary
 
 `pi-perm` owns the sandbox and the structured profile in

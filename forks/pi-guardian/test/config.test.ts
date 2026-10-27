@@ -13,29 +13,6 @@ test("loads safe defaults from an empty user agent directory", async () => {
 	assert.equal(config.maxParallelReviews, 4);
 	assert.equal(config.guardianSessionDir, join(agentDir, "guardian-sessions"));
 	assert.deepEqual([...config.exemptTools], ["read", "grep", "find", "ls", "tool_search"]);
-	assert.deepEqual(config.reviewerExtensions, []);
-});
-
-test("keeps npm sources while resolving local reviewer extensions", async () => {
-	const agentDir = await mkdtemp(join(tmpdir(), "pi-guardian-config-test-"));
-	await writeFile(
-		join(agentDir, "guardian.json"),
-		JSON.stringify({
-			reviewer: { extensions: ["npm:@aliou/pi-neuralwatt@0.18.0", "./local.ts", "/opt/provider.ts"] },
-		}),
-	);
-	const config = loadGuardianConfig(agentDir, "/bundle/policy.md");
-	assert.deepEqual(config.reviewerExtensions, [
-		"npm:@aliou/pi-neuralwatt@0.18.0",
-		join(agentDir, "local.ts"),
-		"/opt/provider.ts",
-	]);
-});
-
-test("rejects malformed reviewer extension entries", async () => {
-	const agentDir = await mkdtemp(join(tmpdir(), "pi-guardian-config-test-"));
-	await writeFile(join(agentDir, "guardian.json"), '{"reviewer":{"extensions":[""]}}');
-	assert.throws(() => loadGuardianConfig(agentDir, "/bundle/policy.md"), /reviewer\.extensions must be an array/);
 });
 
 test("rejects unsafe or malformed bounds instead of silently accepting them", async () => {

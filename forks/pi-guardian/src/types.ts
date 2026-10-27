@@ -44,6 +44,8 @@ export interface GuardianAssessmentRecordV1 {
 	parentToolCallId?: string;
 	turnKey: string;
 	assessment: GuardianAssessment;
+	source: "rule" | "reviewer";
+	rule?: string;
 	reviewedAt: string;
 	failure?: string;
 	failureHelp?: string;
@@ -68,6 +70,11 @@ export interface TranscriptBounds {
 	maxRecentNonUserEntries: number;
 }
 
+export interface GuardianPermissions {
+	allow: string[];
+	deny: string[];
+}
+
 export interface GuardianConfig {
 	enabled: boolean;
 	reviewerModel: string;
@@ -82,6 +89,8 @@ export interface GuardianConfig {
 	policyPath: string;
 	piCommand?: string;
 	exemptTools: ReadonlySet<string>;
+	permissions: GuardianPermissions;
+	agentDir: string;
 	transcript: TranscriptBounds;
 }
 

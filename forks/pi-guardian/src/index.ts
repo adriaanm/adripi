@@ -7,8 +7,9 @@ import {
 	type ExtensionContext,
 	type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import { failedClosedAssessment } from "./assessment.ts";
+import { failedClosedAssessment, ruleDeniedAssessment } from "./assessment.ts";
 import { loadGuardianConfig, persistGuardianEnabled } from "./config.ts";
+import { evaluatePermissions } from "./permissions.ts";
 import { buildReviewPrompt } from "./prompt.ts";
 import { requestGuardianAssessment } from "./sidecar.ts";
 import {
@@ -88,6 +89,14 @@ function denialReason(assessment: GuardianAssessment, terminate: boolean): strin
 	].join("\n");
 }
 
+function ruleDenialReason(rule: string, terminate: boolean): string {
+	const circuitBreaker = terminate ? " Too many consecutive denials; this tool batch is being terminated." : "";
+	return [
+		`Guardian blocked this action by fixed permission rule ${rule}.${circuitBreaker}`,
+		"Do not retry by other means, indirect execution, or a workaround.",
+	].join("\n");
+}
+
 interface ReviewExecution {
 	assessment: GuardianAssessment;
 	failure?: string;
@@ -141,7 +150,7 @@ async function assessAction(
 			assessment: await requestGuardianAssessment(
 				config,
 				state,
-				buildReviewPrompt(parentSessionId, transcript, action),
+				buildReviewPrompt(parentSessionId, transcript, action, config.permissions.deny),
 				signal,
 			),
 			validReview: true,
@@ -246,6 +255,8 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		reviewerThinking: config?.thinkingLevel ?? null,
 		policySha256: policyHash ?? null,
 		exemptTools: config ? [...config.exemptTools] : [],
+		permissions: config?.permissions ?? null,
+		permissionsSha256: config ? hashText(JSON.stringify(config.permissions)) : null,
 		configError: initializationError ?? null,
 	});
 	const pendingReviews = new Map<string, PendingReview>();
@@ -452,7 +463,13 @@ export default function guardianExtension(pi: ExtensionAPI) {
 
 	pi.on("message_end", (event, ctx) => {
 		if (!config || !policyHash || initializationError || !config.enabled) return;
-		const calls = assistantToolCalls(event.message).filter((call) => !config?.exemptTools.has(call.toolName));
+		const activeConfig = config;
+		// Rule-decided calls need no speculative review.
+		const calls = assistantToolCalls(event.message).filter(
+			(call) =>
+				evaluatePermissions(activeConfig.permissions, call.toolName, call.input, ctx.cwd, activeConfig.agentDir)
+					.outcome === "review",
+		);
 		if (calls.length === 0) return;
 
 		pendingReviews.clear();
@@ -530,7 +547,12 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		} catch {
 			// Serialization failures fail closed below.
 		}
-		if (config.exemptTools.has(event.toolName)) return undefined;
+		const decision = evaluatePermissions(config.permissions, event.toolName, event.input, ctx.cwd, config.agentDir);
+		if (decision.outcome === "allow") return undefined;
+		const ruleExecution: ReviewExecution | undefined =
+			decision.outcome === "deny"
+				? { assessment: ruleDeniedAssessment(decision.rule), validReview: false }
+				: undefined;
 
 		const branch = ctx.sessionManager.getBranch();
 		const parentSessionId = ctx.sessionManager.getSessionId();
@@ -568,7 +590,9 @@ export default function guardianExtension(pi: ExtensionAPI) {
 			const action = createAction(event.toolName, event.toolCallId, event.input, ctx.cwd);
 			if (event.parentToolCallId) action.parent_actions = parentActions;
 			actionHash = hashAction(action);
-			if (
+			if (ruleExecution) {
+				pending = { parentSessionId, state, actionHash, promise: Promise.resolve(ruleExecution) };
+			} else if (
 				!pending ||
 				pending.parentSessionId !== parentSessionId ||
 				pending.actionHash !== actionHash ||
@@ -602,7 +626,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 				parentSessionId,
 				state,
 				actionHash,
-				promise: Promise.resolve({ assessment: failedClosedAssessment(failure), failure, validReview: false }),
+				promise: Promise.resolve(ruleExecution ?? { assessment: failedClosedAssessment(failure), failure, validReview: false }),
 			};
 		}
 
@@ -627,6 +651,8 @@ export default function guardianExtension(pi: ExtensionAPI) {
 			parentToolCallId: event.parentToolCallId,
 			turnKey,
 			assessment,
+			source: decision.outcome === "deny" ? "rule" : "reviewer",
+			rule: decision.outcome === "deny" ? decision.rule : undefined,
 			reviewedAt: new Date().toISOString(),
 			failure,
 			failureHelp: failure ? guardianFailureHelp(failure, configPath) : undefined,
@@ -644,6 +670,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		} else {
 			if (ctx.hasUI) ctx.ui.notify(`Guardian denied ${event.toolName}: ${assessment.rationale}`, "warning");
 		}
-		return { block: true, reason: denialReason(assessment, terminate), terminate };
+		const reason = decision.outcome === "deny" ? ruleDenialReason(decision.rule, terminate) : denialReason(assessment, terminate);
+		return { block: true, reason, terminate };
 	});
 }

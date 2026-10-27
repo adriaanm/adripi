@@ -1,7 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import type { GuardianConfig, TranscriptBounds } from "./types.ts";
+import { builtInDenyRules, DEFAULT_ALLOW_RULES, normalizeTool, validateRules } from "./permissions.ts";
+import type { GuardianConfig, GuardianPermissions, TranscriptBounds } from "./types.ts";
+
+const BARE_TOOL = /^[\w-]+$/;
 
 const DEFAULT_TRANSCRIPT: TranscriptBounds = {
 	maxMessageChars: 40_000,
@@ -27,6 +30,7 @@ interface GuardianConfigFile {
 	policyPath?: string;
 	piCommand?: string;
 	exemptTools?: string[];
+	permissions?: { allow?: string[]; deny?: string[] };
 	transcript?: Partial<TranscriptBounds>;
 }
 
@@ -119,10 +123,11 @@ export function loadGuardianConfig(agentDir: string, bundledPolicyPath: string):
 		"guardianSessionDir",
 	);
 	const policyPathValue = nonEmptyString(file.policyPath, bundledPolicyPath, "policyPath");
-	const exemptTools = file.exemptTools ?? ["read", "grep", "find", "ls", "tool_search"];
-	if (!Array.isArray(exemptTools) || exemptTools.some((tool) => typeof tool !== "string" || tool.trim() === "")) {
-		throw new Error("exemptTools must be an array of non-empty tool names");
-	}
+	const guardianSessionDir = resolveConfiguredPath(sessionDirValue, agentDir);
+	const permissions = loadPermissions(file, agentDir, guardianSessionDir);
+	// Bare allow rules are reported as exempt tools for status consumers.
+	const exemptTools = permissions.allow.filter((rule) => BARE_TOOL.test(rule)).map(normalizeTool);
+
 	const reviewerExtensions = file.reviewer?.extensions ?? [];
 	if (
 		!Array.isArray(reviewerExtensions) ||
@@ -141,11 +146,41 @@ export function loadGuardianConfig(agentDir: string, bundledPolicyPath: string):
 		maxParallelReviews: positiveInteger(file.maxParallelReviews, 4, "maxParallelReviews"),
 		maxConsecutiveDenials: positiveInteger(file.maxConsecutiveDenials, 3, "maxConsecutiveDenials"),
 		maxActionChars: positiveInteger(file.maxActionChars, 64_000, "maxActionChars"),
-		guardianSessionDir: resolveConfiguredPath(sessionDirValue, agentDir),
+		guardianSessionDir,
 		policyPath: resolveConfiguredPath(policyPathValue, agentDir),
 		piCommand: file.piCommand === undefined ? undefined : nonEmptyString(file.piCommand, "", "piCommand"),
 		exemptTools: new Set(exemptTools),
+		permissions,
+		agentDir,
 		transcript,
+	};
+}
+
+/**
+ * Built-in denies always apply and user denies add to them. An explicit
+ * `permissions.allow` replaces the default allow list; legacy `exemptTools`
+ * names become extra bare allow rules.
+ */
+function loadPermissions(file: GuardianConfigFile, agentDir: string, sessionDir: string): GuardianPermissions {
+	const configured = file.permissions;
+	if (configured !== undefined) {
+		if (!configured || typeof configured !== "object" || Array.isArray(configured)) {
+			throw new Error("permissions must be an object with optional allow and deny arrays");
+		}
+		if (Object.keys(configured).some((key) => key !== "allow" && key !== "deny")) {
+			throw new Error("permissions supports only allow and deny (no ask)");
+		}
+	}
+	const legacy = file.exemptTools === undefined ? [] : validateRules(file.exemptTools, "exemptTools");
+	if (legacy.some((tool) => !BARE_TOOL.test(tool))) throw new Error("exemptTools must contain bare tool names");
+
+	let allow: string[];
+	if (configured?.allow !== undefined) allow = validateRules(configured.allow, "permissions.allow");
+	else allow = file.exemptTools === undefined ? DEFAULT_ALLOW_RULES : [];
+	const deny = configured?.deny === undefined ? [] : validateRules(configured.deny, "permissions.deny");
+	return {
+		allow: [...new Set([...allow, ...legacy])],
+		deny: [...new Set([...builtInDenyRules(agentDir, sessionDir), ...deny])],
 	};
 }
 

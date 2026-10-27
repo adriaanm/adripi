@@ -69,7 +69,7 @@ export function buildSidecarArgs(config: GuardianConfig, state: GuardianStateV1)
 		"--no-themes",
 		"--no-approve",
 	];
-	for (const extension of config.reviewerExtensions) {
+	for (const extension of config.reviewerExtensions ?? []) {
 		args.push("--extension", extension);
 	}
 	if (state.reviewCount === 0) args.push("--name", `Guardian for ${state.parentSessionId.slice(0, 12)}`);
@@ -95,6 +95,17 @@ function assistantTextFromEvent(event: unknown): string | undefined {
 	return text || undefined;
 }
 
+function assistantErrorFromEvent(event: unknown): string | undefined {
+	if (!event || typeof event !== "object") return undefined;
+	const record = event as Record<string, unknown>;
+	if (record.type !== "message_end" || !record.message || typeof record.message !== "object") return undefined;
+	const message = record.message as Record<string, unknown>;
+	if (message.role !== "assistant" || (message.stopReason !== "error" && message.stopReason !== "aborted")) return undefined;
+	return typeof message.errorMessage === "string" && message.errorMessage
+		? message.errorMessage
+		: `request ended with ${message.stopReason}`;
+}
+
 async function runSidecarTurn(
 	config: GuardianConfig,
 	state: GuardianStateV1,
@@ -112,6 +123,7 @@ async function runSidecarTurn(
 		let stdoutBuffer = "";
 		let stderr = "";
 		let latestAssistantText: string | undefined;
+		let latestAssistantError: string | undefined;
 		let settled = false;
 		let killTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -129,6 +141,8 @@ async function runSidecarTurn(
 			clearTimeout(timeout);
 			signal?.removeEventListener("abort", onAbort);
 			if (error) reject(error);
+			// A provider failure (e.g. 401) ends the reviewer turn with an error message rather than text.
+			else if (!latestAssistantText && latestAssistantError) reject(new Error(`Guardian reviewer request failed: ${latestAssistantError}`));
 			else if (!latestAssistantText) reject(new Error(`Guardian produced no assistant response${stderr ? `: ${stderr.trim()}` : ""}`));
 			else resolve({ text: latestAssistantText, stderr });
 		};
@@ -154,7 +168,9 @@ async function runSidecarTurn(
 			for (const line of lines) {
 				if (!line.trim()) continue;
 				try {
-					latestAssistantText = assistantTextFromEvent(JSON.parse(line)) ?? latestAssistantText;
+					const event: unknown = JSON.parse(line);
+					latestAssistantText = assistantTextFromEvent(event) ?? latestAssistantText;
+					latestAssistantError = assistantErrorFromEvent(event) ?? latestAssistantError;
 				} catch {
 					// Pi startup diagnostics may be non-JSON. The process exit and assistant event remain authoritative.
 				}
@@ -169,7 +185,9 @@ async function runSidecarTurn(
 			if (killTimer) clearTimeout(killTimer);
 			if (stdoutBuffer.trim()) {
 				try {
-					latestAssistantText = assistantTextFromEvent(JSON.parse(stdoutBuffer)) ?? latestAssistantText;
+					const event: unknown = JSON.parse(stdoutBuffer);
+					latestAssistantText = assistantTextFromEvent(event) ?? latestAssistantText;
+					latestAssistantError = assistantErrorFromEvent(event) ?? latestAssistantError;
 				} catch {
 					// Ignore a trailing non-JSON diagnostic.
 				}

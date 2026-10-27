@@ -17,6 +17,8 @@ const config: GuardianConfig = {
 	guardianSessionDir: "/tmp/guardian-sessions",
 	policyPath: "/tmp/policy.md",
 	exemptTools: new Set(["read"]),
+	permissions: { allow: ["Read"], deny: [] },
+	agentDir: "/tmp/agent",
 	transcript: {
 		maxMessageChars: 1,
 		maxToolChars: 1,

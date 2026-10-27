@@ -368,6 +368,7 @@ test("assessment display distinguishes allow, deny, and review failure", () => {
 	const base: GuardianAssessmentRecordV1 = {
 		version: 1,
 		guardianSessionId: "guardian-session",
+		source: "reviewer",
 		toolName: "bash",
 		toolCallId: "call-1",
 		actionHash: "hash",
@@ -504,6 +505,110 @@ process.stdout.write(JSON.stringify({type:"message_end",message:{role:"assistant
 		const assessments = branch.filter((entry) => entry.type === "custom" && entry.customType === GUARDIAN_ASSESSMENT_ENTRY);
 		assert.equal(assessments.length, 7);
 		assert.equal(findGuardianState(branch)?.consecutiveDenials, 0);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
+});
+
+test("fixed denies audit nested calls, bypass speculative review, and count the denial streak", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "pi-guardian-rule-index-"));
+	await writeFile(join(directory, "guardian.json"), JSON.stringify({
+		piCommand: "/does-not-exist-reviewer", maxConsecutiveDenials: 2,
+		permissions: { allow: ["Read", "codemode", "Bash(git status)"], deny: ["Read(~/.codex/**)", "Bash(git push:*)"] },
+	}));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = directory;
+	try {
+		const branch: SessionEntry[] = [message("user", null, "user", "Run checks.")];
+		const handlers = new Map<string, Function>();
+		const fakePi = {
+			on: (name: string, handler: Function) => handlers.set(name, handler),
+			appendEntry(customType: string, data: unknown) {
+				branch.push({
+					type: "custom",
+					id: `entry-${branch.length}`,
+					parentId: branch.at(-1)?.id ?? null,
+					timestamp: new Date().toISOString(),
+					customType,
+					data,
+				});
+			}, registerEntryRenderer() {}, registerCommand() {},
+		} as unknown as ExtensionAPI;
+		guardianExtension(fakePi);
+		const context: FakeContext = {
+			hasUI: false, mode: "json", cwd: directory, signal: undefined,
+			sessionManager: { getBranch: () => structuredClone(branch), getSessionId: () => "rule-parent" },
+			ui: new Proxy({}, { get() { throw new Error("Headless UI must not be accessed"); } }) as FakeContext["ui"],
+		};
+		handlers.get("session_start")!({}, context);
+		const call = handlers.get("tool_call")! as ToolHandler;
+		const blocks = [
+			{ type: "toolCall", id: "outer", name: "codemode", arguments: { code: "await tools.read({path: computePath()})" } },
+			{ type: "toolCall", id: "push", name: "bash", arguments: { command: "git push origin" } },
+		];
+		handlers.get("message_end")!({ message: { role: "assistant", content: blocks } }, context);
+		branch.push(message("assistant", branch.at(-1)?.id ?? null, "assistant", blocks));
+		assert.equal(await call({ toolName: "codemode", toolCallId: "outer", input: blocks[0].arguments }, context), undefined);
+		const denied = await call(
+			{ toolName: "read", toolCallId: "outer/1", parentToolCallId: "outer", input: { path: "~/.codex/auth.json" } },
+			context,
+		);
+		assert.equal(denied?.block, true);
+		assert.equal(denied?.terminate, false);
+		assert.match(denied?.reason ?? "", /fixed permission rule[\s\S]*Do not retry by other means/);
+		const second = await call({ toolName: "bash", toolCallId: "push", input: { command: "git push origin" } }, context);
+		assert.equal(second?.terminate, true);
+		const records = branch.filter((entry) => entry.type === "custom" && entry.customType === GUARDIAN_ASSESSMENT_ENTRY)
+			.map((entry) => (entry as Extract<SessionEntry, { type: "custom" }>).data as GuardianAssessmentRecordV1);
+		assert.equal(records.length, 2);
+		assert.equal(records[0].parentToolCallId, "outer");
+		assert.equal(records[0].parentCursorEntryId, "assistant");
+		assert.equal(records[0].source, "rule");
+		assert.equal(records[0].rule, "Read(~/.codex/**)");
+		assert.deepEqual(records[0].assessment, {
+			risk_level: "high",
+			user_authorization: "unknown",
+			outcome: "deny",
+			rationale: "Denied by rule Read(~/.codex/**)",
+		});
+		assert.equal(records[0].failure, undefined);
+		assert.equal(findGuardianState(branch)?.reviewCount, 0);
+		assert.equal(findGuardianState(branch)?.consecutiveDenials, 2);
+		assert.equal(await call({ toolName: "read", toolCallId: "allowed", input: { path: "public.txt" } }, context), undefined);
+		assert.equal(branch.filter((entry) => entry.type === "custom" && entry.customType === GUARDIAN_ASSESSMENT_ENTRY).length, 2);
+		// Rule and reviewer denials share the same state counter; a reviewer failure is the third denial.
+		const third = await call({ toolName: "bash", toolCallId: "review", input: { command: "unknown" } }, context);
+		assert.equal(third?.terminate, true);
+		assert.equal(findGuardianState(branch)?.consecutiveDenials, 3);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
+});
+
+test("malformed permission config blocks even default-exempt reads", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "pi-guardian-rule-invalid-"));
+	await writeFile(join(directory, "guardian.json"), JSON.stringify({ permissions: { deny: ["Read("] } }));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = directory;
+	try {
+		const handlers = new Map<string, Function>();
+		const entries: Array<{ customType: string; data: Record<string, unknown> }> = [];
+		guardianExtension({ on: (name: string, handler: Function) => handlers.set(name, handler),
+			appendEntry: (customType: string, data: Record<string, unknown>) => entries.push({ customType, data }),
+			registerEntryRenderer() {},
+			registerCommand() {},
+		} as unknown as ExtensionAPI);
+		const ctx = { hasUI: false, mode: "json", cwd: directory } as FakeContext;
+		handlers.get("session_start")!({}, ctx);
+		assert.equal(entries[0].data.permissions, null);
+		assert.equal(entries[0].data.permissionsSha256, null);
+		assert.match(String(entries[0].data.configError), /Malformed permission rule/);
+		const toolCall = handlers.get("tool_call")! as ToolHandler;
+		const result = await toolCall({ toolName: "read", toolCallId: "read", input: { path: "public.txt" } }, ctx);
+		assert.equal(result?.block, true);
+		assert.match(result?.reason ?? "", /Malformed permission rule/);
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

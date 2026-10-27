@@ -5,7 +5,7 @@
 # a sandboxed bash command.
 npm:pi-subagents@0.81.0
 npm:pi-perm@0.1.8
-npm:pi-guardian@0.1.0
+npm:pi-guardian@0.2.0
 npm:@georgedong32/pi-review@0.8.6
 npm:@aliou/pi-neuralwatt@0.18.0
 npm:@juicesharp/rpiv-todo@2.15.0
