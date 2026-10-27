@@ -178,7 +178,13 @@ copies, not the templates.
 
 `reviewer.extensions` accepts local paths and package sources (`npm:...`). The
 sidecar runs with `--no-tools` and `--no-extensions`; only the listed package
-extensions load.
+extensions load. `exemptTools` includes `request_sandbox_exception`, because the
+sandbox broker's own review is the review for that call.
+
+When the selected model comes from an extension-provided provider (Neuralwatt),
+set `defaultProvider` as well as `defaultModel`; a bare provider/model string in
+`defaultModel` alone resolves before the provider extension is registered and Pi
+falls back to another provider.
 
 ### Paths outside the project
 

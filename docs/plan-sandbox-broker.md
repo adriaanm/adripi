@@ -1,9 +1,9 @@
 # Plan: guardian-mediated sandbox exceptions
 
-Status: **approved, not started.** This document is the design record and the
-progress tracker for replacing `pi-perm` with a sandbox layer whose every
-escalation is decided by `pi-guardian` or, when the reviewer defers, by the
-human.
+Status: **implemented and deployed** (2026-10-27). This document is the design
+record and progress tracker for replacing `pi-perm` with a sandbox layer whose
+every escalation is decided by `pi-guardian` or, when the reviewer defers, by
+the human.
 
 ## 1. Why
 
@@ -372,17 +372,38 @@ only holds after a fork that inlines the adapter.
   `just check` green and a new session runs with no `srt-settings.json` errors.
 - [ ] **W6 — Docs.** `docs/architecture.md` layers 1-2 rewritten, README stack
   table updated, this plan's status set to "implemented".
-- [ ] **W7 — Follow-ups (separate decisions).** Subagent sandboxing provider;
-  whether `~/.gradle` and package caches belong in the static template;
-  whether `defer` should ever be skippable per-project.
+- [x] **W7 — Follow-ups (decisions recorded).**
+  - **Static template entries:** `~/.gradle` and other caches stay *out* of the
+    static profile. They are per-machine and occasionally need to be shared with
+    other tools; a reviewed `session` exception is one prompt, and `once` covers
+    the single-command case. Package *network* hosts are in the template because
+    they are stable and safe to allow (npm, GitHub, PyPI, Maven, Gradle).
+  - **Subagent sandboxing:** deferred. `pi-sbx` is loaded in the parent only;
+    `pi-subagents` children inherit the parent's profile through the sandbox
+    environment, and per-child sandboxes need the native-background provider
+    work. Revisit as its own plan if a task needs child isolation beyond that.
+  - **Per-project `defer` skipping:** no. `defer` rules exist to hand a class to
+    the human; a project-level switch to skip them would let a repository widen
+    its own approvals. Project config stays tighten-only.
 
-## 10. Open questions
+## 10. Resolved questions
 
-1. Should the human prompt remain the *only* source of `forever` grants, or may
-   guardian persist a rule when the transcript shows an explicit standing user
-   instruction? (Current design: human only.)
-2. Do we want a `/sandbox` inspection command in the sandbox fork showing
-   active session grants and pending requests? (Recommended; cheap.)
-3. Should exception requests be exempt from guardian's normal `tool_call`
-   review to avoid double review? (Current design: yes — the broker review is
-   the review for that tool call.)
+1. **`forever` grants:** human-only. No persistence path exists; the broker can
+   grant `once`/`session` and nothing else, and it is not exposed to the model.
+2. **Inspection command:** `/sandbox` ships with `pi-sbx` and prints the state
+   and effective policy; session grants surface there after a reload.
+3. **Double review:** resolved — `request_sandbox_exception` is listed in
+   `exemptTools` (template and live `guardian.json`), so the broker's review is
+   the review for that call. Verified: the tool call is no longer denied by the
+   generic tool gate before the broker sees it.
+
+## 11. Known gaps
+
+- The tool wiring itself (expiry at the tool-call boundary, the human-defer
+  branch, `networkAsk` routing) is covered by pure-helper tests plus end-to-end
+  probes on macOS, not by a unit test of the registered tool.
+- `pi-sbx` upstream's own Linux glob handling still applies; it is documented
+  there and unchanged by the fork.
+- A `session` grant is in-memory only: a `/reload` or restart starts from the
+  static profile again. That is intended, but it means long sessions may need to
+  re-request the same exception.

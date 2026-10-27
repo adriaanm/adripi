@@ -13,7 +13,13 @@
     "read",
     "grep",
     "find",
-    "ls"
+    "ls",
+    "request_sandbox_exception"
   ],
-  "policyPath": "~/.pi/agent/guardian-policy.md"
+  "policyPath": "~/.pi/agent/guardian-policy.md",
+  "sandboxExceptions": {
+    "allow": [],
+    "defer": [],
+    "deny": []
+  }
 }

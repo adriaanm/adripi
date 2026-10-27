@@ -59,8 +59,8 @@ while IFS='|' read -r pkg dir; do
   echo "   deployed $pkg <- $dir"
   if [ -n "$installed_version" ] && [ -n "$fork_version" ] &&
      [ "$installed_version" != "$fork_version" ]; then
-    echo "   warning: npm has $pkg@$installed_version, fork is $fork_version" >&2
-    echo "            re-pin packages.txt or update the vendored fork" >&2
+    echo "   note: npm has $pkg@$installed_version, fork is $fork_version" >&2
+    echo "         (a vendored fork may carry newer upstream source; see VENDOR.md)" >&2
   fi
 done < forks.txt
 
@@ -68,6 +68,20 @@ echo "== config"
 # pi-perm is retired: the OS boundary is the vendored pi-sbx fork plus the
 # guardian sandbox broker. Remove the package if an older install still has it.
 pi remove npm:pi-perm >/dev/null 2>&1 || true
+# A stale settings entry can outlive the package (pi remove needs it in the npm
+# project); drop it directly so the retired extension cannot load.
+if node - "$PI_AGENT_DIR/settings.json" <<'NODE'
+const fs = require("node:fs");
+const file = process.argv[2];
+const settings = JSON.parse(fs.readFileSync(file, "utf8"));
+const before = settings.packages.length;
+settings.packages = settings.packages.filter((entry) => !entry.startsWith("npm:pi-perm"));
+if (settings.packages.length === before) process.exit(1);
+fs.writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`);
+NODE
+then
+  echo "   removed pi-perm from settings.json"
+fi
 if [ -d "$PI_AGENT_DIR/extensions/pi-perm" ]; then
   echo "   left $PI_AGENT_DIR/extensions/pi-perm in place (unused; delete it when convenient)"
 fi

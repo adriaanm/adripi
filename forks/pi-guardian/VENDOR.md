@@ -47,10 +47,12 @@ replace.
 
 ## Deploy
 
-`install.sh` installs `pi-guardian@0.2.0` from npm and then rsyncs
-`forks/pi-guardian/src/` over the managed package's `src/`. The npm install
-supplies `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui` and peer
-wiring; the vendored source supplies the fork.
+`install.sh` installs `pi-guardian@0.1.0` from npm (the newest *published*
+version) and then rsyncs `forks/pi-guardian/src/` over the managed package's
+`src/`. Upstream 0.2.0 is only on git; this fork carries its source plus the
+deltas below. Both versions declare the same runtime dependencies (none) and the
+same host peers, so the npm install supplies the wiring and the vendored source
+supplies the behaviour. When upstream publishes 0.2.0, re-pin `packages.txt`.
 
 ## Update upstream
 
