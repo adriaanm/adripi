@@ -425,6 +425,14 @@ export function evaluatePermissions(
 		if (writable && lifted.has(text)) continue;
 		if (denies(parseRule(text), call)) return { outcome: "deny", rule: text };
 	}
+	// The workspace's own policy directory is never agent-writable: a project
+	// could otherwise pre-authorize itself. pi-sbx enforces this at the OS level;
+	// this is the reviewer-independent backstop.
+	const projectPolicyDir = join(resolve(cwd), ".pi");
+	if ((call.tool === "write" || call.tool === "edit") &&
+		call.paths.some((path) => path === projectPolicyDir || path.startsWith(`${projectPolicyDir}/`))) {
+		return { outcome: "deny", rule: `Edit(${projectPolicyDir}/**)` };
+	}
 	// A granted project maintains the profile with the file tools. Decide it here
 	// rather than falling through to "review": the reviewer cannot see which
 	// project holds the grant, so it would deny the maintenance path itself.

@@ -95,6 +95,19 @@ do not batch unrelated work into one "update" commit.
   `git push` needs a reviewed host-command exception (remote git uses the host
   credential helper).
 
+## Standing permissions and escalation
+
+- Per-project standing sandbox permissions live in `<workspace>/.pi/guardian.json`
+  (`sandboxExceptions.allow`), trusted by content hash and asked once in a UI
+  session. Global denies and `defer`s always win; a project can pre-authorize,
+  never loosen. Only that one key is honoured. `.pi` is deny-write for the agent
+  in both layers, so a policy is never self-granted.
+- Command rules accept `prefix:*` for "this command with any arguments" (space
+  boundary); bare globs still work for everything else.
+- A subagent that hits a deferred exception asks its supervisor through
+  `contact_supervisor` and needs an explicit `ALLOW`/`DENY` token; a missing
+  supervisor channel fails closed.
+
 ## Verification
 
 - `just check` — shell syntax plus the config templates.

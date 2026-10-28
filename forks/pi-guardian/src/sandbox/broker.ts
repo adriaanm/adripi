@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { evaluateSandboxRules } from "./rules.ts";
+import { evaluateLayeredSandboxRules } from "./rules.ts";
 import type {
 	SandboxAuditRecord,
 	SandboxBrokerService,
@@ -28,6 +28,12 @@ export type SandboxReviewFn = (request: SandboxExceptionRequest) => Promise<Sand
 
 export interface SandboxBrokerOptions {
 	rules: SandboxExceptionRules;
+	/**
+	 * Standing rules for the requesting project (`<workspace>/.pi/guardian.json`),
+	 * already trust-checked by the caller. Layered evaluation keeps global denies
+	 * and defers authoritative; see `evaluateLayeredSandboxRules`.
+	 */
+	projectRules?: (cwd: string) => SandboxExceptionRules | undefined;
 	agentDir: string;
 	review: SandboxReviewFn;
 	audit?: (record: SandboxAuditRecord) => void;
@@ -102,7 +108,12 @@ export function createSandboxBroker(options: SandboxBrokerOptions): SandboxBroke
 				);
 			}
 
-			const ruled = evaluateSandboxRules(rules, request, options.agentDir);
+			const ruled = evaluateLayeredSandboxRules(
+				options.projectRules?.(request.cwd),
+				rules,
+				request,
+				options.agentDir,
+			);
 			if (ruled.outcome === "deny") {
 				return deny(
 					request,

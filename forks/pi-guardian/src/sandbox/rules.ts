@@ -127,6 +127,35 @@ export function evaluateSandboxRules(
 	return { outcome: "review" };
 }
 
+/**
+ * Layered decision for a request that may also have standing project rules
+ * (`<workspace>/.pi/guardian.json`).
+ *
+ * Precedence, tightest restriction first: the global hard denies and global
+ * `defer`s always win, so a project can never erase a global restriction; then
+ * the project's own deny/defer; then the project's `allow` (the point of the
+ * feature: pre-authorize this project's workflow); then the global `allow`; and
+ * only then the reviewer.
+ */
+export function evaluateLayeredSandboxRules(
+	project: SandboxExceptionRules | undefined,
+	global: SandboxExceptionRules,
+	request: SandboxExceptionRequest,
+	agentDir: string,
+): SandboxRuleOutcome {
+	const globalFirst = evaluateSandboxRules(global, request, agentDir);
+	if (globalFirst.outcome === "deny" || globalFirst.outcome === "defer") return globalFirst;
+	if (!project) return globalFirst;
+
+	const local = evaluateSandboxRules(project, request, agentDir);
+	if (local.outcome !== "review") {
+		return local.outcome === "deny" || local.outcome === "defer"
+			? local
+			: { outcome: "allow", rule: local.rule };
+	}
+	return globalFirst;
+}
+
 function targetSpellings(request: SandboxExceptionRequest): string[] {
 	const target = request.target.trim();
 	if (target === "") return [];
@@ -155,8 +184,17 @@ function matches(rule: ParsedSandboxRule, target: string, request: SandboxExcept
 		return [pattern, hostPattern].some((candidate) => globToRegExp(candidate, false).test(lowerTarget));
 	}
 	if (rule.surface === "command") {
-		// Command patterns are plain strings: `*` crosses separators.
-		return globToRegExp(rule.pattern.toLowerCase(), false).test(target.toLowerCase());
+		const pattern = rule.pattern.toLowerCase();
+		const value = target.toLowerCase();
+		// `prefix:*` means "this command with any arguments", the same spelling
+		// pi-sbx uses for excluded commands. The space check keeps
+		// `git push:*` from matching `git pusher`, which a bare glob would.
+		if (pattern.endsWith(":*")) {
+			const prefix = pattern.slice(0, -2).trim();
+			if (value === prefix || value.startsWith(`${prefix} `)) return true;
+		}
+		// Otherwise plain glob: `*` crosses separators.
+		return globToRegExp(pattern, false).test(value);
 	}
 	const pattern = expandHome(rule.pattern);
 	const absolutePattern = isAbsolute(pattern) ? pattern : resolve(request.cwd, pattern);

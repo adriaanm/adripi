@@ -93,6 +93,16 @@ whose escalation path is decided by `pi-guardian` instead of a human-only prompt
     write boundary, subdirectories, a lookalike sibling, malformed values, and a
     project-layer attempt to widen it.
 
+13. **Subagent escalation for deferred exceptions** (`src/supervisor-ask.ts`,
+    wired in `src/index.ts`). A subagent has no UI, so a `defer` decision used to
+    be dropped. The exception tool now asks the parent session through
+    pi-subagents' `contact_supervisor` tool (via the tool context's
+    `executeTool`) and accepts only an explicit `ALLOW once|session` / `DENY`
+    token, so prose cannot be read as consent. Without a supervisor channel the
+    request still fails closed. `test/supervisor-ask.test.ts` covers the question
+    text and the token parsing (including the reply wrapper and the
+    must-start-the-line rule).
+
 Remaining (W5-W6 in `docs/plan-sandbox-broker.md`): the stack swap and the
 architecture/README rewrite.
 

@@ -57,7 +57,18 @@ deltas are listed below; nothing else is modified.
     the rule engine; `auth.json` and `guardian-sessions/**` stay write-denied, and
     every user deny still applies. `install.sh` adds this repo's own root; delete
     the entry to revoke.
-12. `src/permissions.ts` — `write`/`edit` calls are matched on their target
+12. `src/project-policy.ts` + `src/sandbox/{rules,broker}.ts` — per-project
+    Guardian policy at `<workspace>/.pi/guardian.json`, holding only
+    `sandboxExceptions` (`allow`/`defer`/`deny`). It is applied only when its
+    content hash is approved (asked once with a UI, recorded in
+    `<agentDir>/guardian-project-trust.json`), so a subagent inherits the
+    parent's approval but an edited or unauthored file stays inert. Layered
+    evaluation: global hard denies and `defer`s win, then project deny/defer,
+    then project allow, then global allow. Command rules also accept `prefix:*`
+    (with a space boundary) as "this command with any arguments". Guardian also
+    denies agent writes to `<workspace>/.pi/**` as a backstop to pi-sbx's
+    mandatory deny-write.
+13. `src/permissions.ts` — `write`/`edit` calls are matched on their target
     `path` only. Scanning the payload made a document that merely *mentions* a
     protected path (a README explaining the sandbox, say) un-editable, which
     blocked legitimate maintenance twice. Shells, codemode, MCP and extension

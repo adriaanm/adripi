@@ -99,6 +99,36 @@ deployed fork sources instead of asking you to switch the sandbox off.
   and Guardian load next, including the sandbox profile and the reviewer.
   Delete the entry from both live configs to revoke it.
 
+### Standing permissions per project
+
+A project can carry its own Guardian policy at `<workspace>/.pi/guardian.json`.
+It is how "this project may push to its own repo with the host's gh credentials"
+becomes a standing permission instead of a prompt every time:
+
+```json
+{
+  "sandboxExceptions": {
+    "allow": ["command:git push:*", "command:gh pr create:*", "command:gh pr view:*"],
+    "deny": [],
+    "defer": []
+  }
+}
+```
+
+- Command rules accept `prefix:*` for "this command with any arguments"; the
+  space boundary means `command:git push:*` does not match `git pusher`.
+- Layering, tightest first: the global hard denies and global `defer`s always
+  win, then the project's own deny/defer, then the project's `allow`, then the
+  global `allow`. A project can pre-authorize its workflow, never erase a global
+  restriction.
+- The file is **trusted by content hash**. Guardian asks once, in a session with
+  a UI, and records the hash in `<agentDir>/guardian-project-trust.json`; a
+  subagent (no UI) applies the policy only when that exact content was approved.
+  Editing the file requires a fresh approval and is otherwise ignored.
+- Only `sandboxExceptions` is honoured. `pi-sbx` makes `<workspace>/.pi`
+  mandatory deny-write, and Guardian denies writes there too, so an agent cannot
+  pre-authorize itself.
+
 ### Remote git
 
 `git push`, `git pull` and clones of private repositories need the host's

@@ -230,3 +230,50 @@ test("repository config and HEAD are never grantable", () => {
 		assert.equal(evaluateSandboxRules(rules, request({ target }), agentDir).outcome, "deny");
 	}
 });
+
+test("project rules pre-authorize without overriding global restrictions", async () => {
+	const { evaluateLayeredSandboxRules } = await import("../src/sandbox/rules.ts");
+	const request = (target: string) => ({
+		id: "r1",
+		origin: "tool" as const,
+		surface: "command" as const,
+		target,
+		scope: "session" as const,
+		cwd: "/work/project",
+	});
+	const global = { allow: ["command:make:*"], defer: ["command:docker:*"], deny: ["command:rm -rf:*"] };
+	const project = { allow: ["command:git push:*", "command:make:*", "command:docker:*", "command:rm -rf:*"], defer: [], deny: [] };
+	const decide = (target: string) => evaluateLayeredSandboxRules(project, global, request(target), "/agent");
+
+	// The project's standing permission grants without a review...
+	assert.equal(decide("git push -u origin main").outcome, "allow");
+	assert.equal(decide("git push").outcome, "allow");
+	// A prefix rule must not match a longer word.
+	assert.equal(
+		evaluateLayeredSandboxRules({ allow: ["command:git push:*"], defer: [], deny: [] }, { allow: [], defer: [], deny: [] }, request("git pusher"), "/agent").outcome,
+		"review",
+	);
+	// ...but a global deny still wins, even when the project allows the same target.
+	assert.equal(decide("rm -rf build").outcome, "deny");
+	// A global defer ("always ask me") also wins over a project allow.
+	assert.equal(decide("docker build .").outcome, "defer");
+	// A project deny can tighten a global allow.
+	assert.equal(
+		evaluateLayeredSandboxRules({ allow: [], defer: [], deny: ["command:make deploy:*"] }, global, request("make deploy"), "/agent").outcome,
+		"deny",
+	);
+	// Unrelated targets still go to the reviewer.
+	assert.equal(decide("npm install").outcome, "review");
+	// Without a project policy the global rules are the whole story.
+	assert.equal(evaluateLayeredSandboxRules(undefined, global, request("git push"), "/agent").outcome, "review");
+});
+
+test("a project cannot write its own policy file", async () => {
+	const { evaluatePermissions } = await import("../src/permissions.ts");
+	const permissions = { allow: ["Write", "Edit"], deny: [] };
+	const outcome = (path: string) =>
+		evaluatePermissions(permissions, "write", { path, content: "{}" }, "/work/project", "/agent").outcome;
+	assert.equal(outcome("/work/project/.pi/guardian.json"), "deny");
+	assert.equal(outcome("/work/project/.pi/sandbox.json"), "deny");
+	assert.equal(outcome("/work/project/src/main.ts"), "allow");
+});

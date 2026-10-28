@@ -24,6 +24,7 @@ import {
   type JsonObject,
 } from "./config.ts";
 import { isCommandExcluded } from "./command-policy.ts";
+import { parseSupervisorDecision, supervisorQuestion } from "./supervisor-ask.ts";
 import { getConfigPaths } from "./config.ts";
 import { registerFileGate } from "./file-gate.ts";
 import { buildHardeningPaths } from "./hardening.ts";
@@ -384,18 +385,58 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     return { ok: true };
   };
 
-  /** Human fallback, reached only when guardian defers or is absent. */
+  type HumanExceptionDecision = { kind: "allow"; scope: SandboxScope } | { kind: "deny"; reason?: string };
+
+  /**
+   * `executeTool` exists on the context passed to a tool's `execute()` (Pi 1.0+);
+   * the vendored types predate it, so it is discovered structurally and its
+   * absence is a plain denial.
+   */
+  type SupervisorChannel = {
+    executeTool?: (name: string, args: unknown) => Promise<{
+      isError: boolean;
+      result: { content: ReadonlyArray<{ type: string; text?: string }> };
+    }>;
+  };
+
+  /**
+   * Human fallback, reached only when guardian defers or is absent. A subagent
+   * has no UI, so it asks its supervisor instead (pi-subagents'
+   * `contact_supervisor`), which surfaces the question in the parent session.
+   */
   const askHumanForException = async (
     ctx: ExtensionContext,
     surface: SandboxSurface,
     target: string,
-  ): Promise<boolean> => {
-    if (!ctx.hasUI) return false;
-    const choice = await ctx.ui.select(`Allow a sandbox exception for ${surface} ${target}?`, [
-      "Allow for this session",
-      "Deny",
-    ]);
-    return choice === "Allow for this session";
+    reason?: string,
+  ): Promise<HumanExceptionDecision> => {
+    if (ctx.hasUI) {
+      const choice = await ctx.ui.select(`Allow a sandbox exception for ${surface} ${target}?`, [
+        "Allow for this session",
+        "Deny",
+      ]);
+      return choice === "Allow for this session" ? { kind: "allow", scope: "session" } : { kind: "deny" };
+    }
+    const escalate = (ctx as unknown as SupervisorChannel).executeTool;
+    if (typeof escalate !== "function") {
+      return { kind: "deny", reason: "no UI and no supervisor channel is available" };
+    }
+    try {
+      const outcome = await escalate.call(ctx, "contact_supervisor", {
+        reason: "need_decision",
+        message: supervisorQuestion({ surface, target, reason, cwd: ctx.cwd }),
+      });
+      const text = outcome.result.content
+        .map((block) => (block.type === "text" ? (block.text ?? "") : ""))
+        .join("\n")
+        .trim();
+      const decision = parseSupervisorDecision(text);
+      if (decision) return decision;
+      if (outcome.isError) return { kind: "deny", reason: `the supervisor channel failed: ${text.slice(0, 200)}` };
+      return { kind: "deny", reason: `the supervisor reply was not a decision: ${text.slice(0, 200)}` };
+    } catch (error) {
+      return { kind: "deny", reason: error instanceof Error ? error.message : String(error) };
+    }
   };
 
   function localTool(cwd: string) {
@@ -619,21 +660,22 @@ export default function sandboxExtension(pi: ExtensionAPI) {
           details: { decision },
         };
       }
+      let human: HumanExceptionDecision | undefined;
       if (decision.kind === "defer") {
-        const allowed = await askHumanForException(ctx, surface, params.target);
-        if (!allowed) {
+        human = await askHumanForException(ctx, surface, params.target, params.reason);
+        if (human.kind !== "allow") {
           return {
             content: [
               {
                 type: "text" as const,
-                text: "The user did not allow this sandbox exception. Do not retry it or rephrase it; ask how to proceed if the step matters.",
+                text: `The user did not allow this sandbox exception${human.reason ? ` (${human.reason})` : ""}. Do not retry it or rephrase it; ask how to proceed if the step matters.`,
               },
             ],
-            details: { decision },
+            details: { decision, refusal: human.reason },
           };
         }
       }
-      const grantedScope = decision.kind === "allow" ? decision.scope : "session";
+      const grantedScope: SandboxScope = decision.kind === "allow" ? decision.scope : (human?.kind === "allow" ? human.scope : "session");
       if (surface === "command") {
         // Host execution, exact match only. Refuse shapes that could run a
         // second command before spending a review on them.

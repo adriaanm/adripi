@@ -13,6 +13,12 @@ import { evaluatePermissions } from "./permissions.ts";
 import { buildReviewPrompt } from "./prompt.ts";
 import { requestGuardianAssessment } from "./sidecar.ts";
 import { createSandboxBroker, publishSandboxBroker } from "./sandbox/broker.ts";
+import {
+	isProjectPolicyTrusted,
+	readProjectPolicy,
+	recordProjectTrust,
+} from "./project-policy.ts";
+import type { SandboxExceptionRules } from "./sandbox/types.ts";
 import { buildSandboxExceptionPrompt, sandboxOutcomeFromAssessment } from "./sandbox/review.ts";
 import { SANDBOX_EXCEPTION_ENTRY, type SandboxExceptionRequest } from "./sandbox/types.ts";
 import {
@@ -273,8 +279,47 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		initializationError = conciseFailure(error);
 	}
 
+	let projectRules: SandboxExceptionRules | undefined;
+
+	/** Standing rules from `<cwd>/.pi/guardian.json`, pinned to an approved hash. */
+	const resolveProjectPolicy = (ctx: ExtensionContext): void => {
+		projectRules = undefined;
+		const read = readProjectPolicy(ctx.cwd);
+		if (read.kind === "none") return;
+		if (read.kind === "invalid") {
+			if (ctx.hasUI) ctx.ui.notify(`Ignored project Guardian policy (${read.path}): ${read.error}`, "error");
+			return;
+		}
+		const { policy } = read;
+		const agentDir = config?.agentDir;
+		if (!agentDir) return;
+		if (isProjectPolicyTrusted(agentDir, policy.path, policy.hash)) {
+			projectRules = policy.sandboxExceptions;
+			return;
+		}
+		// A subagent has no UI and must not self-approve workspace content.
+		if (!ctx.hasUI) return;
+		void (async () => {
+			try {
+				const approved = await ctx.ui.confirm(
+					"Apply this project's Guardian policy?",
+					`${policy.path} can pre-authorize sandbox exceptions for this project (for example git push or gh with the host's credentials). Approve only if you wrote or reviewed that file.`,
+				);
+				if (!approved) {
+					ctx.ui.notify(`Ignored ${policy.path}; it stays inactive`, "warning");
+					return;
+				}
+				recordProjectTrust(agentDir, policy.path, policy.hash);
+				projectRules = policy.sandboxExceptions;
+			} catch {
+				// A prompt that cannot run leaves the project policy inactive.
+			}
+		})();
+	};
+
 	pi.on("session_start", (_event, ctx) => {
 		activeCalls.clear();
+		resolveProjectPolicy(ctx);
 		appendStatus();
 		// Pi 1.0 print mode subscribes after session_start. Replay once at input.
 		replayStatus = ctx.mode === "json";
@@ -473,6 +518,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 			disposeSandboxBroker = publishSandboxBroker(
 				createSandboxBroker({
 					rules: config.sandboxExceptions,
+					projectRules: () => projectRules,
 					agentDir: config.agentDir,
 					review: reviewSandboxException,
 					audit: (record) => pi.appendEntry(SANDBOX_EXCEPTION_ENTRY, record),
