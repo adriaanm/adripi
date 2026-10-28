@@ -25,6 +25,7 @@ import {
 } from "./config.ts";
 import { isCommandExcluded } from "./command-policy.ts";
 import { parseSupervisorDecision, supervisorQuestion } from "./supervisor-ask.ts";
+import { sandboxGuidance } from "./guidance.ts";
 import { getConfigPaths } from "./config.ts";
 import { registerFileGate } from "./file-gate.ts";
 import { buildHardeningPaths } from "./hardening.ts";
@@ -539,6 +540,28 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       }
       return local.execute(id, input, signal, onUpdate, ctx);
     },
+  });
+
+  // Sandbox conventions are not trained knowledge; keep them in the prompt while
+  // the sandbox is on, and leave it alone when the sandbox is off.
+  pi.on("before_agent_start", (event) => {
+    if (!sessionEnabled || configError) return;
+    const section = sandboxGuidance({
+      scratchDir: scratchpad?.dir,
+      projectPolicyPath: ".pi/guardian.json (project policy, user-owned)",
+    });
+    // Pi 1.x exposes structured `sections` (cache-friendly delta); older hosts
+    // only have the append slot. Support both without narrowing the vendored types.
+    const options = event.systemPromptOptions as typeof event.systemPromptOptions & {
+      sections?: Record<string, string>;
+    };
+    if (options.sections) {
+      options.sections = { ...options.sections, sandbox: section };
+      return;
+    }
+    options.appendSystemPrompt = [options.appendSystemPrompt, `<sandbox>\n${section}\n</sandbox>`]
+      .filter(Boolean)
+      .join("\n\n");
   });
 
   pi.on("user_bash", (event) => {

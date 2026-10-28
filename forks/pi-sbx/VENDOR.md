@@ -103,6 +103,16 @@ whose escalation path is decided by `pi-guardian` instead of a human-only prompt
     text and the token parsing (including the reply wrapper and the
     must-start-the-line rule).
 
+14. **Harness guidance in the system prompt** (`src/guidance.ts`, wired in
+    `src/index.ts` via `before_agent_start`). Models are not trained on this
+    harness, so while the sandbox is on the prompt gains a short `<sandbox>`
+    section: what is writable/readable, the never-grantable credential stores,
+    the `request_sandbox_exception` signature with the one-exact-target rule, that
+    `surface: "command"` runs the exact line on the host and must be re-run
+    unchanged, that a denial is final, and that circumvention is not a workaround.
+    It uses structured `sections` on Pi 1.x and falls back to the append slot on
+    older hosts. `test/guidance.test.ts` covers the content.
+
 Remaining (W5-W6 in `docs/plan-sandbox-broker.md`): the stack swap and the
 architecture/README rewrite.
 
