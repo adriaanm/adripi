@@ -108,15 +108,30 @@ becomes a standing permission instead of a prompt every time:
 ```json
 {
   "sandboxExceptions": {
-    "allow": ["command:git push:*", "command:gh pr create:*", "command:gh pr view:*"],
+    "allow": [
+      "command:git ls-remote:*",
+      "command:git fetch:*",
+      "command:git pull:*",
+      "command:git push:*",
+      "command:gh pr create:*",
+      "command:gh pr view:*"
+    ],
     "deny": [],
     "defer": []
   }
 }
 ```
 
+These pre-authorize the *exception*, not the sandbox: the agent still has to call
+`request_sandbox_exception` with `surface: "command"` and the exact command line,
+which then runs on the host with your credentials. A command run inside the
+sandbox cannot use `gh` or a git credential helper — `~/.config/gh` and friends
+are permanently denied, by design.
+
 - Command rules accept `prefix:*` for "this command with any arguments"; the
-  space boundary means `command:git push:*` does not match `git pusher`.
+  space boundary means `command:git push:*` does not match `git pusher`, and a
+  trailing colon without `*` (`command:git pull:`) is rejected as a rule that
+  would silently match nothing.
 - Layering, tightest first: the global hard denies and global `defer`s always
   win, then the project's own deny/defer, then the project's `allow`, then the
   global `allow`. A project can pre-authorize its workflow, never erase a global

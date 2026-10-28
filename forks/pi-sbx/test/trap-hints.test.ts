@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTrapHint, findDeniedPaths, withTrapHint } from "../src/trap-hints.ts";
+import { buildCredentialHint, buildTrapHint, findDeniedPaths, withTrapHint } from "../src/trap-hints.ts";
 
 describe("findDeniedPaths", () => {
 	it("finds paths from common denial messages", () => {
@@ -63,4 +63,29 @@ describe("buildTrapHint", () => {
 		expect(next.details).toEqual({ x: 1 });
 		expect(withTrapHint(result, "all good", { cwd: "/work" })).toBe(result);
 	});
+});
+
+describe("credential failures", () => {
+  it("points at a host command exception instead of a read grant", () => {
+    const output = [
+      "warning: failed to load config: open /Users/u/.config/gh/config.yml: operation not permitted",
+      "The sandbox denied access to \"/Users/u/.config/gh/config.yml\".",
+      "fatal: could not read Username for 'https://github.com': Device not configured",
+    ].join("\n");
+    const hint = buildTrapHint(output, { cwd: "/work" }) ?? "";
+    // The credential path is never grantable, so it is not offered as a target.
+    expect(hint).not.toContain("surface\" \\\"read\\\" for a read denial");
+    expect(hint).toContain("permanently denied credential store");
+    expect(hint).toContain("`command` exception");
+    const credential = buildCredentialHint(output) ?? "";
+    expect(credential).toContain("git pull --ff-only origin main");
+    expect(credential).toContain("Do not retry it in the sandbox");
+  });
+
+  it("stays quiet for ordinary failures and ordinary denials", () => {
+    expect(buildCredentialHint("error: failed to compile")).toBeUndefined();
+    const ordinary = buildTrapHint("touch: /data/x: Operation not permitted", { cwd: "/work" }) ?? "";
+    expect(ordinary).toContain("call request_sandbox_exception");
+    expect(ordinary).not.toContain("permanently denied");
+  });
 });

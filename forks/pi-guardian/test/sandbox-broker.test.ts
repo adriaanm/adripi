@@ -277,3 +277,9 @@ test("a project cannot write its own policy file", async () => {
 	assert.equal(outcome("/work/project/.pi/sandbox.json"), "deny");
 	assert.equal(outcome("/work/project/src/main.ts"), "allow");
 });
+
+test("a command prefix rule must be spelled prefix:*", async () => {
+	const { validateSandboxRules } = await import("../src/sandbox/rules.ts");
+	assert.throws(() => validateSandboxRules(["command:git pull:"], "sandboxExceptions.allow"), /ends with ":\*"/);
+	assert.doesNotThrow(() => validateSandboxRules(["command:git pull:*"], "sandboxExceptions.allow"));
+});

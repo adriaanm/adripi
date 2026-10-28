@@ -12,6 +12,17 @@
  */
 const DENIAL = /(Operation not permitted|Permission denied|Read-only file system)/i;
 
+/**
+ * Credential stores that are permanently denied: a review cannot grant them, so
+ * suggesting a `read`/`write` request for one of these sends the model into a
+ * loop (ask → hard deny → retry). A command that needs them must run on the host.
+ */
+const PERMANENT_DENY = /(?:^|\/)\.ssh(?:\/|$)|\.aws(?:\/|$)|\.gnupg(?:\/|$)|\.config\/gh(?:\/|$)|\/auth\.json$/;
+
+/** Failures that mean "this needs the host's credentials", not a wider sandbox. */
+const CREDENTIAL_FAILURE =
+	/(could not read Username for|could not read Password for|Device not configured|failed to create root command|Authentication failed|Permission denied \(publickey\)|terminal prompts disabled)/i;
+
 const PATH_BEFORE_DENIAL =
 	/(?:^|[\s:`"'(])((?:'[^']+'|"[^"]+"|\/[^\s:'"()]+))(?=:\s*(?:Operation not permitted|Permission denied|Read-only file system))/gi;
 
@@ -42,6 +53,18 @@ export interface HintContext {
  * A hint appended to the tool result, or undefined when the output shows no
  * denials, or when every denied path is already known to be writable/readable.
  */
+/** A hint for "git/gh needs host credentials", or undefined when it does not apply. */
+export function buildCredentialHint(output: string): string | undefined {
+	if (!CREDENTIAL_FAILURE.test(output)) return undefined;
+	return [
+		"This command needs the host's credential helper, which is not available inside the sandbox.",
+		'Call request_sandbox_exception with `surface` "command", the exact command line as `target`',
+		'(for example `git pull --ff-only origin main`), and a reason: an approved command runs on the host with your real credentials.',
+		"Do not retry it in the sandbox, and do not request read access to ~/.config/gh, ~/.ssh or other credential files —",
+		"those are permanently denied and are not needed when the command runs on the host.",
+	].join(" ");
+}
+
 export function buildTrapHint(output: string, context: HintContext): string | undefined {
 	const paths = findDeniedPaths(output).filter((path) => {
 		if (context.scratchDir && path.startsWith(context.scratchDir)) return false;
@@ -49,19 +72,37 @@ export function buildTrapHint(output: string, context: HintContext): string | un
 		return true;
 	});
 	if (paths.length === 0) return undefined;
-	const listed = paths.map((path) => `"${path}"`).join(", ");
-	return [
-		`The sandbox denied access to ${listed}.`,
-		"If the task genuinely needs it, call request_sandbox_exception with one of those exact paths as `target`,",
-		"`surface` \"write\" for a write denial (or \"read\" for a read denial), and a `reason` explaining why the task needs it.",
-		"Guardian reviews the request; the user is asked when guardian defers.",
-	].join(" ");
+	const permanent = paths.filter((path) => PERMANENT_DENY.test(path));
+	const grantable = paths.filter((path) => !PERMANENT_DENY.test(path));
+	const parts: string[] = [];
+	if (grantable.length > 0) {
+		const listed = grantable.map((path) => `"${path}"`).join(", ");
+		parts.push(
+			[
+				`The sandbox denied access to ${listed}.`,
+				"If the task genuinely needs it, call request_sandbox_exception with one of those exact paths as `target`,",
+				"`surface` \"write\" for a write denial (or \"read\" for a read denial), and a `reason` explaining why the task needs it.",
+				"Guardian reviews the request; the user is asked when guardian defers.",
+			].join(" "),
+		);
+	}
+	if (permanent.length > 0) {
+		const listed = permanent.map((path) => `"${path}"`).join(", ");
+		parts.push(
+			[
+				`The sandbox denied ${listed}, which is a permanently denied credential store — a request for it is refused by rule.`,
+				"If the tool needs those credentials (git or gh authenticating against a remote), request a `command` exception",
+				"for the exact command line instead; it runs on the host, where the credentials already live.",
+			].join(" "),
+		);
+	}
+	return parts.join("\n\n");
 }
 
 /** Append the hint to a Pi tool result's text content, if it has one. */
 export function withTrapHint<T extends { content?: unknown }>(result: T, output: string, context: HintContext): T {
 	if (!Array.isArray(result.content)) return result;
-	const hint = buildTrapHint(output, context);
+	const hint = [buildTrapHint(output, context), buildCredentialHint(output)].filter(Boolean).join("\n\n");
 	if (!hint) return result;
 	return {
 		...result,

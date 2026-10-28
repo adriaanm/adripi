@@ -35,6 +35,14 @@ export function parseSandboxRule(text: string): ParsedSandboxRule {
 	if (!SURFACES.has(surface)) throw new Error(`Unknown sandbox surface in rule: ${text}`);
 	const pattern = match[2].trim();
 	if (pattern === "") throw new Error(`Empty sandbox rule pattern: ${text}`);
+	// `command:git pull:` is the natural way to write "this command with any
+	// arguments", but a bare trailing colon is a literal that matches nothing —
+	// exactly the silent no-op users hit. Demand the `:*` spelling.
+	if (surface === "command" && pattern.endsWith(":")) {
+		throw new Error(
+			`Malformed sandbox exception rule: ${text} (a command prefix rule ends with ":*", not ":", so it matches the command plus its arguments)`,
+		);
+	}
 	return { surface, pattern, text: `${surface}:${pattern}` };
 }
 
