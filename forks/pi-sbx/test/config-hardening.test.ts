@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { JsonObject } from "../src/config.ts";
 import {
   getArrayLayer,
   getConfigArray,
@@ -24,7 +25,9 @@ describe("config and hardening", () => {
     writeFileSync(join(root, ".pi", "sandbox.json"), JSON.stringify({ network: { allowedDomains: ["project.test"] }, excludedCommands: ["docker:*"] }));
 
     const config = loadConfig({ cwd: root, agentDir: agent, configDirName: ".pi", allowProjectConfig: true });
-    expect(config.runtime.network.allowedDomains).toEqual(["project.test"]);
+    // The global file owns its policy (it replaces the built-in defaults), but
+    // the trusted project layer adds to it instead of replacing it.
+    expect(config.runtime.network.allowedDomains).toEqual(["global.test", "project.test"]);
     expect(config.excludedCommands).toEqual(["docker:*"]);
     expect(config.runtime.filesystem.denyRead).toContain(agent);
     expect(config.runtime.filesystem.denyWrite).toContain(join(root, ".pi"));
@@ -137,5 +140,148 @@ describe("config and hardening", () => {
     writeFileSync(join(root, ".pi", "sandbox.json"), "{ invalid");
     expect(() => loadConfig({ cwd: root, agentDir: agent, configDirName: ".pi", allowProjectConfig: true })).toThrow(/Could not parse/);
     expect(() => loadConfig({ cwd: root, agentDir: agent, configDirName: ".pi", allowProjectConfig: false })).not.toThrow();
+  });
+});
+
+describe("session layer stacking", () => {
+  const setup = (global: Record<string, unknown>) => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-session-"));
+    const agent = join(root, "agent");
+    mkdirSync(join(agent, "extensions"), { recursive: true });
+    writeFileSync(join(agent, "extensions", "sandbox.json"), JSON.stringify(global));
+    return { root, agent };
+  };
+
+  it("adds session grants to the inherited allowlists instead of replacing them", async () => {
+    const { withSessionException } = await import("../src/broker.ts");
+    const { root, agent } = setup({
+      network: { allowedDomains: ["npmjs.org", "*.npmjs.org"] },
+      filesystem: { allowRead: ["/data"], allowWrite: ["."] },
+    });
+    const sessionConfig = withSessionException(
+      withSessionException(withSessionException({}, "network", "repo.maven.apache.org:443"), "read", "/usr/share/x"),
+      "write",
+      "/home/u/.gradle",
+    );
+    const config = loadConfig({ cwd: root, agentDir: agent, configDirName: ".pi", allowProjectConfig: false, sessionConfig: sessionConfig as unknown as JsonObject });
+
+    for (const host of ["npmjs.org", "*.npmjs.org", "repo.maven.apache.org:443"]) {
+      expect(config.runtime.network.allowedDomains).toContain(host);
+    }
+    expect(config.runtime.filesystem.allowRead).toContain("/data");
+    expect(config.runtime.filesystem.allowRead).toContain("/usr/share/x");
+    expect(config.runtime.filesystem.allowWrite).toContain(".");
+    expect(config.runtime.filesystem.allowWrite).toContain("/home/u/.gradle");
+  });
+
+  it("keeps an any-port network grant loadable (regression: host:* crashed the sandbox)", async () => {
+    const { withSessionException } = await import("../src/broker.ts");
+    const { root, agent } = setup({ network: { allowedDomains: ["npmjs.org"] } });
+    const sessionConfig = withSessionException({}, "network", "registry.example.com:*");
+    const config = loadConfig({ cwd: root, agentDir: agent, configDirName: ".pi", allowProjectConfig: false, sessionConfig: sessionConfig as unknown as JsonObject });
+    expect(config.runtime.network.allowedDomains).toContain("npmjs.org");
+    expect(config.runtime.network.allowedDomains).toContain("registry.example.com");
+  });
+
+  it("does not let a session layer clear inherited entries by naming an empty list", async () => {
+    const { root, agent } = setup({ network: { allowedDomains: ["npmjs.org"] } });
+    const config = loadConfig({
+      cwd: root,
+      agentDir: agent,
+      configDirName: ".pi",
+      allowProjectConfig: false,
+      sessionConfig: { network: { allowedDomains: [] } } as unknown as JsonObject,
+    });
+    expect(config.runtime.network.allowedDomains).toContain("npmjs.org");
+  });
+});
+
+describe("project allow lists", () => {
+  it("adds to the global grants without dropping the workspace or the package hosts", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-project-union-"));
+    const agent = join(root, "agent");
+    mkdirSync(join(root, ".pi"));
+    mkdirSync(join(agent, "extensions"), { recursive: true });
+    writeFileSync(join(agent, "extensions", "sandbox.json"), JSON.stringify({
+      network: { allowedDomains: ["npmjs.org"], allowUnixSockets: ["/tmp/global-sock"] },
+      filesystem: { allowRead: ["/data"], allowWrite: ["."] },
+    }));
+    writeFileSync(join(root, ".pi", "sandbox.json"), JSON.stringify({
+      network: { allowedDomains: ["127.0.0.1:5555"], allowUnixSockets: ["/tmp/sgo-501", "/private/tmp/sgo-501"], allowLocalBinding: true },
+      filesystem: { allowRead: ["/tmp/sgo-501"], allowWrite: ["/tmp/sgo-501"] },
+      excludedCommands: ["just ios-device-logs:*"],
+    }));
+
+    const config = loadConfig({ cwd: root, agentDir: agent, configDirName: ".pi", allowProjectConfig: true });
+    expect(config.runtime.network.allowedDomains).toContain("npmjs.org");
+    expect(config.runtime.network.allowedDomains).toContain("127.0.0.1:5555");
+    expect(config.runtime.network.allowUnixSockets).toEqual(["/tmp/global-sock", "/tmp/sgo-501", "/private/tmp/sgo-501"]);
+    expect(config.runtime.network.allowLocalBinding).toBe(true);
+    expect(config.runtime.filesystem.allowRead).toEqual(["/data", "/tmp/sgo-501"]);
+    // The workspace grant must survive a project write grant, or every write
+    // inside the repo would need an exception.
+    expect(config.runtime.filesystem.allowWrite).toEqual([".", "/tmp/sgo-501"]);
+    expect(config.excludedCommands).toEqual(["just ios-device-logs:*"]);
+  });
+});
+
+describe("agentDirWriteProjects", () => {
+  const setup = (projects: unknown, globalExtra: Record<string, unknown> = {}) => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-agentdir-"));
+    const agent = join(root, "agentdir");
+    mkdirSync(join(agent, "extensions"), { recursive: true });
+    writeFileSync(join(agent, "extensions", "sandbox.json"), JSON.stringify({ agentDirWriteProjects: projects, ...globalExtra }));
+    return { root, agent };
+  };
+
+  it("lifts the agent-dir lock only for a listed project root", async () => {
+    const project = mkdtempSync(join(tmpdir(), "pi-sbx-proj-"));
+    const { root, agent } = setup([project]);
+    const config = loadConfig({ cwd: project, agentDir: agent, configDirName: ".pi", allowProjectConfig: false });
+
+    expect(config.hardening.mandatoryDenyWrite).not.toContain(agent);
+    expect(config.hardening.denyRead).not.toContain(agent);
+    // Writes are allowlist-based: the grant must add an allow root, not just
+    // lift the deny, or bash would still get EPERM.
+    expect(config.runtime.filesystem.allowWrite).toContain(agent);
+    expect(config.runtime.filesystem.denyWrite).not.toContain(agent);
+    // Credentials and Guardian's transcripts stay protected, and the project's
+    // own policy file stays mandatory deny-write.
+    expect(config.hardening.mandatoryDenyWrite).toContain(join(agent, "auth.json"));
+    expect(config.hardening.mandatoryDenyWrite).toContain(join(agent, "guardian-sessions"));
+    expect(config.hardening.mandatoryDenyWrite).toContain(join(project, ".pi"));
+
+    const outside = loadConfig({ cwd: root, agentDir: agent, configDirName: ".pi", allowProjectConfig: false });
+    expect(outside.hardening.mandatoryDenyWrite).toContain(agent);
+    expect(outside.runtime.filesystem.allowWrite).not.toContain(agent);
+  });
+
+  it("covers subdirectories of a listed root but not a sibling prefix", async () => {
+    const project = mkdtempSync(join(tmpdir(), "pi-sbx-proj-"));
+    const nested = join(project, "forks", "pi-sbx");
+    mkdirSync(nested, { recursive: true });
+    const { agent } = setup([project]);
+    expect(loadConfig({ cwd: nested, agentDir: agent, configDirName: ".pi", allowProjectConfig: false }).hardening.mandatoryDenyWrite).not.toContain(agent);
+
+    // A sibling whose name shares the prefix is a different project.
+    const sibling = `${project}-evil`;
+    mkdirSync(sibling, { recursive: true });
+    const { agent: agent2 } = setup([project]);
+    expect(loadConfig({ cwd: sibling, agentDir: agent2, configDirName: ".pi", allowProjectConfig: false }).hardening.mandatoryDenyWrite).toContain(agent2);
+  });
+
+  it("ignores the key in a project layer and rejects malformed values", async () => {
+    const project = mkdtempSync(join(tmpdir(), "pi-sbx-proj-"));
+    const { agent } = setup([], {});
+    mkdirSync(join(project, ".pi"), { recursive: true });
+    writeFileSync(join(project, ".pi", "sandbox.json"), JSON.stringify({ agentDirWriteProjects: [project] }));
+    const config = loadConfig({ cwd: project, agentDir: agent, configDirName: ".pi", allowProjectConfig: true });
+    expect(config.hardening.mandatoryDenyWrite).toContain(agent);
+    expect(config.warnings).toContain("Ignored agentDirWriteProjects outside the global profile");
+
+    const { agent: agent2 } = setup(["relative/path"]);
+    const malformed = loadConfig({ cwd: project, agentDir: agent2, configDirName: ".pi", allowProjectConfig: false });
+    expect(malformed.hardening.mandatoryDenyWrite).toContain(agent2);
+    expect(malformed.warnings.some((warning) => warning.startsWith("Ignored agentDirWriteProjects"))).toBe(true);
   });
 });

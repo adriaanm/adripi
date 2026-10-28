@@ -119,6 +119,19 @@ test("denied path literals end at a path boundary", () => {
 	assert.equal(decide("bash", { command: "ls /root/.pi" }, ["Edit(//root/.pi/**)"]).outcome, "deny");
 });
 
+test("write/edit match their target path, not text that merely mentions it", () => {
+	const agent = join(homedir(), ".pi", "agent");
+	const rule = [`Edit(/${agent}/**)`];
+	const docs = join(homedir(), "g", "proj", "NOTES.md");
+	const tildeAgent = ["~", ".pi", "agent"].join("/");
+	const quoting = { path: docs, content: `policy lives in ${agent}/extensions/sandbox.json and in ${tildeAgent}` };
+	assert.equal(decide("write", quoting, rule, ["Write"]).outcome, "allow");
+	assert.equal(decide("edit", { path: docs, oldText: tildeAgent, newText: "the agent dir" }, rule, ["Edit"]).outcome, "allow");
+	// The protected path itself is still denied for both tools.
+	assert.equal(decide("write", { path: join(agent, "extensions", "sandbox.json"), content: "{}" }, rule).outcome, "deny");
+	assert.equal(decide("edit", { path: join(agent, "settings.json"), oldText: "a", newText: "b" }, rule).outcome, "deny");
+});
+
 test("absolute rules under home also match ~ and $HOME spellings in shell commands", () => {
 	const agentDirRule = [`Edit(/${join(homedir(), ".pi/agent")}/**)`];
 	for (const prefix of [join(homedir(), ".pi/agent"), "~/.pi/agent", "$HOME/.pi/agent", "${HOME}/.pi/agent"]) {
@@ -201,4 +214,30 @@ test("malformed and unsupported rules are config errors", async () => {
 		await writeFile(join(directory, "guardian.json"), JSON.stringify({ permissions }));
 		assert.throws(() => loadGuardianConfig(directory, "/policy"));
 	}
+});
+
+test("agentDirWriteProjects lifts only the agent-dir self-protection rules", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "guardian-agentdir-write-"));
+	const project = join(directory, "project");
+	const other = join(directory, "other");
+	const config = loadGuardianConfig(directory, "/policy");
+	const permissions = { allow: ["Write", "Edit"], deny: config.permissions.deny, agentDirWriteProjects: [project] };
+	void other;
+
+	const write = (cwd: string, path: string) =>
+		evaluatePermissions(permissions, "write", { path, content: "{}" }, cwd, directory).outcome;
+	assert.equal(write(project, join(directory, "extensions", "sandbox.json")), "allow");
+	assert.equal(write(join(project, "forks", "pi-sbx"), join(directory, "guardian.json")), "allow");
+	assert.equal(write(other, join(directory, "extensions", "sandbox.json")), "deny");
+	// Credentials and the session transcripts stay denied everywhere.
+	assert.equal(write(project, join(directory, "auth.json")), "deny");
+	assert.equal(write(project, join(config.guardianSessionDir, "session.jsonl")), "deny");
+	// Reading the profile (Guardian's own config included) is decided by the rule
+	// engine, not sent to the reviewer, which cannot see who holds the grant.
+	const read = (cwd: string, path: string) =>
+		evaluatePermissions(permissions, "read", { path }, cwd, directory).outcome;
+	assert.equal(read(project, join(directory, "guardian.json")), "allow");
+	assert.equal(read(project, join(directory, "extensions", "sandbox.json")), "allow");
+	// Without the grant the config is still a fixed deny.
+	assert.equal(read(other, join(directory, "guardian.json")), "deny");
 });

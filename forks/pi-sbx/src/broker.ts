@@ -119,6 +119,17 @@ function addUnique(existing: unknown, value: string): string[] {
 }
 
 /**
+ * The config shape has no `:*` port wildcard: a bare host already matches every
+ * port, and srt's schema rejects `host:*` ("Invalid domain pattern ... An
+ * optional ':port' suffix (1-65535)"). The trap and the tool spell "any port"
+ * as `host:*`, so translate it before it lands in a config layer, and translate
+ * on lookup/removal too so the three helpers agree.
+ */
+export function configNetworkTarget(target: string): string {
+	return target.endsWith(":*") ? target.slice(0, -2) : target;
+}
+
+/**
  * Apply one session-scope grant to the session config layer. Returns a new
  * object; the on-disk config is never touched, and reloads rebuild the layer
  * from scratch, so a grant cannot outlive the session.
@@ -139,7 +150,7 @@ export function withSessionException(
 		return next;
 	}
 	if (surface === "network") {
-		next.network = { ...next.network, allowedDomains: addUnique(next.network?.allowedDomains, target) };
+		next.network = { ...next.network, allowedDomains: addUnique(next.network?.allowedDomains, configNetworkTarget(target)) };
 		return next;
 	}
 	next.excludedCommands = addUnique(layer.excludedCommands, target);
@@ -187,7 +198,7 @@ export function withoutSessionException(
 		return next;
 	}
 	if (surface === "network") {
-		const remaining = removeValue(next.network?.allowedDomains, target);
+		const remaining = removeValue(next.network?.allowedDomains, configNetworkTarget(target));
 		if (remaining) next.network = { ...next.network, allowedDomains: remaining };
 		else if (next.network) delete next.network.allowedDomains;
 		return next;
@@ -207,7 +218,7 @@ export function hasSessionException(layer: SessionLayer, surface: SandboxSurface
 	}
 	if (surface === "network") {
 		const list = layer.network?.allowedDomains;
-		return Array.isArray(list) && list.includes(target);
+		return Array.isArray(list) && list.includes(configNetworkTarget(target));
 	}
 	return Array.isArray(layer.excludedCommands) && layer.excludedCommands.includes(target);
 }

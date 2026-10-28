@@ -73,6 +73,13 @@ export interface TranscriptBounds {
 export interface GuardianPermissions {
 	allow: string[];
 	deny: string[];
+	/**
+	 * Absolute project roots (from `permissions.agentDirWriteProjects`) that may
+	 * edit the agent directory, so the repo that installs this stack can maintain
+	 * it. Everything else — credentials, Guardian's own config, the session
+	 * transcripts — stays denied for those projects too.
+	 */
+	agentDirWriteProjects?: string[];
 }
 
 import type { SandboxExceptionRules } from "./sandbox/types.ts";

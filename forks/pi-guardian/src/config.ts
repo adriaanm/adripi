@@ -32,7 +32,7 @@ interface GuardianConfigFile {
 	policyPath?: string;
 	piCommand?: string;
 	exemptTools?: string[];
-	permissions?: { allow?: string[]; deny?: string[] };
+	permissions?: { allow?: string[]; deny?: string[]; agentDirWriteProjects?: string[] };
 	sandboxExceptions?: { allow?: string[]; defer?: string[]; deny?: string[] };
 	transcript?: Partial<TranscriptBounds>;
 }
@@ -74,6 +74,15 @@ const WINDOWS_DRIVE_PATTERN = /^[a-z]:[\\/]/i;
 function resolveReviewerExtension(value: string, baseDir: string): string {
 	if (SCHEME_PATTERN.test(value) && !WINDOWS_DRIVE_PATTERN.test(value)) return value;
 	return resolveConfiguredPath(value, baseDir);
+}
+
+/** Absolute project roots allowed to edit the agent directory (fail closed). */
+function validateAgentDirWriteProjects(value: unknown): string[] {
+	if (value === undefined) return [];
+	if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || !isAbsolute(entry))) {
+		throw new Error("permissions.agentDirWriteProjects must be an array of absolute project roots");
+	}
+	return value.map((entry) => resolve(entry));
 }
 
 export function loadGuardianConfig(agentDir: string, bundledPolicyPath: string): GuardianConfig {
@@ -176,8 +185,8 @@ function loadPermissions(file: GuardianConfigFile, agentDir: string, sessionDir:
 		if (!configured || typeof configured !== "object" || Array.isArray(configured)) {
 			throw new Error("permissions must be an object with optional allow and deny arrays");
 		}
-		if (Object.keys(configured).some((key) => key !== "allow" && key !== "deny")) {
-			throw new Error("permissions supports only allow and deny (no ask)");
+		if (Object.keys(configured).some((key) => key !== "allow" && key !== "deny" && key !== "agentDirWriteProjects")) {
+			throw new Error("permissions supports only allow, deny, and agentDirWriteProjects (no ask)");
 		}
 	}
 	const legacy = file.exemptTools === undefined ? [] : validateRules(file.exemptTools, "exemptTools");
@@ -190,6 +199,7 @@ function loadPermissions(file: GuardianConfigFile, agentDir: string, sessionDir:
 	return {
 		allow: [...new Set([...allow, ...legacy])],
 		deny: [...new Set([...builtInDenyRules(agentDir, sessionDir), ...deny])],
+		agentDirWriteProjects: validateAgentDirWriteProjects(configured?.agentDirWriteProjects),
 	};
 }
 

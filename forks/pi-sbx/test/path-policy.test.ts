@@ -1,7 +1,7 @@
 import { mkdtempSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { canonicalizeTarget, canRead, canTraverse, canWrite, createFilePolicy, resolveReadTarget, type FilePolicy } from "../src/path-policy.ts";
 
 function policy(root: string): FilePolicy {
@@ -66,5 +66,25 @@ describe("path policy", () => {
     });
     expect(canRead(credentials[0]!, root, p)).toBe(false);
     expect(canRead(credentials[1]!, root, p)).toBe(false);
+  });
+});
+
+describe("denied realpath", () => {
+  it("falls back instead of throwing when the sandbox denies realpath", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-realpath-"));
+    const file = join(root, "secret", "auth.json");
+    mkdirSync(join(root, "secret"), { recursive: true });
+    writeFileSync(file, "{}");
+    const fsPolicy = policy(root);
+    const spy = vi.spyOn(realpathSync, "native").mockImplementation(() => {
+      throw Object.assign(new Error("operation not permitted, realpath"), { code: "EPERM" });
+    });
+    try {
+      expect(() => canWrite(file, root, fsPolicy)).not.toThrow();
+      expect(canWrite(file, root, fsPolicy)).toBe(true);
+      expect(() => canRead(join(root, "secret", "x"), root, fsPolicy)).not.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

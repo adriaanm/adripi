@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { GuardianPermissions } from "./types.ts";
 
@@ -348,6 +348,10 @@ function pathRuleDenies(rule: Rule, specifier: string, call: ToolCall): boolean 
 	// Guardian addition: a recursive search from an ancestor could reach a read-denied file.
 	const reachesPath = (root: string) => patterns.some((pattern) => couldMatchDescendant(pattern, root));
 	if (DIRECTORY_TOOLS.has(call.tool) && call.paths.some(reachesPath)) return true;
+	// write/edit access exactly their `path`; the payload is data, not an access.
+	// Without this, a document that merely mentions a protected path (a README
+	// explaining the sandbox, say) could never be edited.
+	if (call.tool === "write" || call.tool === "edit") return false;
 	return inputMentionsRulePath(specifier, call);
 }
 
@@ -401,8 +405,35 @@ export function evaluatePermissions(
 		agentDir,
 	};
 
+	// A project root listed in permissions.agentDirWriteProjects may maintain the
+	// agent directory (that is how the repo installing this stack keeps its own
+	// profile). Only the two self-protection rules for that directory are lifted;
+	// credentials, the session transcripts, and every user deny still apply.
+	// The file tools on that directory are decided here, not by the reviewer.
+	const writable = (permissions.agentDirWriteProjects ?? []).some((root) => {
+		const rel = relative(resolve(root), resolve(cwd));
+		return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+	});
+	const baseAgentDir = `/${resolve(agentDir)}`;
+	const lifted = new Set([`Edit(${baseAgentDir}/**)`, `Read(${baseAgentDir}/guardian.json)`]);
+	if (writable) {
+		// Maintaining the profile never includes exfiltrating credentials or
+		// reading Guardian's transcripts, and those stay write-denied too.
+		for (const text of [`Edit(${baseAgentDir}/auth.json)`, `Edit(${baseAgentDir}/guardian-sessions/**)`]) {
+			if (denies(parseRule(text), call)) return { outcome: "deny", rule: text };
+		}
+	}
 	for (const text of permissions.deny) {
+		if (writable && lifted.has(text)) continue;
 		if (denies(parseRule(text), call)) return { outcome: "deny", rule: text };
+	}
+	// A granted project maintains the profile with the file tools. Decide it here
+	// rather than falling through to "review": the reviewer cannot see which
+	// project holds the grant, so it would deny the maintenance path itself.
+	const agentDirPath = resolve(agentDir);
+	if (writable && (call.tool === "read" || call.tool === "write" || call.tool === "edit") &&
+		call.paths.some((path) => path === agentDirPath || path.startsWith(`${agentDirPath}/`))) {
+		return { outcome: "allow", rule: `agentDirWriteProjects(${call.paths[0]})` };
 	}
 	const allow = permissions.allow.map(parseRule);
 	const rule = SHELL_TOOLS.has(tool) ? shellAllowRule(allow, call) : allow.find((candidate) => allows(candidate, call));

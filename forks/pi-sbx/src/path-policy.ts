@@ -25,7 +25,7 @@ export function resolveTarget(value: string, cwd: string): string {
 /** Resolve exactly the path Pi's read tool will try to open. */
 export function resolveReadTarget(value: string, cwd: string): string {
   const resolved = resolveTarget(value, cwd);
-  if (existsSync(resolved)) return realpathSync.native(resolved);
+  if (existsSync(resolved)) return safeRealpath(resolved);
   const nfd = resolved.normalize("NFD");
   const candidates = [
     resolved.replace(/ (AM|PM)\./gi, "\u202F$1."),
@@ -34,12 +34,26 @@ export function resolveReadTarget(value: string, cwd: string): string {
     nfd.replace(/'/g, "\u2019"),
   ];
   const existing = candidates.find((candidate) => candidate !== resolved && existsSync(candidate));
-  return existing ? realpathSync.native(existing) : canonicalizeTarget(resolved, cwd);
+  return existing ? safeRealpath(existing) : canonicalizeTarget(resolved, cwd);
+}
+
+/**
+ * `existsSync` can succeed while `realpath` is denied: the sandbox filters
+ * `realpath` itself, so a *protected* path (a credential file, say) throws EPERM
+ * here. Policy evaluation must not throw — fall back to the resolved path, which
+ * is what the deny patterns are written against anyway.
+ */
+function safeRealpath(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return path;
+  }
 }
 
 export function canonicalizeTarget(value: string, cwd: string): string {
   const absolute = resolveTarget(value, cwd);
-  if (existsSync(absolute)) return realpathSync.native(absolute);
+  if (existsSync(absolute)) return safeRealpath(absolute);
   const suffix: string[] = [];
   let ancestor = absolute;
   while (!existsSync(ancestor)) {
@@ -48,7 +62,7 @@ export function canonicalizeTarget(value: string, cwd: string): string {
     suffix.unshift(ancestor.slice(parent.length + (parent.endsWith(sep) ? 0 : 1)));
     ancestor = parent;
   }
-  const canonicalAncestor = existsSync(ancestor) ? realpathSync.native(ancestor) : ancestor;
+  const canonicalAncestor = existsSync(ancestor) ? safeRealpath(ancestor) : ancestor;
   return resolve(canonicalAncestor, ...suffix);
 }
 

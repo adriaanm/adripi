@@ -54,6 +54,57 @@ whose escalation path is decided by `pi-guardian` instead of a human-only prompt
    grants run one exact command on the host (remote git), exact-match and
    single-use, with metacharacter/interpreter shapes refused before review.
    `test/host-command.test.ts` covers eligibility and the grant store.
+10. **Grants are additive and validated** (`src/config.ts`, `src/broker.ts`,
+    `src/index.ts`). Found by an
+    `Invalid sandbox runtime config: network.allowedDomains.0` report:
+    a `host:*` target (the trap's spelling for "any port") is stored as the bare
+    host, since the runtime schema rejects a `:*` port suffix and a bare host
+    already matches every port (`configNetworkTarget`, applied in
+    `withSessionException`/`withoutSessionException`/`hasSessionException`).
+    `merge` now unions the allow lists (`network.allowedDomains`,
+    `network.allowUnixSockets`, `filesystem.allowRead`, `allowWrite`) for every
+    step above the user's own file, so a project or session layer adds grants
+    instead of replacing the inherited ones — previously one
+    `write /tmp/sgo-501` grant dropped the workspace and one `allowedDomains`
+    entry dropped the package hosts. The defaults → global step keeps replace
+    semantics so the global profile can still withdraw the default temp-root
+    write. Finally, `applySessionGrant` validates the candidate layer before
+    adopting it, so an unusable target is refused with a message instead of
+    making every later `loadConfig` fail, which disabled the sandbox for the
+    rest of the session. `test/broker.test.ts` and
+    `test/config-hardening.test.ts` cover all of it.
+
+11. **`agentDirWriteProjects`** (`src/config.ts`). An absolute project root
+    listed in the *global* profile may write (and read) the agent dir, so the
+    repo that installs this stack can repair the profile it installs. Read from
+    the global layer only — a project or session layer must not widen it — and
+    matched against the session cwd, including subdirectories. The hardening
+    paths drop `agentDir` and the global config file from `denyRead`/`denyWrite`/
+    `mandatoryDenyWrite`; `<agentDir>/auth.json` and `<agentDir>/guardian-sessions`
+    are added back to all three, and `<workspace>/.pi` (the project's own policy)
+    stays mandatory deny-write. `install.sh` grants this repo's root; removing
+    the entry revokes it. `test/config-hardening.test.ts` covers the reachable
+    root boundary, subdirectories, a lookalike sibling, malformed values, and a
+    project-layer attempt to widen it.
+
+    Operational consequence in `<workspace>/.pi/sandbox.json`: unix-socket IPC is
+    `network.allowUnixSockets` (SRT emits `network-bind` *and*
+    `network-outbound` per directory), loopback TCP is `allowLocalBinding`, and
+    permanent host execution is a `prefix:*` entry in `excludedCommands` (the
+    whole process tree runs unsandboxed, so `just … → xcrun …` works).
+
+12. **Subagent artifacts are readable** (`src/session-artifacts.ts`, wired in
+    `src/index.ts`). Pi writes subagent outputs to
+    `<agentDir>/sessions/<encoded-cwd>/subagent-artifacts/…`, i.e. inside the
+    agent directory, which the sandbox denies wholesale — so the agent could not
+    read back its own subagent results. At `session_start` the session's
+    `getSessionDir()` names the exact directory and it is added to the effective
+    profile's `allowRead` (copy only, never the persisted config). Deliberately
+    narrow: the transcript `.jsonl`, the sibling session-state directories, the
+    rest of the agent dir, and other projects' artifact directories all stay
+    unreadable, and nothing becomes writable. `test/session-artifacts.test.ts`
+    covers the derivation, the copy/dedupe behaviour, and the read matrix against
+    a locked agent dir.
 
 Remaining (W5-W6 in `docs/plan-sandbox-broker.md`): the stack swap and the
 architecture/README rewrite.

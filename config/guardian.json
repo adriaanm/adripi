@@ -21,5 +21,10 @@
     "allow": [],
     "defer": [],
     "deny": []
+  },
+  "permissions": {
+    "agentDirWriteProjects": [
+      "/Users/adriaan/g/adripi"
+    ]
   }
 }

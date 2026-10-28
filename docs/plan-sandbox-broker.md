@@ -180,7 +180,12 @@ attempt may already have had partial side effects"). We never do that: an
 approved exception widens the profile and the command re-runs **inside** it.
 
 - `write`/`read` → the exact path joins the run's (or session's) allow list;
-- `network` → `host:port` joins `allowedDomains` (or a one-shot connection);
+- `network` → `host:port` joins `allowedDomains` (or a one-shot connection). An
+  unknown port is spelled `host:*` internally and stored as the bare host: the
+  runtime schema has no `:*` port wildcard and rejects it, and a bare host
+  matches every port anyway. Session grants extend the inherited allowlist
+  rather than replacing it, and a target the runtime cannot represent is refused
+  before it enters the layer;
 - `command` → the exact command joins the session exclusion list. This is the
   only grant that runs unsandboxed, and it requires a human ("Allow for this
   session" in the existing prompt), never the broker alone.

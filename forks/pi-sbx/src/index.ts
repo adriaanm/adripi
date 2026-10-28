@@ -29,6 +29,7 @@ import { registerFileGate } from "./file-gate.ts";
 import { buildHardeningPaths } from "./hardening.ts";
 import { SandboxController, RuntimeSandboxManager } from "./manager.ts";
 import { createScratchpad, SCRATCH_ENV, type Scratchpad, sweepScratchpads, withScratchpad } from "./scratch.ts";
+import { sessionArtifactsDir, withSessionArtifacts } from "./session-artifacts.ts";
 import {
   decideSandboxException,
   type SandboxScope,
@@ -106,6 +107,8 @@ export default function sandboxExtension(pi: ExtensionAPI) {
   let currentContext: ExtensionContext | undefined;
   let config: EffectiveSandboxConfig | undefined;
   let scratchpad: Scratchpad | undefined;
+  /** `sessions/<encoded-cwd>/subagent-artifacts` for this session, if Pi reports it. */
+  let artifactsDir: string | undefined;
   /** `once` grants expire after the next sandboxed command (network: next connection). */
   let pendingOnceGrants: Array<{ surface: SandboxSurface; target: string; grantedByToolCallId: string }> = [];
   const pendingNetworkOnce = new Set<string>();
@@ -188,7 +191,12 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     });
     if (decision.kind === "allow") {
       if (decision.scope === "session") {
-        sessionConfig = withSessionException(sessionConfig as SessionLayer, "network", target) as typeof sessionConfig;
+        if (!currentContext) return false;
+        const applied = await applySessionGrant(currentContext, "network", target);
+        if (!applied.ok) {
+          currentContext.ui.notify(`Sandbox network exception refused: ${applied.reason}`, "error");
+          return false;
+        }
       }
       return true;
     }
@@ -223,6 +231,9 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       // The scratchpad is policy, not an exception: the agent can always write
       // temporary files there, and nothing else under the temp root opens up.
       if (scratchpad) config = withScratchpad(config, scratchpad.dir);
+      // Subagent artifacts sit in the agent dir and are this session's own
+      // outputs; make just that directory readable, nothing else.
+      config = withSessionArtifacts(config, artifactsDir);
       applyOverlay(config);
       for (const warning of config.warnings) ctx.ui.notify(warning, "warning");
       sessionEnabled = (sessionEnabledOverride ?? config.enabled) && !Boolean(pi.getFlag("no-sandbox"));
@@ -348,14 +359,35 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     ));
   };
 
-  /** Apply a session-scope grant to the in-memory layer and refresh the runtime. */
+  type SessionGrantResult = { ok: true } | { ok: false; reason: string };
+
+  /**
+   * Apply a session-scope grant to the in-memory layer and refresh the runtime.
+   * The candidate layer is validated first: the runtime schema rejects some
+   * targets (e.g. `host:*`, a URL, a relative path), and adopting one would make
+   * every later loadConfig fail — which disables the sandbox for the rest of the
+   * session instead of refusing that one request.
+   */
   const applySessionGrant = async (
     ctx: ExtensionContext,
     surface: SandboxSurface,
     target: string,
-  ): Promise<void> => {
-    sessionConfig = withSessionException(sessionConfig as SessionLayer, surface, target) as typeof sessionConfig;
+  ): Promise<SessionGrantResult> => {
+    const candidate = withSessionException(sessionConfig as SessionLayer, surface, target) as typeof sessionConfig;
+    try {
+      loadConfig({
+        cwd: ctx.cwd,
+        agentDir: getAgentDir(),
+        configDirName: CONFIG_DIR_NAME,
+        allowProjectConfig: projectApproved,
+        sessionConfig: candidate,
+      });
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+    }
+    sessionConfig = candidate;
     await reloadConfig(ctx, false);
+    return { ok: true };
   };
 
   /** Human fallback, reached only when guardian defers or is absent. */
@@ -640,7 +672,18 @@ export default function sandboxExtension(pi: ExtensionAPI) {
         // A one-shot connection grant: the proxy asks again for the next one.
         pendingNetworkOnce.add(params.target);
       } else {
-        await applySessionGrant(ctx, surface, params.target);
+        const applied = await applySessionGrant(ctx, surface, params.target);
+        if (!applied.ok) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Sandbox exception refused: ${applied.reason}. Nothing was granted and the sandbox config is unchanged; pick one target the runtime accepts (a bare host, host:port, or an absolute path) instead of retrying this shape.`,
+              },
+            ],
+            details: { decision, refusal: applied.reason },
+          };
+        }
         // Expiry is keyed to the tool-call boundary: the grant survives the call
         // that granted it, is usable by the next tool call (bash, write, edit,
         // read...), and is removed once that call returns. A target that already
@@ -689,6 +732,12 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       // best effort
     }
     scratchpad = await createScratchpad();
+    try {
+      artifactsDir = sessionArtifactsDir(ctx.sessionManager.getSessionDir());
+    } catch {
+      // Older Pi without the accessor: keep the agent dir closed.
+      artifactsDir = undefined;
+    }
     projectApproved = await resolveProjectApproval(ctx);
     await reloadConfig(ctx, true);
     sessionStarted = true;
@@ -709,6 +758,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     hostGrants.clear();
     await scratchpad?.dispose();
     scratchpad = undefined;
+    artifactsDir = undefined;
   });
 
   pi.registerCommand("sandbox", {

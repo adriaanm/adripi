@@ -201,6 +201,11 @@ exception: the agent calls `request_sandbox_exception` with one target and a
 reason, `pi-guardian` decides, and you are asked only when it defers. Grants
 last for one command (`once`) or the session, in memory only.
 
+Sessions in this repo are additionally allowed to write the agent dir
+(`agentDirWriteProjects`, added by `install.sh`), so the setup can be repaired
+in place; credentials and Guardian's transcripts stay denied. See
+[`config/README.md`](config/README.md).
+
 Remote git uses the same mechanism with a `command` exception: ask for the exact
 command (`git push -u origin main`), guardian reviews it, and on approval that
 string runs once on the host with your normal git credentials — the token never
@@ -208,8 +213,12 @@ enters the sandbox or the conversation. Chained commands, redirects and
 interpreters are refused.
 
 To make a path permanently writable, add it to `filesystem.allowWrite` in
-`sandbox.json` yourself; for a host, add it to `network.allowedDomains`. Prefer
-narrow entries. See [`config/README.md`](config/README.md) and
+`sandbox.json` yourself; for a host, add it to `network.allowedDomains`; for a
+Unix socket directory, add it to `network.allowUnixSockets` (that grants bind
+*and* connect); for a command that must run on the host, add a `prefix:*` entry
+to `excludedCommands`. Project-level policy goes in `<workspace>/.pi/sandbox.json`
+and only ever adds grants. Prefer narrow entries. See
+[`config/README.md`](config/README.md) and
 [`docs/plan-sandbox-broker.md`](docs/plan-sandbox-broker.md).
 
 ## Layout

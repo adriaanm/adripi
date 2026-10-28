@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 const configDir = fileURLToPath(new URL("../config/", import.meta.url));
 
@@ -52,6 +52,12 @@ for (const pattern of ["**/.env", "**/*.pem", "**/*.key"]) {
     throw new Error(`config/sandbox.json: denyWrite must include ${pattern}`);
   }
 }
+if (
+  !Array.isArray(sandbox.agentDirWriteProjects) ||
+  sandbox.agentDirWriteProjects.some((entry) => typeof entry !== "string" || !isAbsolute(entry))
+) {
+  throw new Error("config/sandbox.json: agentDirWriteProjects must be an array of absolute project roots");
+}
 if (!Array.isArray(sandbox.network?.allowedDomains) || sandbox.network.allowedDomains.length === 0) {
   throw new Error("config/sandbox.json: network.allowedDomains must name the package hosts");
 }
@@ -61,6 +67,13 @@ if (existsSync(join(configDir, "pi-perm.config.json"))) {
 const pkg = readFileSync(join(configDir, "..", "packages.txt"), "utf8");
 if (pkg.includes("pi-perm")) throw new Error("packages.txt still installs pi-perm");
 if (!pkg.includes("pi-sbx@")) throw new Error("packages.txt must install pi-sbx");
+
+if (
+  !Array.isArray(guardian.permissions?.agentDirWriteProjects) ||
+  guardian.permissions.agentDirWriteProjects.some((entry) => typeof entry !== "string" || !isAbsolute(entry))
+) {
+  throw new Error("config/guardian.json: permissions.agentDirWriteProjects must be an array of absolute project roots");
+}
 
 const review = read("pi-review.json");
 if (review.schemaVersion !== 1 || !review.gate || !review.reviewers) {

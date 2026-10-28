@@ -125,6 +125,42 @@ else
   echo "   kept existing pi-review.json"
 fi
 
+echo "== agent-dir write grant"
+# This repo maintains the live profile it installs, so its own workspace is
+# allowed to write the agent dir (see config/README.md, "agentDirWriteProjects").
+# Running install.sh is the human decision that grants it; the agent cannot.
+REPO_ROOT="$(pwd -P)"
+node - "$PI_AGENT_DIR" "$REPO_ROOT" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const [agentDir, repoRoot] = process.argv.slice(2);
+const grant = (list, value) => [...new Set([...(Array.isArray(list) ? list : []), value])];
+function update(file, mutate, describe) {
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    console.log(`   skipped ${file} (missing or unreadable)`);
+    return;
+  }
+  fs.writeFileSync(file, `${JSON.stringify(mutate(config), null, 2)}\n`);
+  console.log(`   ${describe}`);
+}
+update(
+  path.join(agentDir, "extensions", "sandbox.json"),
+  (config) => ({ ...config, agentDirWriteProjects: grant(config.agentDirWriteProjects, repoRoot) }),
+  `extensions/sandbox.json: agentDirWriteProjects += ${repoRoot}`,
+);
+update(
+  path.join(agentDir, "guardian.json"),
+  (config) => {
+    const permissions = config.permissions && typeof config.permissions === "object" ? config.permissions : {};
+    return { ...config, permissions: { ...permissions, agentDirWriteProjects: grant(permissions.agentDirWriteProjects, repoRoot) } };
+  },
+  `guardian.json: permissions.agentDirWriteProjects += ${repoRoot}`,
+);
+NODE
+
 cat <<'NOTE'
 
 == sign in
@@ -142,6 +178,13 @@ hidden temp root is not, and each session gets a private scratch directory
 (PI_SANDBOX_SCRATCH). Paths outside the project need a reviewed exception: the
 agent calls request_sandbox_exception, guardian decides, and you are asked when
 guardian defers. See config/README.md and docs/plan-sandbox-broker.md.
+
+This install also grants THIS repository write access to the agent dir
+(agentDirWriteProjects in both configs), so sessions here can maintain Pi's and
+Guardian's own profile. That is a real privilege: a session in this workspace
+can change what Pi and Guardian load next. Credentials (auth.json) and
+Guardian's session transcripts stay denied. Remove the path from both files to
+revoke it.
 
 == done
 Restart Pi after installing or updating extensions.

@@ -26,6 +26,11 @@ to sandboxed commands as `PI_SANDBOX_SCRATCH`. It is added to the effective
 profile at session start, removed at shutdown, and never written to this config.
 Temporary files belong there; no exception is needed.
 
+Subagent outputs are written to `<agentDir>/sessions/<encoded-cwd>/subagent-artifacts/`.
+That one directory is added to the session's `allowRead` at start-up so the agent
+can read back its own subagent results; the session transcript, the rest of the
+agent dir, and other projects' artifacts stay unreadable.
+
 ## Paths outside the project
 
 An exception is a reviewed decision, not a config edit:
@@ -39,10 +44,52 @@ An exception is a reviewed decision, not a config edit:
 4. a grant applies for that command (`once`) or the session, in memory only —
    nothing is persisted, and a restart starts from this profile again.
 
+## Permanent, per-project policy
+
+A project can carry its own `<workspace>/.pi/sandbox.json` (same shape as this
+profile). It is merged over the global one at session start after one
+confirmation, and the directory is mandatory deny-write for the sandbox and the
+file tools, so the agent cannot widen its own policy.
+
+- **Allow lists are additive.** `filesystem.allowRead`, `filesystem.allowWrite`,
+  `network.allowedDomains` and `network.allowUnixSockets` union across layers;
+  a project entry adds a grant and never revokes a global one (otherwise
+  "write /tmp/sgo-501" would drop the workspace and "add one host" would drop
+  the package hosts). Deny lists and every other array keep replace semantics.
+  A session-scope grant follows the same rule.
+- **Unix sockets.** `network.allowUnixSockets: ["/tmp/sgo-501"]` makes the
+  runtime emit `network-bind` (bind/listen) *and* `network-outbound` (connect)
+  rules for that directory, plus `system-socket AF_UNIX`; the directory also
+  needs `allowRead`/`allowWrite` for its non-socket files. `allowLocalBinding`
+  adds loopback TCP bind/inbound and connects to `localhost`.
+- **Host-only commands.** `excludedCommands: ["just ios-device-logs:*"]` runs a
+  matching command — and its whole process tree — on the host, unsandboxed.
+  The prefix matches the command start; arguments may follow, and a compound or
+  piped command line is not excluded. This is the permanent form of a
+  `command` exception: narrow, explicit, and chosen by the human who writes the
+  file.
+
 To make a path permanently writable, add it to `filesystem.allowWrite` in
 `sandbox.json` yourself. For a network host, add it to
 `network.allowedDomains`. Prefer narrow entries (`~/.gradle/caches`) over
 `~/.gradle`.
+
+### Maintaining this profile from its own repo
+
+`agentDirWriteProjects` (top level in `sandbox.json`, and under `permissions` in
+`guardian.json`) lists absolute project roots whose sessions may write the agent
+dir. `install.sh` adds this repo's own root, so a session in `~/g/adripi` can
+repair `extensions/sandbox.json`, `guardian.json`, `settings.json` or the
+deployed fork sources instead of asking you to switch the sandbox off.
+
+- Read from the **global** profile only: a project or session layer cannot widen
+  it, and a session outside the listed roots still sees the full lock.
+- `<agentDir>/auth.json` and `<agentDir>/guardian-sessions` stay read- and
+  write-denied either way, and `<workspace>/.pi` (the project's own policy file)
+  stays mandatory deny-write.
+- This is a real privilege: a session in a listed workspace can change what Pi
+  and Guardian load next, including the sandbox profile and the reviewer.
+  Delete the entry from both live configs to revoke it.
 
 ### Remote git
 

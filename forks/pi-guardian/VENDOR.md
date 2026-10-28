@@ -50,6 +50,19 @@ deltas are listed below; nothing else is modified.
    `host:*` in both directions.
 10. `test/sandbox-{broker,review}.test.ts` — decision order, scope narrowing,
     breaker, request validation, and rule precedence.
+11. `src/{types,config,permissions}.ts` — `permissions.agentDirWriteProjects`:
+    absolute project roots whose sessions may maintain the agent directory
+    (that is how this repo installs and repairs the profile it ships). It lifts
+    only the two self-protection rules for that directory — `Edit(<agentDir>/**)`
+    and `Read(<agentDir>/guardian.json)` — and only for a cwd inside a listed
+    root; `auth.json` and `guardian-sessions/**` stay read- and write-denied, and
+    every user deny still applies. `install.sh` adds this repo's own root; delete
+    the entry to revoke.
+12. `src/permissions.ts` — `write`/`edit` calls are matched on their target
+    `path` only. Scanning the payload made a document that merely *mentions* a
+    protected path (a README explaining the sandbox, say) un-editable, which
+    blocked legitimate maintenance twice. Shells, codemode, MCP and extension
+    inputs keep the literal scan.
 
 Upstream 0.2.0 already covers the rest of what the 0.1.0 fork needed: the
 deterministic `permissions.allow` / `permissions.deny` rule family (evaluated

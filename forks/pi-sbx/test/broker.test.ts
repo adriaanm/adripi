@@ -180,3 +180,24 @@ describe("hasSessionException", () => {
 		expect(hasSessionException(layer, "command", "other")).toBe(false);
 	});
 });
+
+describe("config-layer network targets", () => {
+	it("stores an unknown-port grant as the bare host the schema accepts", async () => {
+		const { configNetworkTarget } = await import("../src/broker.ts");
+		expect(configNetworkTarget("example.com:*")).toBe("example.com");
+		expect(configNetworkTarget("example.com:443")).toBe("example.com:443");
+		expect(configNetworkTarget("[::1]:*")).toBe("[::1]");
+		expect(configNetworkTarget("[::1]:443")).toBe("[::1]:443");
+
+		const layer = withSessionException({}, "network", "example.com:*");
+		expect(layer.network?.allowedDomains).toEqual(["example.com"]);
+	});
+
+	it("finds and removes `host:*` grants through their config spelling", async () => {
+		const { hasSessionException, withoutSessionException } = await import("../src/broker.ts");
+		const layer = withSessionException({}, "network", "api.example.com:*");
+		expect(hasSessionException(layer, "network", "api.example.com:*")).toBe(true);
+		expect(hasSessionException(layer, "network", "api.example.com")).toBe(true);
+		expect(withoutSessionException(layer, "network", "api.example.com:*").network?.allowedDomains).toBeUndefined();
+	});
+});

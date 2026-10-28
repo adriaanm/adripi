@@ -26,9 +26,26 @@
     "deniedDomains": []
   },
   "filesystem": {
-    "denyRead": ["~/.ssh", "~/.aws", "~/.gnupg", "~/.config/gh"],
+    "denyRead": [
+      "~/.ssh",
+      "~/.aws",
+      "~/.gnupg",
+      "~/.config/gh"
+    ],
     "allowRead": [],
-    "allowWrite": ["."],
-    "denyWrite": ["**/.env", "**/.env.*", "**/*.pem", "**/*.key", "**/*.p12", "**/*.pfx"]
-  }
+    "allowWrite": [
+      "."
+    ],
+    "denyWrite": [
+      "**/.env",
+      "**/.env.*",
+      "**/*.pem",
+      "**/*.key",
+      "**/*.p12",
+      "**/*.pfx"
+    ]
+  },
+  "agentDirWriteProjects": [
+    "/Users/adriaan/g/adripi"
+  ]
 }

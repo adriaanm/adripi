@@ -4,7 +4,7 @@ import {
 } from "@anthropic-ai/sandbox-runtime";
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { open, rename, unlink } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { buildHardeningPaths, type HardeningPaths } from "./hardening.ts";
 
@@ -94,6 +94,7 @@ const KNOWN_TOP_LEVEL = new Set([
   "allowUnsandboxedCommands",
   "excludedCommands",
   "environment",
+  "agentDirWriteProjects",
   "network",
   "filesystem",
   "credentials",
@@ -115,10 +116,48 @@ function isObject(value: unknown): value is JsonObject {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function merge(base: JsonObject, override: JsonObject): JsonObject {
+/**
+ * Arrays that layers above the user's own file extend instead of replacing.
+ * They are allow lists: a project or session layer may add a grant, and must
+ * not drop one it inherits. Replacement would silently revoke the global
+ * package-host allowlist (or the workspace itself) as soon as a project or
+ * session layer names a single entry, so a grant like "write /tmp/sgo-501"
+ * would break workspace writes instead of widening them.
+ *
+ * The defaults → global step keeps replace semantics: the user's file owns its
+ * policy and must be able to drop a default (the host temp root is writable by
+ * pi-sbx's defaults and deliberately not by this stack). Every other array,
+ * deny lists included, also keeps replace semantics, which is what the
+ * settings UI's remove action expects.
+ */
+const UNIONED_ARRAYS: ReadonlyArray<readonly [string, string]> = [
+  ["network", "allowedDomains"],
+  ["network", "allowUnixSockets"],
+  ["filesystem", "allowRead"],
+  ["filesystem", "allowWrite"],
+];
+
+function stringEntries(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+function unionKey(section: string, key: string): boolean {
+  return UNIONED_ARRAYS.some(([candidateSection, candidateKey]) => candidateSection === section && candidateKey === key);
+}
+
+function merge(base: JsonObject, override: JsonObject, section = "", unionGrants = false): JsonObject {
   const output: JsonObject = { ...base };
   for (const [key, value] of Object.entries(override)) {
-    output[key] = isObject(value) && isObject(base[key]) ? merge(base[key] as JsonObject, value) : value;
+    const existing = base[key];
+    if (isObject(value) && isObject(existing)) {
+      output[key] = merge(existing, value, key, unionGrants);
+      continue;
+    }
+    if (unionGrants && Array.isArray(value) && unionKey(section, key)) {
+      output[key] = dedupe([...stringEntries(existing), ...stringEntries(value)]);
+      continue;
+    }
+    output[key] = value;
   }
   return output;
 }
@@ -150,13 +189,48 @@ function dedupe(values: string[]): string[] {
   return [...new Set(values)];
 }
 
-function applyHardening(raw: JsonObject, hardening: HardeningPaths): JsonObject {
+/**
+ * Human-owned escape hatch: a project root listed in the *global* profile may
+ * write the agent directory, so the repo that installs this stack can maintain
+ * the profile it installs. It is read from the global layer only — a project or
+ * session layer must not widen the boundary — and only for a cwd inside a listed
+ * root. Credentials and Guardian's session transcripts stay denied either way.
+ */
+function agentDirWriteAllowed(cwd: string, value: unknown, warnings: string[]): boolean {
+  if (value === undefined) return false;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || !isAbsolute(entry))) {
+    warnings.push("Ignored agentDirWriteProjects: expected an array of absolute project roots");
+    return false;
+  }
+  return value.some((root) => {
+    const rel = relative(resolve(root), resolve(cwd));
+    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  });
+}
+
+/** Drop the agent-dir write lock for an allowed project, keeping the secrets. */
+function openAgentDir(hardening: HardeningPaths, agentDir: string, globalConfigPath: string): HardeningPaths {
+  const stillDenied = [join(agentDir, "auth.json"), join(agentDir, "guardian-sessions")];
+  const keep = (entry: string) => entry !== agentDir && entry !== globalConfigPath;
+  return {
+    ...hardening,
+    denyRead: [...hardening.denyRead.filter(keep), ...stillDenied],
+    denyWrite: [...hardening.denyWrite.filter(keep), ...stillDenied],
+    mandatoryDenyWrite: [...hardening.mandatoryDenyWrite.filter(keep), ...stillDenied],
+  };
+}
+
+function applyHardening(raw: JsonObject, hardening: HardeningPaths, agentDirWrite?: string): JsonObject {
   const filesystem = isObject(raw.filesystem) ? { ...raw.filesystem } : {};
   filesystem.denyRead = dedupe([...(Array.isArray(filesystem.denyRead) ? filesystem.denyRead as string[] : []), ...hardening.denyRead]);
   filesystem.denyWrite = dedupe([...(Array.isArray(filesystem.denyWrite) ? filesystem.denyWrite as string[] : []), ...hardening.denyWrite]);
   filesystem.allowWrite = dedupe([
     ...(Array.isArray(filesystem.allowWrite) ? filesystem.allowWrite as string[] : []),
     ...(hardening.worktreeGitDir ? [hardening.worktreeGitDir] : []),
+    // A granted project needs an allow root, not just a lifted deny: writes are
+    // allowlist-based, and denyWrite entries for credentials/transcripts are
+    // emitted after this allow so they still win.
+    ...(agentDirWrite ? [agentDirWrite] : []),
   ]);
 
   const environment = isObject(raw.environment) ? raw.environment : {};
@@ -194,11 +268,18 @@ export function loadConfig(options: LoadConfigOptions): EffectiveSandboxConfig {
   const sessionRaw = options.sessionConfig ?? {};
   if (existsSync(paths.project) && !options.allowProjectConfig) warnings.push(`Ignored untrusted project config: ${paths.project}`);
 
-  const raw = merge(merge(merge(DEFAULT_CONFIG, globalRaw), projectRaw), sessionRaw);
+  const raw = merge(merge(merge(DEFAULT_CONFIG, globalRaw), projectRaw, "", true), sessionRaw, "", true);
   for (const key of Object.keys(raw)) if (!KNOWN_TOP_LEVEL.has(key)) warnings.push(`Unknown sandbox config key: ${key}`);
 
-  const hardening = buildHardeningPaths(options.cwd, options.agentDir, paths.global, paths.project);
-  const hardened = applyHardening(raw, hardening);
+  if (projectRaw.agentDirWriteProjects !== undefined || sessionRaw.agentDirWriteProjects !== undefined) {
+    warnings.push("Ignored agentDirWriteProjects outside the global profile");
+  }
+  let hardening = buildHardeningPaths(options.cwd, options.agentDir, paths.global, paths.project);
+  const agentDirWrite = agentDirWriteAllowed(options.cwd, globalRaw.agentDirWriteProjects, warnings)
+    ? options.agentDir
+    : undefined;
+  if (agentDirWrite) hardening = openAgentDir(hardening, agentDirWrite, paths.global);
+  const hardened = applyHardening(raw, hardening, agentDirWrite);
 
   const enabled = bool(hardened.enabled, "enabled");
   const failIfUnavailable = bool(hardened.failIfUnavailable, "failIfUnavailable");
@@ -208,7 +289,7 @@ export function loadConfig(options: LoadConfigOptions): EffectiveSandboxConfig {
     ? { deny: stringArray(hardened.environment.deny ?? [], "environment.deny") }
     : { deny: [] };
 
-  const runtimeInput = Object.fromEntries(Object.entries(hardened).filter(([key]) => !["enabled", "failIfUnavailable", "allowUnsandboxedCommands", "excludedCommands", "environment"].includes(key)));
+  const runtimeInput = Object.fromEntries(Object.entries(hardened).filter(([key]) => !["enabled", "failIfUnavailable", "allowUnsandboxedCommands", "excludedCommands", "environment", "agentDirWriteProjects"].includes(key)));
   const parsed = SandboxRuntimeConfigSchema.safeParse(runtimeInput);
   if (!parsed.success) throw new Error(`Invalid sandbox runtime config: ${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`);
 
