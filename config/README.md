@@ -26,10 +26,15 @@ to sandboxed commands as `PI_SANDBOX_SCRATCH`. It is added to the effective
 profile at session start, removed at shutdown, and never written to this config.
 Temporary files belong there; no exception is needed.
 
-Subagent outputs are written to `<agentDir>/sessions/<encoded-cwd>/subagent-artifacts/`.
-That one directory is added to the session's `allowRead` at start-up so the agent
-can read back its own subagent results; the session transcript, the rest of the
-agent dir, and other projects' artifacts stay unreadable.
+## Agent directory
+
+The agent dir is readable except for what is actually sensitive: `auth.json` and
+`models.json` (credentials), `guardian.json` and `extensions/sandbox.json` (the
+sandbox and reviewer configuration), and `guardian-sessions` (reviewer
+transcripts). Everything else — installed packages and their skills, session
+transcripts and subagent artifacts, `settings.json`, the policy text — is data a
+sandboxed command may legitimately read. Writes are separate: the agent dir stays
+denied for every project except one granted through `agentDirWriteProjects`.
 
 ## Paths outside the project
 

@@ -74,37 +74,27 @@ whose escalation path is decided by `pi-guardian` instead of a human-only prompt
     rest of the session. `test/broker.test.ts` and
     `test/config-hardening.test.ts` cover all of it.
 
-11. **`agentDirWriteProjects`** (`src/config.ts`). An absolute project root
-    listed in the *global* profile may write (and read) the agent dir, so the
-    repo that installs this stack can repair the profile it installs. Read from
-    the global layer only — a project or session layer must not widen it — and
-    matched against the session cwd, including subdirectories. The hardening
-    paths drop `agentDir` and the global config file from `denyRead`/`denyWrite`/
-    `mandatoryDenyWrite`; `<agentDir>/auth.json` and `<agentDir>/guardian-sessions`
-    are added back to all three, and `<workspace>/.pi` (the project's own policy)
-    stays mandatory deny-write. `install.sh` grants this repo's root; removing
-    the entry revokes it. `test/config-hardening.test.ts` covers the reachable
-    root boundary, subdirectories, a lookalike sibling, malformed values, and a
-    project-layer attempt to widen it.
+11. **Agent-dir reads are scoped to what is sensitive** (`src/hardening.ts`).
+    `denyRead` no longer covers the whole agent dir. Hidden are only
+    `auth.json`, `models.json`, `guardian.json`, `extensions/sandbox.json` and
+    `guardian-sessions` — the credentials and the sandbox/guardian
+    configuration. Installed packages, skills (`npm/node_modules/pi-subagents/skills/…`),
+    session transcripts, `settings.json` and the policy text stay readable, so a
+    normal `read` of a skill or a subagent artifact no longer trips the sandbox.
+    Writes remain denied wholesale.
 
-    Operational consequence in `<workspace>/.pi/sandbox.json`: unix-socket IPC is
-    `network.allowUnixSockets` (SRT emits `network-bind` *and*
-    `network-outbound` per directory), loopback TCP is `allowLocalBinding`, and
-    permanent host execution is a `prefix:*` entry in `excludedCommands` (the
-    whole process tree runs unsandboxed, so `just … → xcrun …` works).
-
-12. **Subagent artifacts are readable** (`src/session-artifacts.ts`, wired in
-    `src/index.ts`). Pi writes subagent outputs to
-    `<agentDir>/sessions/<encoded-cwd>/subagent-artifacts/…`, i.e. inside the
-    agent directory, which the sandbox denies wholesale — so the agent could not
-    read back its own subagent results. At `session_start` the session's
-    `getSessionDir()` names the exact directory and it is added to the effective
-    profile's `allowRead` (copy only, never the persisted config). Deliberately
-    narrow: the transcript `.jsonl`, the sibling session-state directories, the
-    rest of the agent dir, and other projects' artifact directories all stay
-    unreadable, and nothing becomes writable. `test/session-artifacts.test.ts`
-    covers the derivation, the copy/dedupe behaviour, and the read matrix against
-    a locked agent dir.
+12. **`agentDirWriteProjects`** (`src/config.ts`). An absolute project root
+    listed in the *global* profile may write the agent dir, so the repo that
+    installs this stack can repair the profile it installs. Read from the global
+    layer only — a project or session layer must not widen it — and matched
+    against the session cwd, including subdirectories. The grant drops the
+    agent-dir write lock and opens reads of the two config files it maintains
+    (`guardian.json`, `extensions/sandbox.json`); `auth.json`, `models.json` and
+    `guardian-sessions` stay read- and write-denied even there, and
+    `<workspace>/.pi` stays mandatory deny-write. `install.sh` grants this repo's
+    root; removing the entry revokes it. `test/config-hardening.test.ts` covers
+    the read matrix, the reachable root boundary, subdirectories, a lookalike
+    sibling, malformed values, and a project-layer attempt to widen it.
 
 Remaining (W5-W6 in `docs/plan-sandbox-broker.md`): the stack swap and the
 architecture/README rewrite.

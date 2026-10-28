@@ -29,7 +29,6 @@ import { registerFileGate } from "./file-gate.ts";
 import { buildHardeningPaths } from "./hardening.ts";
 import { SandboxController, RuntimeSandboxManager } from "./manager.ts";
 import { createScratchpad, SCRATCH_ENV, type Scratchpad, sweepScratchpads, withScratchpad } from "./scratch.ts";
-import { sessionArtifactsDir, withSessionArtifacts } from "./session-artifacts.ts";
 import {
   decideSandboxException,
   type SandboxScope,
@@ -107,8 +106,6 @@ export default function sandboxExtension(pi: ExtensionAPI) {
   let currentContext: ExtensionContext | undefined;
   let config: EffectiveSandboxConfig | undefined;
   let scratchpad: Scratchpad | undefined;
-  /** `sessions/<encoded-cwd>/subagent-artifacts` for this session, if Pi reports it. */
-  let artifactsDir: string | undefined;
   /** `once` grants expire after the next sandboxed command (network: next connection). */
   let pendingOnceGrants: Array<{ surface: SandboxSurface; target: string; grantedByToolCallId: string }> = [];
   const pendingNetworkOnce = new Set<string>();
@@ -231,9 +228,6 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       // The scratchpad is policy, not an exception: the agent can always write
       // temporary files there, and nothing else under the temp root opens up.
       if (scratchpad) config = withScratchpad(config, scratchpad.dir);
-      // Subagent artifacts sit in the agent dir and are this session's own
-      // outputs; make just that directory readable, nothing else.
-      config = withSessionArtifacts(config, artifactsDir);
       applyOverlay(config);
       for (const warning of config.warnings) ctx.ui.notify(warning, "warning");
       sessionEnabled = (sessionEnabledOverride ?? config.enabled) && !Boolean(pi.getFlag("no-sandbox"));
@@ -732,12 +726,6 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       // best effort
     }
     scratchpad = await createScratchpad();
-    try {
-      artifactsDir = sessionArtifactsDir(ctx.sessionManager.getSessionDir());
-    } catch {
-      // Older Pi without the accessor: keep the agent dir closed.
-      artifactsDir = undefined;
-    }
     projectApproved = await resolveProjectApproval(ctx);
     await reloadConfig(ctx, true);
     sessionStarted = true;
@@ -758,7 +746,6 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     hostGrants.clear();
     await scratchpad?.dispose();
     scratchpad = undefined;
-    artifactsDir = undefined;
   });
 
   pi.registerCommand("sandbox", {

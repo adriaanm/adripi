@@ -6,7 +6,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from "no
 import { open, rename, unlink } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { buildHardeningPaths, type HardeningPaths } from "./hardening.ts";
+import { buildHardeningPaths, maintainableAgentDirReads, sensitiveAgentDirReads, type HardeningPaths } from "./hardening.ts";
 
 export interface ExtensionConfigFields {
   enabled: boolean;
@@ -208,13 +208,20 @@ function agentDirWriteAllowed(cwd: string, value: unknown, warnings: string[]): 
   });
 }
 
-/** Drop the agent-dir write lock for an allowed project, keeping the secrets. */
+/**
+ * Drop the agent-dir write lock for an allowed project. Reads are already open
+ * except for the sensitive paths (see `sensitiveAgentDirReads`), so only the
+ * write side changes — and the credentials and transcripts stay unwritable.
+ */
 function openAgentDir(hardening: HardeningPaths, agentDir: string, globalConfigPath: string): HardeningPaths {
-  const stillDenied = [join(agentDir, "auth.json"), join(agentDir, "guardian-sessions")];
   const keep = (entry: string) => entry !== agentDir && entry !== globalConfigPath;
+  const readable = new Set(maintainableAgentDirReads(agentDir));
+  const stillDenied = sensitiveAgentDirReads(agentDir);
   return {
     ...hardening,
-    denyRead: [...hardening.denyRead.filter(keep), ...stillDenied],
+    // Reads open for the config this project maintains; credentials and the
+    // reviewer's transcripts stay closed even here.
+    denyRead: hardening.denyRead.filter((entry) => !readable.has(entry)),
     denyWrite: [...hardening.denyWrite.filter(keep), ...stillDenied],
     mandatoryDenyWrite: [...hardening.mandatoryDenyWrite.filter(keep), ...stillDenied],
   };

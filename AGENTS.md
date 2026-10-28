@@ -61,17 +61,17 @@ dir. `install.sh` adds this repo, which is why a session here can repair the
 profile it installs. Keep it that way; it is the only reason agent-dir edits are
 not blocked.
 
-- `<agentDir>/auth.json` and `<agentDir>/guardian-sessions` stay read- and
-  write-denied everywhere, for every project.
+- Reads are scoped, not blanketed: only `auth.json`, `models.json`,
+  `guardian.json`, `extensions/sandbox.json` and `guardian-sessions` are hidden.
+  Skills, installed packages, session transcripts and subagent artifacts are
+  readable, so a normal tool read does not need an exception. A granted project
+  additionally reads the two config files it maintains. Credentials stay closed
+  even for it, and writes are denied everywhere unless granted.
 - `<workspace>/.pi` stays mandatory deny-write, so a granted project still cannot
   edit its own project policy.
 - Guardian decides file-tool maintenance calls in its **rule engine**
   (`agentDirWriteProjects(<path>)`), not via the reviewer: the reviewer cannot
   see which project holds the grant and would refuse its own maintenance path.
-- Subagent outputs live in `<agentDir>/sessions/<encoded-cwd>/subagent-artifacts/`.
-  That directory is added to the session's `allowRead` at start-up
-  (`src/session-artifacts.ts`); the transcript, sibling session dirs and other
-  projects' artifacts stay unreadable.
 
 ## Commit regularly
 

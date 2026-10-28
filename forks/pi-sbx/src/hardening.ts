@@ -24,6 +24,28 @@ export function detectWorktreeCommonGitDir(cwd: string): string | undefined {
   }
 }
 
+/**
+ * What inside the agent directory is actually sensitive: credentials and the
+ * sandbox/guardian configuration. Reads are denied only for these; everything
+ * else there (installed packages, skills, extension configs, settings) is data
+ * the agent may legitimately need — a SKILL.md under `npm/node_modules` is not a
+ * credential store. Writes stay denied wholesale; see hardening below.
+ */
+export function sensitiveAgentDirReads(agentDir: string): string[] {
+  return [
+    join(agentDir, "auth.json"),                 // provider credentials and OAuth tokens
+    join(agentDir, "models.json"),               // provider definitions, often with API keys
+    join(agentDir, "guardian.json"),             // reviewer and broker configuration
+    join(agentDir, "extensions", "sandbox.json"), // the sandbox profile itself
+    join(agentDir, "guardian-sessions"),         // reviewer transcripts
+  ];
+}
+
+/** The subset a maintenance project (agentDirWriteProjects) may read. */
+export function maintainableAgentDirReads(agentDir: string): string[] {
+  return [join(agentDir, "guardian.json"), join(agentDir, "extensions", "sandbox.json")];
+}
+
 export function buildHardeningPaths(cwd: string, agentDir: string, globalConfigPath: string, projectConfigPath: string): HardeningPaths {
   const denyWrite = [agentDir, globalConfigPath, projectConfigPath, dirname(projectConfigPath)];
   const gitDir = join(cwd, ".git");
@@ -33,7 +55,7 @@ export function buildHardeningPaths(cwd: string, agentDir: string, globalConfigP
   if (worktreeGitDir) denyWrite.push(join(worktreeGitDir, "config"), join(worktreeGitDir, "hooks"));
 
   return {
-    denyRead: [agentDir],
+    denyRead: sensitiveAgentDirReads(agentDir),
     denyWrite,
     mandatoryDenyWrite: [...denyWrite],
     worktreeGitDir,

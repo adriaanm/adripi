@@ -14,6 +14,7 @@ import {
   updateProjectConfig,
 } from "../src/config.ts";
 import { buildHardeningPaths, detectWorktreeCommonGitDir } from "../src/hardening.ts";
+import { canRead } from "../src/path-policy.ts";
 
 describe("config and hardening", () => {
   it("merges trusted project config and appends mandatory rules", () => {
@@ -29,7 +30,13 @@ describe("config and hardening", () => {
     // the trusted project layer adds to it instead of replacing it.
     expect(config.runtime.network.allowedDomains).toEqual(["global.test", "project.test"]);
     expect(config.excludedCommands).toEqual(["docker:*"]);
-    expect(config.runtime.filesystem.denyRead).toContain(agent);
+    // The agent dir is no longer read-denied wholesale; only the sensitive
+    // files are, so skills and installed packages stay readable.
+    expect(config.runtime.filesystem.denyRead).not.toContain(agent);
+    for (const sensitive of ["auth.json", "models.json", "guardian.json", "guardian-sessions"]) {
+      expect(config.runtime.filesystem.denyRead).toContain(join(agent, sensitive));
+    }
+    expect(config.runtime.filesystem.denyRead).toContain(join(agent, "extensions", "sandbox.json"));
     expect(config.runtime.filesystem.denyWrite).toContain(join(root, ".pi"));
     expect(config.runtime.credentials?.envVars?.some((entry) => entry.name === "ANTHROPIC_API_KEY" && entry.mode === "deny")).toBe(true);
   });
@@ -283,5 +290,52 @@ describe("agentDirWriteProjects", () => {
     const malformed = loadConfig({ cwd: project, agentDir: agent2, configDirName: ".pi", allowProjectConfig: false });
     expect(malformed.hardening.mandatoryDenyWrite).toContain(agent2);
     expect(malformed.warnings.some((warning) => warning.startsWith("Ignored agentDirWriteProjects"))).toBe(true);
+  });
+});
+
+describe("agent dir read policy", () => {
+  const setup = (projects: unknown = []) => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-agentread-"));
+    const agent = join(root, "agentdir");
+    mkdirSync(join(agent, "extensions"), { recursive: true });
+    mkdirSync(join(agent, "sessions", "--proj--"), { recursive: true });
+    writeFileSync(join(agent, "extensions", "sandbox.json"), JSON.stringify({ agentDirWriteProjects: projects }));
+    return { root, agent };
+  };
+  const reads = (config: ReturnType<typeof loadConfig>, path: string) =>
+    canRead(path, "/work/project", {
+      denyRead: config.hardening.denyRead,
+      allowRead: config.runtime.filesystem.allowRead ?? [],
+      allowWrite: config.runtime.filesystem.allowWrite,
+      denyWrite: config.runtime.filesystem.denyWrite ?? [],
+      mandatoryDenyWrite: config.hardening.mandatoryDenyWrite,
+    });
+
+  it("reads skills, packages and settings, but not credentials or config", () => {
+    const { root, agent } = setup();
+    const config = loadConfig({ cwd: root, agentDir: agent, configDirName: ".pi", allowProjectConfig: false });
+
+    // Normal, useful reads.
+    expect(reads(config, join(agent, "npm", "node_modules", "pi-subagents", "skills", "x", "SKILL.md"))).toBe(true);
+    expect(reads(config, join(agent, "sessions", "--proj--", "subagent-artifacts", "outputs", "a", "review.md"))).toBe(true);
+    expect(reads(config, join(agent, "settings.json"))).toBe(true);
+    expect(reads(config, join(agent, "guardian-policy.md"))).toBe(true);
+    // Nothing under the sandbox/guardian config or the credential stores.
+    expect(reads(config, join(agent, "auth.json"))).toBe(false);
+    expect(reads(config, join(agent, "models.json"))).toBe(false);
+    expect(reads(config, join(agent, "guardian.json"))).toBe(false);
+    expect(reads(config, join(agent, "extensions", "sandbox.json"))).toBe(false);
+    expect(reads(config, join(agent, "guardian-sessions", "s.jsonl"))).toBe(false);
+  });
+
+  it("lets a maintenance project read its config but still not the secrets", () => {
+    const project = mkdtempSync(join(tmpdir(), "pi-sbx-proj-"));
+    const { agent } = setup([project]);
+    const config = loadConfig({ cwd: project, agentDir: agent, configDirName: ".pi", allowProjectConfig: false });
+
+    expect(reads(config, join(agent, "extensions", "sandbox.json"))).toBe(true);
+    expect(reads(config, join(agent, "guardian.json"))).toBe(true);
+    expect(reads(config, join(agent, "auth.json"))).toBe(false);
+    expect(reads(config, join(agent, "guardian-sessions", "s.jsonl"))).toBe(false);
   });
 });
