@@ -163,9 +163,11 @@ test("built-in self-protection survives empty deny and broad allow", async () =>
 	for (const file of protectedFiles) {
 		for (const tool of ["edit", "write"]) assert.equal(outcome(tool, join(directory, file)), "deny");
 	}
-	for (const file of ["guardian.json", "auth.json"]) assert.equal(outcome("read", join(directory, file)), "deny");
-	assert.equal(outcome("read", join(directory, "guardian-sessions/session.jsonl")), "deny");
-	assert.equal(outcome("read", join(directory, "settings.json")), "allow");
+	// Only credentials are unreadable; config, transcripts and settings are not.
+	assert.equal(outcome("read", join(directory, "auth.json")), "deny");
+	for (const file of ["guardian.json", "guardian-sessions/session.jsonl", "settings.json", "models.json"]) {
+		assert.equal(outcome("read", join(directory, file)), "allow", file);
+	}
 	// Skills are read from the agent dir, so edit-only protection must not block reads or listings.
 	assert.equal(outcome("read", join(directory, "skills/example/SKILL.md")), "allow");
 	assert.equal(
@@ -221,7 +223,7 @@ test("agentDirWriteProjects lifts only the agent-dir self-protection rules", asy
 	const project = join(directory, "project");
 	const other = join(directory, "other");
 	const config = loadGuardianConfig(directory, "/policy");
-	const permissions = { allow: ["Write", "Edit"], deny: config.permissions.deny, agentDirWriteProjects: [project] };
+	const permissions = { allow: ["Write", "Edit", "Read"], deny: config.permissions.deny, agentDirWriteProjects: [project] };
 	void other;
 
 	const write = (cwd: string, path: string) =>
@@ -229,15 +231,14 @@ test("agentDirWriteProjects lifts only the agent-dir self-protection rules", asy
 	assert.equal(write(project, join(directory, "extensions", "sandbox.json")), "allow");
 	assert.equal(write(join(project, "forks", "pi-sbx"), join(directory, "guardian.json")), "allow");
 	assert.equal(write(other, join(directory, "extensions", "sandbox.json")), "deny");
-	// Credentials and the session transcripts stay denied everywhere.
+	// Credentials and Guardian's audit trail stay write-denied everywhere.
 	assert.equal(write(project, join(directory, "auth.json")), "deny");
 	assert.equal(write(project, join(config.guardianSessionDir, "session.jsonl")), "deny");
-	// Reading the profile (Guardian's own config included) is decided by the rule
-	// engine, not sent to the reviewer, which cannot see who holds the grant.
+	// Reads are open for everyone now; only credentials are hidden.
 	const read = (cwd: string, path: string) =>
 		evaluatePermissions(permissions, "read", { path }, cwd, directory).outcome;
 	assert.equal(read(project, join(directory, "guardian.json")), "allow");
-	assert.equal(read(project, join(directory, "extensions", "sandbox.json")), "allow");
-	// Without the grant the config is still a fixed deny.
-	assert.equal(read(other, join(directory, "guardian.json")), "deny");
+	assert.equal(read(other, join(directory, "guardian.json")), "allow");
+	assert.equal(read(project, join(directory, "auth.json")), "deny");
+	assert.equal(read(other, join(directory, "auth.json")), "deny");
 });

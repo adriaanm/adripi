@@ -86,8 +86,8 @@ export function validateRules(value: unknown, name: string): string[] {
  * Self-protection rules that config cannot remove, in a stable order. The agent
  * may not change anything Pi or Guardian loads: the agent dir (`~/.pi/agent`
  * unless PI_CODING_AGENT_DIR moves it), the Guardian session dir, and Guardian's
- * own package. Reads stay open so skills under the agent dir work, except for
- * credentials, Guardian's config, and the reviewer's transcripts.
+ * own package. Reads stay open — skills, transcripts, configuration, Guardian's
+ * own audit trail — except for provider credentials.
  */
 export function builtInDenyRules(agentDir: string, sessionDir: string): string[] {
 	const packageDir = fileURLToPath(new URL("../", import.meta.url)).replace(/\/$/, "");
@@ -96,8 +96,6 @@ export function builtInDenyRules(agentDir: string, sessionDir: string): string[]
 	return [
 		...directories.map((directory) => `Edit(${directory}/**)`),
 		`Read(${absolute(join(agentDir, "auth.json"))})`,
-		`Read(${absolute(join(agentDir, "guardian.json"))})`,
-		`Read(${absolute(sessionDir)}/**)`,
 	];
 }
 
@@ -407,18 +405,18 @@ export function evaluatePermissions(
 
 	// A project root listed in permissions.agentDirWriteProjects may maintain the
 	// agent directory (that is how the repo installing this stack keeps its own
-	// profile). Only the two self-protection rules for that directory are lifted;
-	// credentials, the session transcripts, and every user deny still apply.
+	// profile). Only the directory-wide edit lock is lifted; credentials and
+	// every user deny still apply.
 	// The file tools on that directory are decided here, not by the reviewer.
 	const writable = (permissions.agentDirWriteProjects ?? []).some((root) => {
 		const rel = relative(resolve(root), resolve(cwd));
 		return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 	});
 	const baseAgentDir = `/${resolve(agentDir)}`;
-	const lifted = new Set([`Edit(${baseAgentDir}/**)`, `Read(${baseAgentDir}/guardian.json)`]);
+	const lifted = new Set([`Edit(${baseAgentDir}/**)`]);
 	if (writable) {
-		// Maintaining the profile never includes exfiltrating credentials or
-		// reading Guardian's transcripts, and those stay write-denied too.
+		// Maintaining the profile never includes touching provider credentials or
+		// rewriting Guardian's own audit trail.
 		for (const text of [`Edit(${baseAgentDir}/auth.json)`, `Edit(${baseAgentDir}/guardian-sessions/**)`]) {
 			if (denies(parseRule(text), call)) return { outcome: "deny", rule: text };
 		}

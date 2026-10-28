@@ -25,25 +25,23 @@ export function detectWorktreeCommonGitDir(cwd: string): string | undefined {
 }
 
 /**
- * What inside the agent directory is actually sensitive: credentials and the
- * sandbox/guardian configuration. Reads are denied only for these; everything
- * else there (installed packages, skills, extension configs, settings) is data
- * the agent may legitimately need — a SKILL.md under `npm/node_modules` is not a
- * credential store. Writes stay denied wholesale; see hardening below.
+ * The one agent-dir file that must never be read: provider credentials and OAuth
+ * tokens. Everything else there is readable — installed packages, skills, session
+ * transcripts, settings, the sandbox and reviewer configuration — because the
+ * agent legitimately needs them and none of them carries a secret.
  */
-export function sensitiveAgentDirReads(agentDir: string): string[] {
-  return [
-    join(agentDir, "auth.json"),                 // provider credentials and OAuth tokens
-    join(agentDir, "models.json"),               // provider definitions, often with API keys
-    join(agentDir, "guardian.json"),             // reviewer and broker configuration
-    join(agentDir, "extensions", "sandbox.json"), // the sandbox profile itself
-    join(agentDir, "guardian-sessions"),         // reviewer transcripts
-  ];
+export function protectedAgentDirReads(agentDir: string): string[] {
+  return [join(agentDir, "auth.json")];
 }
 
-/** The subset a maintenance project (agentDirWriteProjects) may read. */
-export function maintainableAgentDirReads(agentDir: string): string[] {
-  return [join(agentDir, "guardian.json"), join(agentDir, "extensions", "sandbox.json")];
+/**
+ * Files no project may write, not even one granted `agentDirWriteProjects`:
+ * credentials, and the reviewer's own audit trail. The sandbox and reviewer
+ * configuration is writable only from a granted project (the whole agent dir is
+ * otherwise deny-write).
+ */
+export function protectedAgentDirWrites(agentDir: string): string[] {
+  return [join(agentDir, "auth.json"), join(agentDir, "guardian-sessions")];
 }
 
 export function buildHardeningPaths(cwd: string, agentDir: string, globalConfigPath: string, projectConfigPath: string): HardeningPaths {
@@ -55,7 +53,7 @@ export function buildHardeningPaths(cwd: string, agentDir: string, globalConfigP
   if (worktreeGitDir) denyWrite.push(join(worktreeGitDir, "config"), join(worktreeGitDir, "hooks"));
 
   return {
-    denyRead: sensitiveAgentDirReads(agentDir),
+    denyRead: protectedAgentDirReads(agentDir),
     denyWrite,
     mandatoryDenyWrite: [...denyWrite],
     worktreeGitDir,

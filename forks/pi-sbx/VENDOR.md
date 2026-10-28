@@ -74,27 +74,24 @@ whose escalation path is decided by `pi-guardian` instead of a human-only prompt
     rest of the session. `test/broker.test.ts` and
     `test/config-hardening.test.ts` cover all of it.
 
-11. **Agent-dir reads are scoped to what is sensitive** (`src/hardening.ts`).
-    `denyRead` no longer covers the whole agent dir. Hidden are only
-    `auth.json`, `models.json`, `guardian.json`, `extensions/sandbox.json` and
-    `guardian-sessions` — the credentials and the sandbox/guardian
-    configuration. Installed packages, skills (`npm/node_modules/pi-subagents/skills/…`),
-    session transcripts, `settings.json` and the policy text stay readable, so a
-    normal `read` of a skill or a subagent artifact no longer trips the sandbox.
-    Writes remain denied wholesale.
+11. **Agent-dir reads are open except for credentials** (`src/hardening.ts`).
+    `denyRead` names exactly one file, `<agentDir>/auth.json`. Installed packages,
+    skills, session transcripts, subagent artifacts, `settings.json`,
+    `guardian.json`, `extensions/sandbox.json` and Guardian's transcripts are all
+    data a sandboxed command may need, so a plain `read` no longer trips the
+    sandbox.
 
 12. **`agentDirWriteProjects`** (`src/config.ts`). An absolute project root
     listed in the *global* profile may write the agent dir, so the repo that
-    installs this stack can repair the profile it installs. Read from the global
+    installs this stack can maintain the profile it installs. Read from the global
     layer only — a project or session layer must not widen it — and matched
-    against the session cwd, including subdirectories. The grant drops the
-    agent-dir write lock and opens reads of the two config files it maintains
-    (`guardian.json`, `extensions/sandbox.json`); `auth.json`, `models.json` and
-    `guardian-sessions` stay read- and write-denied even there, and
-    `<workspace>/.pi` stays mandatory deny-write. `install.sh` grants this repo's
-    root; removing the entry revokes it. `test/config-hardening.test.ts` covers
-    the read matrix, the reachable root boundary, subdirectories, a lookalike
-    sibling, malformed values, and a project-layer attempt to widen it.
+    against the session cwd, including subdirectories. Writes are otherwise
+    deny-all for the agent dir; the grant drops that lock, `auth.json` and
+    `guardian-sessions` stay mandatory deny-write, and `<workspace>/.pi` stays
+    mandatory deny-write too. `install.sh` grants this repo's root; deleting the
+    entry revokes it. `test/config-hardening.test.ts` covers the read matrix, the
+    write boundary, subdirectories, a lookalike sibling, malformed values, and a
+    project-layer attempt to widen it.
 
 Remaining (W5-W6 in `docs/plan-sandbox-broker.md`): the stack swap and the
 architecture/README rewrite.

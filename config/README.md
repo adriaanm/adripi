@@ -28,13 +28,16 @@ Temporary files belong there; no exception is needed.
 
 ## Agent directory
 
-The agent dir is readable except for what is actually sensitive: `auth.json` and
-`models.json` (credentials), `guardian.json` and `extensions/sandbox.json` (the
-sandbox and reviewer configuration), and `guardian-sessions` (reviewer
-transcripts). Everything else — installed packages and their skills, session
-transcripts and subagent artifacts, `settings.json`, the policy text — is data a
-sandboxed command may legitimately read. Writes are separate: the agent dir stays
-denied for every project except one granted through `agentDirWriteProjects`.
+One file is read-denied: `<agentDir>/auth.json` (provider credentials and OAuth
+tokens). Everything else is data a sandboxed command may legitimately read —
+installed packages and their skills, session transcripts and subagent artifacts,
+`settings.json`, `guardian.json`, `extensions/sandbox.json`.
+
+Writes are the guarded side: the agent dir is deny-write for every project except
+one listed in `agentDirWriteProjects`, `auth.json` and `guardian-sessions` are
+unwritable even there, and `<workspace>/.pi` stays mandatory deny-write. That is
+how the sandbox and reviewer configuration is protected from modification except
+by this repo's own sessions.
 
 ## Paths outside the project
 

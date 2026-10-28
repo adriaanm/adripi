@@ -53,9 +53,8 @@ deltas are listed below; nothing else is modified.
 11. `src/{types,config,permissions}.ts` — `permissions.agentDirWriteProjects`:
     absolute project roots whose sessions may maintain the agent directory
     (that is how this repo installs and repairs the profile it ships). It lifts
-    only the two self-protection rules for that directory — `Edit(<agentDir>/**)`
-    and `Read(<agentDir>/guardian.json)` — and only for a cwd inside a listed
-    root; `auth.json` and `guardian-sessions/**` stay read- and write-denied, and
+    it lifts `Edit(<agentDir>/**)` and decides the maintenance file-tool calls in
+    the rule engine; `auth.json` and `guardian-sessions/**` stay write-denied, and
     every user deny still applies. `install.sh` adds this repo's own root; delete
     the entry to revoke.
 12. `src/permissions.ts` — `write`/`edit` calls are matched on their target
