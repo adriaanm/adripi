@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { evaluateLayeredSandboxRules } from "./rules.ts";
+import { evaluateLayeredSandboxRules, sandboxTargetProblem } from "./rules.ts";
 import type {
 	SandboxAuditRecord,
 	SandboxBrokerService,
@@ -56,9 +56,10 @@ export function getSandboxBroker(): SandboxBrokerService | undefined {
 }
 
 /**
- * Decision order: request validation → hard-deny rules → allow rules → reviewer.
- * Rules never consult a model; a reviewer that fails is a denial, not a defer.
- * `defer` is the only path that reaches the human, and it grants nothing.
+ * Decision order: request validation → target admission → rule restriction/allow
+ * → reviewer. Rules never consult a model; a reviewer that fails is a denial,
+ * not a defer. `defer` is the only path that reaches the human, and it grants
+ * nothing.
  */
 export function createSandboxBroker(options: SandboxBrokerOptions): SandboxBrokerService {
 	const now = options.now ?? (() => new Date());
@@ -98,6 +99,20 @@ export function createSandboxBroker(options: SandboxBrokerOptions): SandboxBroke
 		async review(request: SandboxExceptionRequest): Promise<SandboxExceptionDecision> {
 			const invalid = validateRequest(request);
 			if (invalid) return deny(request, invalid, `Invalid sandbox exception request: ${invalid}`, "rule");
+
+			// An exception grants one exact capability. A wildcard, URL, relative path,
+			// multi-line command or wrapper shape would promise more than the eventual
+			// grant can name, so refuse it before a rule or the reviewer can reason
+			// about a target that can never be enforced exactly.
+			const inadmissible = sandboxTargetProblem(request);
+			if (inadmissible) {
+				return deny(
+					request,
+					`Sandbox exception denied: ${inadmissible}. Nothing was granted; ask for one exact target instead of retrying this shape.`,
+					`Refused before rules or review: ${inadmissible}.`,
+					"rule",
+				);
+			}
 
 			if (consecutiveDenials >= maxConsecutiveDenials) {
 				return deny(

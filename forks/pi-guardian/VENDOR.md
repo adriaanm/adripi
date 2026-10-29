@@ -43,11 +43,20 @@ deltas are listed below; nothing else is modified.
    classes (credentials, the agent directory, secret writes, repo config and
    HEAD), `sandboxExceptions.{allow,defer,deny}` `surface:pattern` rules,
    reviewer prompt with scope narrowing, durable audit entries, and a denial
-   breaker. The built-in deny list also hard-denies `command:` patterns that
-   chain, redirect, substitute, or wrap in an interpreter, so a host-command
-   exception can never be a general escape.
-9. `src/sandbox/rules.ts` network matching covers `host`, `host:port` and
-   `host:*` in both directions.
+   breaker. Built-in command restrictions are a reviewer-side backstop; pi-sbx
+   owns executable eligibility and host dispatch. Host execution is full-host
+   authority, not a credential jail.
+9. `src/sandbox/rules.ts` parses network endpoints instead of dropping their
+   port: `host:443` authorizes only port 443, while `host` and `host:*` cover
+   every port. Port-specific deny/defer rules overlap an all-port request but
+   cannot authorize it. Command arguments remain case-sensitive. Broker target
+   admission rejects wildcard/URL/relative-path/control-character requests before
+   any rule or reviewer. Filesystem rules match the root itself as well as its
+   descendants, resolve relative patterns against request cwd, and include real
+   path/deepest-existing-ancestor aliases; `**/…` also anchors at filesystem root.
+   These repair F4 and the deterministic target-admission portion of F11.
+   `test/sandbox-broker.test.ts` covers distinct ports, all-port restriction
+   precedence, rejected shapes, directory roots, aliases and case-sensitive args.
 10. `test/sandbox-{broker,review}.test.ts` — decision order, scope narrowing,
     breaker, request validation, and rule precedence.
 11. `src/{types,config,permissions}.ts` — `permissions.agentDirWriteProjects`:

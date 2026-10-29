@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { homedir } from "node:os";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -7,7 +8,13 @@ import {
 	getSandboxBroker,
 	publishSandboxBroker,
 } from "../src/sandbox/broker.ts";
-import { builtinSandboxDenyRules, evaluateSandboxRules, parseSandboxRule } from "../src/sandbox/rules.ts";
+import {
+	builtinSandboxDenyRules,
+	evaluateLayeredSandboxRules,
+	evaluateSandboxRules,
+	parseNetworkTarget,
+	parseSandboxRule,
+} from "../src/sandbox/rules.ts";
 import type {
 	SandboxAuditRecord,
 	SandboxExceptionRequest,
@@ -72,6 +79,23 @@ test("an allow rule short-circuits review but a deny still wins", () => {
 	// Network and command targets match their own surface only.
 	assert.equal(
 		evaluateSandboxRules(rules, request({ surface: "network", target: "registry.npmjs.org" }), agentDir).outcome,
+		"review",
+	);
+	// A write grant never answers a read request, or the reverse.
+	assert.equal(
+		evaluateSandboxRules(
+			{ allow: ["write:~/.gradle/**"], defer: [], deny: [] },
+			request({ surface: "read", target: "~/.gradle/caches" }),
+			agentDir,
+		).outcome,
+		"review",
+	);
+	assert.equal(
+		evaluateSandboxRules(
+			{ allow: ["read:~/.gradle/**"], defer: [], deny: [] },
+			request({ surface: "write", target: "~/.gradle/caches" }),
+			agentDir,
+		).outcome,
 		"review",
 	);
 });
@@ -232,7 +256,6 @@ test("repository config and HEAD are never grantable", () => {
 });
 
 test("project rules pre-authorize without overriding global restrictions", async () => {
-	const { evaluateLayeredSandboxRules } = await import("../src/sandbox/rules.ts");
 	const request = (target: string) => ({
 		id: "r1",
 		origin: "tool" as const,
@@ -282,4 +305,199 @@ test("a command prefix rule must be spelled prefix:*", async () => {
 	const { validateSandboxRules } = await import("../src/sandbox/rules.ts");
 	assert.throws(() => validateSandboxRules(["command:git pull:"], "sandboxExceptions.allow"), /ends with ":\*"/);
 	assert.doesNotThrow(() => validateSandboxRules(["command:git pull:*"], "sandboxExceptions.allow"));
+});
+
+test("a network request target is one exact destination", () => {
+	assert.deepEqual(parseNetworkTarget("Example.TEST:443"), {
+		host: "example.test",
+		literalHost: false,
+		port: 443,
+	});
+	assert.deepEqual(parseNetworkTarget("example.test:*"), { host: "example.test", literalHost: false });
+	assert.deepEqual(parseNetworkTarget("[::1]:443"), { host: "::1", literalHost: true, port: 443 });
+	assert.deepEqual(parseNetworkTarget("[::1]"), { host: "::1", literalHost: true });
+	// Unbracketed IPv6 is ambiguous with host:port and cannot be granted exactly.
+	assert.equal(parseNetworkTarget("::1"), undefined);
+	assert.equal(parseNetworkTarget("2001:db8::1:443"), undefined);
+	assert.equal(parseNetworkTarget("*.example.test"), undefined);
+	assert.equal(parseNetworkTarget("https://example.test"), undefined);
+	assert.equal(parseNetworkTarget("example.test:0"), undefined);
+	assert.equal(parseNetworkTarget("example.test:65536"), undefined);
+	assert.equal(parseNetworkTarget("example.test:"), undefined);
+	assert.equal(parseNetworkTarget("example.test/path"), undefined);
+});
+
+test("numeric network rules match only their port; bare host and :* mean any port", () => {
+	const decide = (rules: string[], target: string) =>
+		evaluateSandboxRules(
+			{ allow: rules, defer: [], deny: [] },
+			request({ surface: "network", target, scope: "once" }),
+			agentDir,
+		).outcome;
+
+	assert.equal(decide(["network:example.test:443"], "example.test:443"), "allow");
+	assert.equal(decide(["network:example.test:443"], "example.test:8443"), "review");
+	assert.equal(decide(["network:example.test:443"], "example.test"), "review");
+	assert.equal(decide(["network:example.test:443"], "example.test:*"), "review");
+	assert.equal(decide(["network:example.test"], "example.test:8443"), "allow");
+	assert.equal(decide(["network:example.test:*"], "example.test:8443"), "allow");
+	// Host names are case-insensitive, but the port is an exact number.
+	assert.equal(decide(["network:Example.Test:443"], "example.TEST:443"), "allow");
+	assert.equal(decide(["network:example.test:44"], "example.test:443"), "review");
+	assert.equal(decide(["network:127.0.0.1:8080"], "127.0.0.1:8080"), "allow");
+	assert.equal(decide(["network:127.0.0.1:8080"], "127.0.0.1:8081"), "review");
+	assert.equal(decide(["network:[::1]:443"], "[::1]:443"), "allow");
+	assert.equal(decide(["network:[::1]:443"], "[::1]:8443"), "review");
+	assert.equal(decide(["network:[::1]"], "[::1]:8443"), "allow");
+	assert.equal(decide(["network:[::1]:*"], "[::1]"), "allow");
+	// Intentional host globs stay legal in rules.
+	assert.equal(decide(["network:*.internal:*"], "build.internal:8443"), "allow");
+});
+
+test("numeric deny and defer rules are as precise as allow rules", () => {
+	const decide = (rules: SandboxExceptionRules, target: string) =>
+		evaluateSandboxRules(rules, request({ surface: "network", target, scope: "once" }), agentDir).outcome;
+
+	assert.equal(decide({ allow: [], defer: [], deny: ["network:evil.test:443"] }, "evil.test:443"), "deny");
+	assert.equal(decide({ allow: [], defer: [], deny: ["network:evil.test:443"] }, "evil.test:8443"), "review");
+	// An all-port request includes the denied port, so a narrower deny covers it.
+	assert.equal(decide({ allow: [], defer: [], deny: ["network:evil.test:443"] }, "evil.test"), "deny");
+	assert.equal(decide({ allow: [], defer: [], deny: ["network:evil.test"] }, "evil.test:8443"), "deny");
+	assert.equal(decide({ allow: [], defer: ["network:build.internal:8443"], deny: [] }, "build.internal:8443"), "defer");
+	assert.equal(decide({ allow: [], defer: ["network:build.internal:8443"], deny: [] }, "build.internal:443"), "review");
+	// An all-port deny still outranks a port-specific allow.
+	assert.equal(
+		decide({ allow: ["network:evil.test:8443"], defer: [], deny: ["network:evil.test"] }, "evil.test:8443"),
+		"deny",
+	);
+});
+
+test("command rules compare arguments case-sensitively", () => {
+	const decide = (allow: string[], target: string) =>
+		evaluateLayeredSandboxRules(
+			{ allow, defer: [], deny: [] },
+			{ allow: [], defer: [], deny: [] },
+			request({ surface: "command", target, scope: "once" }),
+			agentDir,
+		).outcome;
+
+	assert.equal(decide(["command:deploy -t MyApp:*"], "deploy -t MyApp --verbose"), "allow");
+	assert.equal(decide(["command:deploy -t MyApp:*"], "deploy -t myapp --verbose"), "review");
+	assert.equal(decide(["command:Git push:*"], "git push"), "review");
+	assert.equal(decide(["command:git push:*"], "git push -u origin Main"), "allow");
+	assert.equal(decide(["command:npm run Build"], "npm run Build"), "allow");
+	assert.equal(decide(["command:npm run Build"], "npm run build"), "review");
+});
+
+test("a wildcard, URL or unsafe request shape is refused before rules or review", async () => {
+	let reviews = 0;
+	const broker = createSandboxBroker({
+		// An intentional rule glob must not turn a wildcard *request* into a grant.
+		rules: { allow: ["network:*.example.test:*"], defer: [], deny: [] },
+		agentDir,
+		maxConsecutiveDenials: 100,
+		review: async () => {
+			reviews++;
+			return { outcome: "allow", rationale: "should not be reviewed" };
+		},
+	});
+	const invalid: Array<Partial<SandboxExceptionRequest>> = [
+		{ surface: "network", target: "*.example.test" },
+		{ surface: "network", target: "https://example.test" },
+		{ surface: "network", target: "example.test:0" },
+		{ surface: "network", target: "example.test:https" },
+		{ surface: "network", target: "user@example.test:443" },
+		{ surface: "network", target: "::1" },
+		{ surface: "write", target: "relative/file" },
+		{ surface: "write", target: "/work/*.env" },
+		{ surface: "write", target: "~/project/*.env" },
+		{ surface: "command", target: "git push\nrm -rf /" },
+		{ surface: "command", target: "git push && rm -rf /" },
+		{ surface: "command", target: "git push | tee out" },
+		{ surface: "command", target: "git push $(whoami)" },
+		{ surface: "command", target: "git push > /tmp/out" },
+		{ surface: "command", target: "/bin/sh -c 'git push'" },
+		{ surface: "command", target: "BASH -c 'git push'" },
+		{ surface: "command", target: "python3 -c 'print(1)'" },
+		{ surface: "command", target: "FOO=1 git push" },
+	];
+	for (const [index, overrides] of invalid.entries()) {
+		const decision = await broker.review(request({ id: `invalid-${index}`, ...overrides }));
+		assert.equal(decision.kind, "deny", overrides.target);
+	}
+	assert.equal(reviews, 0);
+});
+
+test("valid request targets still reach the reviewer", async () => {
+	let reviews = 0;
+	const broker = createSandboxBroker({
+		rules: emptyRules,
+		agentDir,
+		review: async (seen) => {
+			reviews++;
+			return { outcome: "allow", rationale: `Reviewed ${seen.surface}.`, scope: "once" };
+		},
+	});
+	const valid: Array<Partial<SandboxExceptionRequest>> = [
+		{ surface: "network", target: "Example.Test:443" },
+		{ surface: "network", target: "[::1]:8443" },
+		{ surface: "network", target: "build.internal:*" },
+		{ surface: "network", target: "registry.npmjs.org:443", origin: "trap", reason: undefined },
+		{ surface: "write", target: "~/project/.gradle/caches" },
+		{ surface: "read", target: join(cwd, "src", "main.ts") },
+		{ surface: "command", target: "git push -u origin main" },
+		{ surface: "command", target: "make deploy-prod" },
+	];
+	for (const [index, overrides] of valid.entries()) {
+		const decision = await broker.review(request({ id: `valid-${index}`, scope: "once", ...overrides }));
+		assert.equal(decision.kind, "allow", overrides.target);
+	}
+	assert.equal(reviews, valid.length);
+});
+
+test("a protected directory root, descendants and aliases are denied before review", async () => {
+	const root = mkdtempSync(join(process.env.PI_SANDBOX_SCRATCH ?? tmpdir(), "guardian-targets-"));
+	try {
+		const agent = join(root, "agent");
+		mkdirSync(join(agent, "sessions"), { recursive: true });
+		writeFileSync(join(agent, "settings.json"), "{}");
+		const directoryAlias = join(root, "agent-link");
+		const fileAlias = join(root, "settings-link.json");
+		symlinkSync(agent, directoryAlias);
+		symlinkSync(join(agent, "settings.json"), fileAlias);
+
+		let reviews = 0;
+		const broker = createSandboxBroker({
+			rules: emptyRules,
+			agentDir: agent,
+			maxConsecutiveDenials: 100,
+			review: async () => {
+				reviews++;
+				return { outcome: "allow", rationale: "should not be reviewed" };
+			},
+		});
+		const targets: Array<{ surface: "read" | "write"; target: string }> = [
+			{ surface: "write", target: agent },
+			{ surface: "write", target: join(agent, "settings.json") },
+			{ surface: "read", target: join(agent, "sessions") },
+			{ surface: "write", target: directoryAlias },
+			{ surface: "write", target: join(directoryAlias, "settings.json") },
+			{ surface: "write", target: join(directoryAlias, "sessions", "missing.json") },
+			{ surface: "write", target: join(agent, "sessions", "..", "settings.json") },
+			{ surface: "write", target: fileAlias },
+			// The same never-grantable class spelled through the home directory.
+			{ surface: "read", target: join(homedir(), ".ssh") },
+			{ surface: "write", target: join(homedir(), ".ssh", "id_ed25519") },
+		];
+		for (const [index, entry] of targets.entries()) {
+			const decision = await broker.review(
+				request({ id: `protected-${index}`, scope: "once", surface: entry.surface, target: entry.target }),
+			);
+			assert.equal(decision.kind, "deny", entry.target);
+			assert.equal(decision.kind === "deny" ? decision.review.source : undefined, "rule", entry.target);
+		}
+		assert.equal(reviews, 0);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
