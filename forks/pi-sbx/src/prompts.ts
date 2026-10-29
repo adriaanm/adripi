@@ -59,16 +59,21 @@ export class PromptCoordinator {
     return request;
   }
 
-  requestUnsandboxed(command: string, persist: (command: string) => Promise<void>): Promise<UnsandboxedDecision> {
+  requestUnsandboxed(
+    command: string,
+    persist: (pattern: string) => Promise<void>,
+    prefixRule?: string,
+  ): Promise<UnsandboxedDecision> {
+    const alwaysLabel = prefixRule ? `Always allow ${prefixRule}` : "Always allow this exact command";
     return this.enqueue<UnsandboxedDecision>("deny", async (ctx, signal) => {
       const choice = await ctx.ui.select(`Run outside sandbox?\n${command}`, [
         "Run once",
-        "Always allow this exact command",
+        alwaysLabel,
         "Deny",
       ], { signal });
-      if (choice === "Always allow this exact command") {
+      if (choice === alwaysLabel) {
         try {
-          await persist(command.trim());
+          await persist(prefixRule ?? command.trim());
         } catch (error) {
           ctx.ui.notify(`Could not persist exclusion: ${error instanceof Error ? error.message : String(error)}`, "warning");
           return "once";

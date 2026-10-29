@@ -26,6 +26,7 @@ import {
 import { isCommandExcluded } from "./command-policy.ts";
 import { parseSupervisorDecision, supervisorQuestion } from "./supervisor-ask.ts";
 import { sandboxGuidance } from "./guidance.ts";
+import { planInlineEscalation } from "./inline-escalation.ts";
 import { getConfigPaths } from "./config.ts";
 import { registerFileGate } from "./file-gate.ts";
 import { buildHardeningPaths } from "./hardening.ts";
@@ -56,9 +57,36 @@ const bashSchema = Type.Object({
   command: Type.String({ description: "Bash command to execute" }),
   timeout: Type.Optional(Type.Number({ description: "Timeout in seconds" })),
   dangerouslyDisableSandbox: Type.Optional(Type.Boolean({ description: "Request explicit user approval to run this command outside the sandbox" })),
+  // Codex-shaped inline escalation: the request travels with the command, so the
+  // model asks and runs in one call instead of requesting, waiting, and re-running.
+  sandbox_permissions: Type.Optional(Type.Union([
+    Type.Literal("use_default"),
+    Type.Literal("require_escalated"),
+    Type.Literal("with_additional_permissions"),
+  ], { description: "Per-command sandbox override. Defaults to use_default; widen for this command with \"with_additional_permissions\", or run outside the sandbox with \"require_escalated\"." })),
+  justification: Type.Optional(Type.String({ description: "Short question for the user; required with require_escalated or with_additional_permissions, omit otherwise." })),
+  prefix_rule: Type.Optional(Type.Array(Type.String(), { description: "Reusable approval prefix for this command, only with require_escalated; for example [\"git\", \"pull\"]." })),
+  additional_permissions: Type.Optional(Type.Object({
+    network: Type.Optional(Type.Object({ enabled: Type.Optional(Type.Boolean()) })),
+    file_system: Type.Optional(Type.Object({
+      read: Type.Optional(Type.Array(Type.String())),
+      write: Type.Optional(Type.Array(Type.String())),
+    })),
+  }, { description: "Paths to widen for this command only; only with with_additional_permissions." })),
 });
 
-type BashParams = { command: string; timeout?: number; dangerouslyDisableSandbox?: boolean };
+type BashParams = {
+  command: string;
+  timeout?: number;
+  dangerouslyDisableSandbox?: boolean;
+  sandbox_permissions?: "use_default" | "require_escalated" | "with_additional_permissions";
+  justification?: string;
+  prefix_rule?: string[];
+  additional_permissions?: {
+    network?: { enabled?: boolean };
+    file_system?: { read?: string[]; write?: string[] };
+  };
+};
 
 type RuleDefinition = { section?: string; key: string; label: string };
 
@@ -466,7 +494,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       scratchpad
         ? `Write temporary files under ${scratchpad.dir} (also ${SCRATCH_ENV}); it is writable inside the sandbox and removed when the session ends.`
         : "Write temporary files inside the project; paths outside it may need an exception.",
-      "Only set dangerouslyDisableSandbox after explicit user instruction or clear evidence that the immediately preceding command failed because of sandbox restrictions; every request requires user approval.",
+      "When a command fails because of the sandbox, re-run the same call with `sandbox_permissions: \"with_additional_permissions\"` plus `additional_permissions.file_system.{read,write}` and a `justification` (widened for that command only), or `sandbox_permissions: \"require_escalated\"` when it must run on the host (host credentials, host services). `prefix_rule` may propose a narrow standing rule such as [\"git\", \"push\"].",
       "Local git work (status, diff, log, commit, branch, merge, rebase, stash) runs sandboxed; only network git that authenticates with a remote (clone, fetch, pull, push, ls-remote, submodule --remote) and gh/ssh cannot. For those, request a `command` exception for the exact command line instead of retrying, and never ask for read access to gh's config or ~/.ssh — permanently denied.",
     ],
     renderResult(result, options, theme, renderContext) {
@@ -503,14 +531,14 @@ export default function sandboxExtension(pi: ExtensionAPI) {
         return local.execute(id, input, signal, onUpdate, ctx);
       }
 
-      if (params.dangerouslyDisableSandbox) {
-        if (!config.allowUnsandboxedCommands) throw new Error("Unsandboxed commands are disabled by sandbox policy");
+      const runOutsideSandbox = async (reason: string, prefixRule?: string) => {
+        if (!config?.allowUnsandboxedCommands) throw new Error("Unsandboxed commands are disabled by sandbox policy");
         const brokerDecision = await decideSandboxException({
           surface: "command",
           target: params.command,
           scope: "once",
           origin: "tool",
-          reason: "Model requested an unsandboxed retry via dangerouslyDisableSandbox.",
+          reason,
           command: params.command,
           cwd: ctx.cwd,
         });
@@ -518,13 +546,85 @@ export default function sandboxExtension(pi: ExtensionAPI) {
           throw new Error(`Sandbox exception denied: ${brokerDecision.reason}`);
         }
         if (brokerDecision.kind === "defer") {
-          const human = await prompts.requestUnsandboxed(params.command, persistExclusion);
+          const human = await prompts.requestUnsandboxed(params.command, persistExclusion, prefixRule);
           if (human === "deny") throw new Error("User denied running this command outside the sandbox");
           if (human === "always") await applySessionGrant(ctx, "command", params.command);
           return local.execute(id, input, signal, onUpdate, ctx);
         }
         if (brokerDecision.scope === "session") await applySessionGrant(ctx, "command", params.command);
         return local.execute(id, input, signal, onUpdate, ctx);
+      };
+
+      const escalation = planInlineEscalation(params);
+      if (escalation.kind === "invalid") {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Sandbox escalation request rejected: ${escalation.reason}. The command did not run.`,
+            },
+          ],
+          details: { refusal: escalation.reason },
+        };
+      }
+      if (escalation.kind === "host") {
+        return runOutsideSandbox(escalation.justification, escalation.prefixRule);
+      }
+      if (escalation.kind === "scoped") {
+        // Widen the sandbox for this one command, run it inside, then take the
+        // widening back out — no request round trip, nothing left behind.
+        const applied: Array<{ surface: SandboxSurface; target: string }> = [];
+        const preexisting = escalation.targets.filter((entry) =>
+          hasSessionException(sessionConfig as SessionLayer, entry.surface, entry.target),
+        );
+        const rollback = async () => {
+          const revoke = applied.filter((entry) => !preexisting.some((kept) => kept.surface === entry.surface && kept.target === entry.target));
+          if (revoke.length === 0) return;
+          for (const entry of revoke) {
+            sessionConfig = withoutSessionException(sessionConfig as SessionLayer, entry.surface, entry.target) as typeof sessionConfig;
+          }
+          await reloadConfig(ctx, false);
+        };
+        const refuse = async (reason: string) => {
+          await rollback();
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Sandbox escalation refused (${reason}). The command did not run; do not retry it or rephrase the request.`,
+              },
+            ],
+            details: { reason },
+          };
+        };
+        for (const entry of escalation.targets) {
+          const decision = await decideSandboxException({
+            surface: entry.surface,
+            target: entry.target,
+            scope: "session",
+            origin: "tool",
+            reason: escalation.justification,
+            cwd: ctx.cwd,
+          });
+          if (decision.kind === "deny") return refuse(decision.reason);
+          if (decision.kind === "defer") {
+            const human = await askHumanForException(ctx, entry.surface, entry.target, escalation.justification);
+            if (human.kind !== "allow") return refuse(human.reason ?? "the user declined");
+          }
+          const granted = await applySessionGrant(ctx, entry.surface, entry.target);
+          if (!granted.ok) return refuse(granted.reason);
+          applied.push(entry);
+        }
+        try {
+          const result = await sandboxedTool(ctx.cwd).execute(id, input, signal, onUpdate, ctx);
+          return withTrapHint(result, resultText(result), { cwd: ctx.cwd, scratchDir: scratchpad?.dir });
+        } finally {
+          await rollback();
+        }
+      }
+
+      if (params.dangerouslyDisableSandbox) {
+        return runOutsideSandbox("Model requested an unsandboxed retry via dangerouslyDisableSandbox.");
       }
 
       if (controller.canRunSandboxed()) {

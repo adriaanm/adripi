@@ -113,6 +113,24 @@ whose escalation path is decided by `pi-guardian` instead of a human-only prompt
     It uses structured `sections` on Pi 1.x and falls back to the append slot on
     older hosts. `test/guidance.test.ts` covers the content.
 
+15. **Codex-shaped inline escalation** (`src/inline-escalation.ts`, wired in
+    `src/index.ts`, prompt updated in `src/guidance.ts`). Codex trains models on
+    `exec_command({ sandbox_permissions, justification, prefix_rule,
+    additional_permissions })`, i.e. the escalation travels with the command that
+    needs it instead of a request call followed by a re-run. The bash tool now
+    accepts the same names and semantics:
+    `with_additional_permissions` + `additional_permissions.file_system.{read,write}`
+    widens the sandbox for that one command (grants applied, command run inside,
+    widening revoked in a `finally`), `require_escalated` + `justification` runs
+    that exact line on the host and may carry a `prefix_rule` proposal
+    (`["git","push"]` → `git push:*`, rejected for shells, interpreters, `rm`,
+    wildcards and metacharacters) that the human's "Always allow …" choice
+    persists as a project `excludedCommands` entry. Network is per destination,
+    so `network.enabled` is refused with a pointer at the `network` surface
+    instead of pretending to grant "the network". `Pi`'s own
+    `dangerouslyDisableSandbox` keeps working. `test/inline-escalation.test.ts`
+    covers the planner (defaults, stray fields, banned prefixes, relative paths).
+
 Remaining (W5-W6 in `docs/plan-sandbox-broker.md`): the stack swap and the
 architecture/README rewrite.
 

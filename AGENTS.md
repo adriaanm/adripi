@@ -108,6 +108,23 @@ do not batch unrelated work into one "update" commit.
   `contact_supervisor` and needs an explicit `ALLOW`/`DENY` token; a missing
   supervisor channel fails closed.
 
+## Following Codex's escalation pattern
+
+Models are trained on Codex's harness, so the bash tool speaks its dialect
+(`forks/pi-sbx/src/inline-escalation.ts`): `sandbox_permissions`
+(`use_default` | `require_escalated` | `with_additional_permissions`),
+`justification`, `prefix_rule`, `additional_permissions.file_system.{read,write}`.
+Two rules follow from that shape and must stay true:
+
+- **The escalation travels with the command.** `with_additional_permissions`
+  widens for that one call, runs the command inside the sandbox, then revokes the
+  grants; `require_escalated` runs the exact line on the host. Never reintroduce a
+  mandatory "request, wait, re-run" two-step for something a single call can do.
+- **Failure is the trigger.** The guidance tells the model to re-run a
+  sandbox-failing command with escalation attached, without messaging the user
+  first. Scope it: prefer the path-scoped tier over host execution, and keep
+  `prefix_rule` categorical and narrow (no shells, interpreters, `rm`, heredocs).
+
 ## Prompt-level guidance
 
 `pi-sbx` adds a `<sandbox>` system-prompt section while the sandbox is on
