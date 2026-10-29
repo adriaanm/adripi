@@ -81,3 +81,80 @@ to silently add an unbounded side channel or assert that helper tests pass PR3.
 
 Record source-test results, actual runtime results and blocked scenarios
 separately. Source delivery must never imply installation or an OS certification.
+
+## Parent integration and review dispositions
+
+Workflow `4a89c5cc-5fb5-4f66-a588-6fc1ce1a9f93` completed three component handoffs
+and two fresh reviews. All used `neuralwatt/nw-flash`; the parent read the saved
+reports and actual owned diffs, copied only component source/tests/VENDOR files,
+and made the following integration repairs before acceptance:
+
+- Restored feasible scoped **read** grants. The candidate had rejected every
+  denied read despite still advertising `additional_permissions.file_system.read`.
+  Only a more-specific exact carve-out may reopen a non-mandatory read deny;
+  canonical path specificity prevents a longer alias spelling from appearing
+  more specific than an equal exclusion.
+- Made mandatory reads precede baseline allows, including recursive traversal;
+  added native post-approval target re-resolution and an asynchronous symlink
+  retarget negative. Native and Bash path decisions remain action-bound; no
+  baseline mutation or new grant store.
+- Exercised an interactive native grant through the real `HumanChannel`, not
+  just a stub; two separate calls produce two questions. Used command-appropriate
+  versus native-action wording without inventing another API.
+- Preserved explicit user-deny provenance separately from Guardian's merged
+  display list, so a deny identical to the built-in lock is not lifted. Kept
+  audit protection apart by provenance even when its root equals or aliases the
+  agent directory. Project deny/defer restrictions still win; the candidate's
+  project-layer bypass was not accepted.
+- Bound the published broker to its session cwd and tested an ordinary session
+  trying to claim the privileged cwd. Tested a **relocated** audit root through
+  the actual publisher, not merely the broker constructor.
+- Aligned the OS adapter's spelled/canonical maintenance-root test with Guardian
+  and added a cross-fork matrix. Added a registered native pi-sbx gate consuming
+  the actual Guardian publisher, with standing-rule admission, hard negatives,
+  repeated-call independence and broker-disposal refusal.
+- Updated current guidance/product/config/fork documentation together. The
+  worker reports describe their candidates, not the final integrated contract.
+
+The dependency investigation was reviewed against the public exports and the
+actual bundle. Its registration-only suggestion and two overclaims were not
+accepted: a fresh cwd-relative profile is not a narrowing of held parent scope,
+and a second Guardian publisher is refused rather than inherently stealing the
+parent's slot. SRT's global runtime also prevents treating another in-process
+extension instance as isolation. See [the dependency decision](round-2-delegation.md).
+
+## Verification of integrated source
+
+- pi-sbx: **20 Vitest files / 135 tests**, plus `npx tsc --noEmit`.
+- Guardian: **107 tests passed**, excluding only `test/headless.test.ts`; plus
+  `npm run check`. No runner variables or Node version needed changing in the
+  parent checkout.
+- Full Guardian `npm test`: **107 passed, one test file aborted**. The failure is
+  still `test/headless.test.ts` under Node `v26.6.0`, with
+  `node::InternalCallbackScope::Close` / `(env_->execution_async_id()) == (0)`.
+  Log: ignored `.local/round-2/guardian-full-test.log`. The full suite is **not**
+  green; compatible-Node verification remains open.
+- Repository `just check` and `git diff --check`: passed.
+
+The real local-Git test provisions a worktree outside its fixture parent checkout
+under private scratch, checks projected/native scope, invokes the registered
+gate plus the real core Write tool, reviews/commits/integrates the fixture change
+and removes only a clean worktree. Direct/symlink sibling, parent checkout,
+maintenance and workspace policy writes are negatives. It does **not** launch a
+Pi child, apply nested SRT, authenticate Git or measure reviewer latency.
+Its first run caught a fixture assertion passing a lexical `/var` path to a
+canonical-target policy helper; the test now follows the actual file gate's
+canonicalization. No permission was widened to make it pass. Failed fixtures are
+preserved for inspection; successful cleanup uses no force.
+
+## Delivery state and next decision
+
+The shared-action/maintenance **source wave** is integrated; the complete round
+and PR2/PR3/D2–D4 are not complete. No deployment, live-policy edit, restart or
+push occurred. The loaded legacy runtime remains a separate acceptance boundary.
+
+Before another delegation implementation wave, decide whether to vendor/extend
+`pi-subagents` for a host-only launch-authority seam and real parent approval
+service, or wait for upstream support. That new dependency/update burden was not
+silently introduced here. Do not call source fixtures proof of parent-first
+approval, child OS containment or an external production worktree workflow.

@@ -68,6 +68,24 @@ For each scenario record authorization source, child scope, permission prompts,
 reviewer latency, setup/recovery calls and result. Passing helper tests or having
 an approved parent launch is not sufficient evidence.
 
+## Round-2 source progress (not full acceptance)
+
+The operator subsequently answered **“go”** to round 2; its bounded source-only
+scope and evidence are in [the round record](round-2.md). The first wave shares
+one path authorizer between scoped Bash and native Read/Write/Edit (PR1/PR5),
+and aligns canonical trusted maintenance admission and restriction provenance
+(PR6). Registered-tool and actual cross-extension publisher tests are present.
+A real external fixture-worktree/local-Git flow is covered, **not** a launched
+child or authenticated-Git workflow.
+
+PR2/PR3/D2–D4 remain open. The public `pi-subagents@0.81.0` interfaces do not
+supply a host-only launch-authority payload and code-callable parent approval
+service. The parent-reviewed [dependency decision](round-2-delegation.md)
+explains why required-extension registration alone would not safely narrow
+child authority. No new fork, transport, deployment or live-policy change was
+introduced without that decision. Full Guardian headless verification remains
+blocked separately by the reproduced Node 26 native failure.
+
 ## Observed dogfooding evidence
 
 These are operational observations, not the workers' private reasoning and not
@@ -267,6 +285,7 @@ let this privileged session iterate on its configuration more quickly.
 - Establish interruption/latency targets after measuring the Git/worktree
   scenarios. No numerical budgets were supplied.
 
-These decisions do not authorize blanket policy widening, unannounced deployment
-or another implementation wave. The full Guardian headless check remains open
-independently of this interview.
+The interview decisions alone did not authorize an implementation wave. The
+subsequent **“go”** authorized the round-2 source work recorded above, not blanket
+policy widening, unannounced deployment or silently introducing a third vendored
+component. The full Guardian headless check remains open independently.
