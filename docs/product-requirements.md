@@ -20,6 +20,47 @@ credentials, rewrite audit evidence, disable guards to get past a denial, or
 silently deploy/restart. Maintenance authority must be explicit and visible,
 not something the reviewer has to infer from a filename or repeated persuasion.
 
+## Operator decisions after round 1
+
+These answers set the next design direction; they do not change the round-1
+as-built contract or authorize another implementation wave or live deployment.
+
+| Decision | Direction | Interpretation / boundary |
+|---|---|---|
+| D1 — Unified tool authorization | The operator said, "let's unify by having a Bash tool among the other tools." | Working interpretation, **to confirm**: Bash is a peer of Read/Write/Edit in one permission mechanism, not the sole route through which other tools must escalate. Do not add a second Bash tool or a competing compatibility API. Exact schema/UX is not yet chosen. |
+| D2 — Parent-first delegation | Delegation goes through the parent, which may pass on its own authorizations. | A parent can delegate authority it actually holds, bounded to the child task; an agent's free-form approval text is not a new grant. Child requests go to the parent first. Requests beyond its held/delegable authority require the appropriate human decision; global/non-delegable protections still win. |
+| D3 — Standing workspace roots | Standing roots are sufficient; this repository has special agent-configuration modification authority. The agent configuration directory could be modeled as a workspace. | Model it as an additional **authorized maintenance root**, not a globally writable directory for every project. The operator wrote `~/.pi/agents`; this installation currently uses `~/.pi/agent` (the configured `agentDir`). Confirm that path interpretation before any policy migration. Credential and audit exclusions remain, even inside an authorized workspace. No extra per-session maintainer-mode requirement. |
+| D4 — Daily Git and worktrees | Daily Git and worktrees are key to subagent flows. | Prioritize their complete parent/child workflow and recovery over adding unrelated escape routes. Prompt/latency budgets remain unspecified; measure them rather than inventing thresholds. |
+
+### First end-to-end acceptance scenarios
+
+These are proposed acceptance gates implementing D2–D4, not claims that they
+already pass:
+
+1. **Daily Git:** local status/diff/branch/stage/commit works inside the normal
+   workspace boundary. Authenticated fetch/pull/push uses the one tool-permission
+   contract and existing appropriate standing authorization. The parent can
+   delegate the covered scope to an assigned child without asking the human to
+   re-authorize the same capability. An unapproved command/repository remains
+   blocked or takes the parent-first approval path; credentials are never handed
+   to the model as readable files.
+2. **Subagent worktree lifecycle:** parent provisions an isolated worktree,
+   conveys its bounded workspace/Git authority, and verifies file-tool/bash
+   writes, scratch and dependencies before the child's first model call. Include
+   a worktree outside the original checkout. The child edits/tests in its own
+   tree; the parent reviews/integrates; authorized cleanup preserves dirty work
+   on failure. An unrelated sibling sentinel remains protected. Missing authority
+   produces a real actionable parent request, not a phantom waiting notice.
+3. **Maintenance boundary within that flow:** this repository can use its
+   explicitly authorized agent-config root; an ordinary repository cannot gain
+   it by declaring another workspace. A delegated child receives only the
+   applicable subset, with source and scope visible. Credential/audit protections
+   and workspace-policy self-protection survive both root and delegation handling.
+
+For each scenario record authorization source, child scope, permission prompts,
+reviewer latency, setup/recovery calls and result. Passing helper tests or having
+an approved parent launch is not sufficient evidence.
+
 ## Observed dogfooding evidence
 
 These are operational observations, not the workers' private reasoning and not
@@ -44,9 +85,11 @@ widened to recover.
 
 ### PR1 — One action, one escalation contract
 
-**Requirement:** expose one canonical permission mechanism for an action. Tool
-schemas, prompt examples, errors, standing-rule storage and human UI must agree.
-Do not retain competing model-facing aliases or a second persistence fallback.
+**Requirement:** expose one canonical permission mechanism for actions across
+tools, with Bash as a peer rather than a privileged sole escalation route
+(working interpretation D1, awaiting confirmation). Tool schemas, prompt
+examples, errors, standing-rule storage and human UI must agree. Do not retain
+competing model-facing aliases or a second persistence fallback.
 
 **Acceptance:** enumerate loaded tools/schemas for parent and supported children.
 Only the canonical route is advertised. Every prompt example validates against
@@ -76,15 +119,19 @@ children.
 
 ### PR3 — Approval transport is a real service, not a tool-name assumption
 
-**Requirement:** all routes use one supported decision adapter. Whether a tool
-is visible to a model is separate from whether host code may invoke it. A
-headless human-only decision needs a supported, request-bound transport to the
-parent/human, not `executeTool()` on a model-only tool.
+**Requirement:** all routes use one supported decision adapter. Child permission
+requests go to the parent first (D2). The parent may pass on authorizations it
+actually holds, narrowed to the assigned work; a human is needed for authority
+outside that scope or reserved to the human. Whether a tool is visible to a
+model is separate from whether host code may invoke it. Use a supported,
+request-bound transport, not `executeTool()` on a model-only tool.
 
 **Acceptance:** exercise UI, supported RPC and headless modes end to end. A
 routed request has an ID and receives the exact authorized scope; absent channels
-fail closed with an infrastructure/deferred explanation. The parent cannot be
-accidentally treated as the human merely because it emits an `ALLOW` string.
+fail closed with an infrastructure/deferred explanation. A parent decision is backed by a verifiable authorization source and may only
+narrow it; it cannot be treated as human consent merely because it emits an
+`ALLOW` string. Test reuse of held authorizations without duplicate human asks,
+and refusal/escalation for requests outside the parent's authority.
 No test may mock an impossible nested tool call and call that integration proof.
 
 **Evidence:** E2. Round 1 may provide consistent fail-closed headless behavior;
@@ -120,12 +167,14 @@ remain the baseline, but their bundle integration is our responsibility.
 
 ### PR6 — Privileged-maintainer authority is explicit and bounded
 
-**Requirement:** a setup-development session carries trusted, structured
+**Requirement:** human-authorized standing workspace roots are sufficient (D3);
+a separate per-session maintainer mode is not required. Model the agent-config
+directory as an additional maintenance workspace available to this specially
+authorized repository, not to arbitrary projects. Carry trusted, structured
 maintenance authority to deterministic rules and the reviewer. In-scope agent
 config changes are expected work, not presumptively malicious circumvention.
-Supported delegated worktrees need an explicit way to receive the portion of
-that authority necessary for their assigned task; repository text alone cannot
-self-assert it.
+Supported delegated worktrees receive only the portion of that authority needed
+for their assigned task; repository text alone cannot self-assert a root.
 
 **Acceptance:** an authorized maintainer can edit a disposable agent-config
 fixture without persuading Guardian repeatedly. An ordinary project cannot.
@@ -197,20 +246,19 @@ with the operator after a working baseline; do not invent success thresholds.
 **Evidence:** E5. Routine authorized coding should spend its effort on code,
 not on reverse-engineering its harness.
 
-## Questions for the closing interview
+## Remaining clarification before the next design
 
-1. Is bash-only inline escalation acceptable for outside-policy filesystem work,
-   or should native read/write/edit carry the same action-bound permission
-   vocabulary? Either way, no standalone grant tool or competing route.
-2. For supported children, must a deferred decision always reach the human, or
-   may the parent approve narrowly delegated capabilities under explicit
-   authority? These are different product contracts.
-3. Should approved managed worktrees inherit bounded workspace/maintenance
-   authority automatically, or receive a separate capability grant at launch?
-4. Should maintainer mode be explicit per session, derived from the trusted
-   install root, or both? How prominent should its warning/status be?
-5. Which daily workflows are the first ergonomics acceptance scenarios, and
-   which interruptions are acceptable?
+- Confirm D1: does "Bash among the other tools" mean a common authorization
+  mechanism for Bash/Read/Write/Edit, rather than forcing file actions through
+  bash? Tool naming alone is not the design; avoid registering a duplicate tool.
+- Confirm the agent-config root spelling: configured `agentDir`
+  (`~/.pi/agent` here), rather than a new `~/.pi/agents` directory.
+- Decide the concrete parent/child transport and grant representation in design;
+  the operator has selected parent-first delegation of held authority, not a
+  particular protocol or indiscriminate inheritance of every privilege.
+- Establish interruption/latency targets after measuring the Git/worktree
+  scenarios. No numerical budgets were supplied.
 
-These questions inform the next round; they do not authorize extra APIs,
-blanket policy widening or an unannounced live deployment in the current round.
+These decisions do not authorize blanket policy widening, unannounced deployment
+or another implementation wave. The full Guardian headless check remains open
+independently of this interview.

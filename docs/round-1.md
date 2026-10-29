@@ -173,15 +173,31 @@ repair and matching documentation are committed together separately. There was
 no `install.sh`, live-policy edit, restart, network Git operation or push.
 Existing ignored worktrees/artifacts preserve the worker evidence.
 
-Before another round, ask the operator:
+### Operator interview follow-up
 
-1. Keep outside-policy filesystem escalation bash-only, or use the same vocabulary
-   on native file tools too (with one implementation, not a second grant store)?
-2. Must child defers always reach the human, or may an explicitly delegated parent
-   approve bounded capabilities? How should that authority be recorded?
-3. How should bounded worktree and maintainer authority propagate to children?
-4. Prefer explicit per-session maintainer mode or standing trusted install roots?
-5. Which two daily workflows should become the first end-to-end ergonomics gates,
-   and how many interruptions/what latency are tolerable?
+The operator answered:
 
-No second implementation wave is authorized by these open questions.
+1. Unify with "a Bash tool among the other tools." The working interpretation is
+   one tool-permission mechanism with Bash as a peer of native file tools, not a
+   requirement to route file actions through bash. Confirm that interpretation;
+   the round-1 bash-only implementation remains the current source behavior.
+2. Delegation goes through the parent first; the parent may pass on its own
+   authorizations. This calls for provenance-backed, bounded child grants and a
+   real parent request path, not free-form `ALLOW` text or automatic human asks
+   for capabilities the parent already holds.
+3. Standing workspace roots are enough. This repository's special authorization
+   to modify agent configuration can be modeled as an additional maintenance
+   workspace root. The operator wrote `~/.pi/agents`; current `agentDir` is
+   `~/.pi/agent`. Clarify that spelling before policy migration. This does not
+   make the directory writable to ordinary projects or remove credential/audit
+   exclusions.
+4. Daily Git and worktrees are the priority for subagent flows. Proposed
+   acceptance gates cover authenticated Git with reused delegated authority and
+   worktree provisioning/preflight/edit-test/integration/cleanup, including
+   external worktrees and unauthorized sibling sentinels.
+
+Details and remaining clarifications are in
+[product requirements](product-requirements.md#operator-decisions-after-round-1).
+No prompt/latency budget was specified. No second implementation wave or live
+policy change is inferred from these interview answers; full headless validation
+is still separately blocked.
