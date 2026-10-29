@@ -1,6 +1,12 @@
-import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
+import {
+	canonicalPath,
+	isWithinDirectory,
+	maintenanceRuleText,
+	pathSpellings,
+	type MaintenanceAuthority,
+} from "../maintenance.ts";
 import type {
 	SandboxExceptionRequest,
 	SandboxExceptionRules,
@@ -111,13 +117,29 @@ export function validateSandboxRules(value: unknown, name: string): string[] {
 /**
  * Always-deny classes for sandbox exceptions. These never reach the reviewer and
  * cannot be granted, whatever the model or the transcript says.
+ *
+ * Exactly one agent-directory file is hidden from reads: the provider
+ * credentials. Skills, installed packages, session transcripts, settings and the
+ * reviewer configuration are readable, so an ordinary read needs no exception.
+ * Writes are different: `liftableSandboxDenyRules` names the broad
+ * agent-directory write lock, which a trusted maintenance project may set aside.
  */
-export function builtinSandboxDenyRules(agentDir: string): string[] {
+export function builtinSandboxDenyRules(
+	agentDir: string,
+	sessionDir: string = join(agentDir, "guardian-sessions"),
+	includeAgentDirLock = true,
+): string[] {
 	const secrets = ["~/.ssh/**", "~/.aws/**", "~/.gnupg/**", "~/.config/gh/**"];
+	const agent = resolve(agentDir);
+	const audit = resolve(sessionDir);
 	const rules = [
 		...secrets.flatMap((pattern) => [`read:${pattern}`, `write:${pattern}`]),
-		`read:${agentDir}/**`,
-		`write:${agentDir}/**`,
+		`read:${join(agent, "auth.json")}`,
+		// Credentials and Guardian's own audit trail stay write-denied even for a
+		// project that may otherwise maintain the agent directory.
+		`write:${join(agent, "auth.json")}`,
+		`write:${join(audit, "**")}`,
+		...(includeAgentDirLock ? liftableSandboxDenyRules(agentDir) : []),
 		"write:**/.env",
 		"write:**/.env.*",
 		"write:**/.git/hooks/**",
@@ -158,30 +180,87 @@ export function builtinSandboxDenyRules(agentDir: string): string[] {
 	return rules;
 }
 
+/**
+ * The single built-in rule a trusted maintenance project may set aside: the
+ * broad agent-directory write lock. Only the built-in spelling is liftable — a
+ * user or project deny that repeats this text stays in force — and credentials,
+ * the audit trail and the workspace policy directory are separate rules that are
+ * never lifted.
+ */
+export function liftableSandboxDenyRules(agentDir: string): string[] {
+	return [`write:${join(resolve(agentDir), "**")}`];
+}
+
+/**
+ * Per-request built-in: the requesting workspace's own policy directory is
+ * mandatory deny-write, so an agent cannot pre-authorize itself. Like pi-sbx's
+ * OS-level rule this is never liftable, including through a symlinked `.pi` or a
+ * canonical spelling of it.
+ */
+export function workspaceSandboxDenyRules(cwd: string): string[] {
+	return [`write:${join(resolve(cwd), ".pi", "**")}`];
+}
+
+export interface SandboxRuleOptions {
+	/** Guardian's audit directory, when it is configured away from the default. */
+	sessionDir?: string;
+	/**
+	 * Trusted maintenance authority for `request.cwd`, resolved by the caller from
+	 * the *global* `permissions.agentDirWriteProjects` list and the session cwd.
+	 * Production brokers bind that cwd to the publishing session; project policy
+	 * and model-supplied authority fields never add roots.
+	 */
+	maintenance?: MaintenanceAuthority;
+}
+
 export function evaluateSandboxRules(
 	rules: SandboxExceptionRules,
 	request: SandboxExceptionRequest,
 	agentDir: string,
+	options: SandboxRuleOptions = {},
 ): SandboxRuleOutcome {
 	const target = normalizeRequestTarget(request);
 	if (!target) return { outcome: "review" };
 
-	// Order is the decision order: hard denies, then defer, then allow. A project
-	// can therefore never erase a built-in deny by adding its own rule.
-	const ordered: { text: string; outcome: "deny" | "defer" | "allow" }[] = [
-		...[...builtinSandboxDenyRules(agentDir), ...rules.deny].map((text) => ({ text, outcome: "deny" as const })),
-		...rules.defer.map((text) => ({ text, outcome: "defer" as const })),
-		...rules.allow.map((text) => ({ text, outcome: "allow" as const })),
+	// Order is the decision order: hard denies, then defer, then the maintenance
+	// grant, then allow, so a project can never erase a built-in deny by adding its
+	// own rule. Only the built-in broad agent-directory lock is dropped when a
+	// trusted maintenance project holds the authority for this request.
+	const builtin = [
+		// Omit the broad lock by provenance, not text equality: the audit or
+		// workspace rule may legitimately have exactly the same spelling.
+		...builtinSandboxDenyRules(agentDir, options.sessionDir, !options.maintenance),
+		...workspaceSandboxDenyRules(request.cwd),
 	];
+	// `restrict` is false for allow rules: permission must cover the whole request,
+	// while a restriction may be narrower than an all-port request.
+	const restricted = (texts: readonly string[], outcome: "deny" | "defer"): SandboxRuleOutcome | undefined => {
+		for (const text of texts) {
+			const rule = parseSandboxRule(text);
+			if (ruleMatches(rule, target, true, request.cwd)) return { outcome, rule: rule.text };
+		}
+		return undefined;
+	};
 
-	for (const candidate of ordered) {
-		const rule = parseSandboxRule(candidate.text);
-		// `restrict` is false for allow rules: permission must cover the whole
-		// request, while a restriction may be narrower than an all-port request.
-		if (!ruleMatches(rule, target, candidate.outcome !== "allow", request.cwd)) continue;
-		return { outcome: candidate.outcome, rule: rule.text };
+	// User and project denies are never lifted, even when they repeat the built-in
+	// broad lock's spelling.
+	const denied = restricted([...builtin, ...rules.deny], "deny");
+	if (denied) return denied;
+	const deferred = restricted(rules.defer, "defer");
+	if (deferred) return deferred;
+
+	// The grant decides agent-directory reads and writes here, in the rule engine,
+	// because the reviewer cannot see which project holds it. Every hard deny and
+	// every user/global `defer` above still wins, and the authority never speaks
+	// for an unrelated command or network target.
+	if (options.maintenance && requestReachesDirectory(request, agentDir)) {
+		return { outcome: "allow", rule: maintenanceRuleText(options.maintenance, request.target) };
 	}
 
+	for (const text of rules.allow) {
+		const rule = parseSandboxRule(text);
+		if (ruleMatches(rule, target, false, request.cwd)) return { outcome: "allow", rule: rule.text };
+	}
 	return { outcome: "review" };
 }
 
@@ -194,18 +273,22 @@ export function evaluateSandboxRules(
  * the project's own deny/defer; then the project's `allow` (the point of the
  * feature: pre-authorize this project's workflow); then the global `allow`; and
  * only then the reviewer.
+ *
+ * Only the trusted global project list grants maintenance. A project cannot
+ * grant it to itself, but its restrictions still win over that authority.
  */
 export function evaluateLayeredSandboxRules(
 	project: SandboxExceptionRules | undefined,
 	global: SandboxExceptionRules,
 	request: SandboxExceptionRequest,
 	agentDir: string,
+	options: SandboxRuleOptions = {},
 ): SandboxRuleOutcome {
-	const globalFirst = evaluateSandboxRules(global, request, agentDir);
+	const globalFirst = evaluateSandboxRules(global, request, agentDir, options);
 	if (globalFirst.outcome === "deny" || globalFirst.outcome === "defer") return globalFirst;
 	if (!project) return globalFirst;
 
-	const local = evaluateSandboxRules(project, request, agentDir);
+	const local = evaluateSandboxRules(project, request, agentDir, options);
 	if (local.outcome !== "review") {
 		return local.outcome === "deny" || local.outcome === "defer"
 			? local
@@ -345,7 +428,7 @@ function normalizeRequestTarget(request: SandboxExceptionRequest): NormalizedTar
 		return endpoint ? { surface: "network", endpoint } : undefined;
 	}
 	if (request.surface === "command") return { surface: "command", command: target };
-	return { surface: request.surface, paths: pathSpellings(target, request.cwd) };
+	return { surface: request.surface, paths: requestPaths(target, request.cwd) };
 }
 
 /**
@@ -420,25 +503,21 @@ function expandHome(path: string): string {
 }
 
 /**
- * Resolve symlinks in the deepest existing ancestor too, so a path reached
- * through a symlinked directory matches a rule written for the real one.
+ * A request target as spelled and with symlinks (and the deepest existing
+ * ancestor) resolved, so a rule written for either spelling decides it.
  */
-function canonical(path: string): string {
-	try {
-		return realpathSync(path);
-	} catch {
-		const parent = dirname(path);
-		if (parent === path) return path;
-		const name = path.slice(parent.length + (parent === "/" ? 0 : 1));
-		return join(canonical(parent), name);
-	}
-}
-
-function pathSpellings(path: string, cwd: string): string[] {
+function requestPaths(path: string, cwd: string): string[] {
 	// `resolve` also folds `.`, `..` and a trailing slash, so an alias spelling
 	// of a protected path is decided on the path it actually names.
-	const absolute = resolve(cwd, expandHome(path));
-	return [...new Set([absolute, canonical(absolute)])];
+	return pathSpellings(resolve(cwd, expandHome(path)));
+}
+
+/** Whether a read/write request names the directory, under any spelling of it. */
+function requestReachesDirectory(request: SandboxExceptionRequest, directory: string): boolean {
+	const target = normalizeRequestTarget(request);
+	if (!target || (target.surface !== "read" && target.surface !== "write")) return false;
+	const directories = pathSpellings(resolve(directory));
+	return target.paths.some((path) => directories.some((entry) => isWithinDirectory(entry, path)));
 }
 
 /** The literal directory part of a glob pattern, used to resolve symlinks. */
@@ -451,7 +530,7 @@ function nonGlobPrefix(pattern: string): string {
 function patternSpellings(pattern: string): string[] {
 	const prefix = nonGlobPrefix(pattern);
 	const rest = pattern.slice(prefix.length);
-	return [...new Set([prefix, canonical(prefix)])].map((spelling) => spelling + rest);
+	return [...new Set([prefix, canonicalPath(prefix)])].map((spelling) => spelling + rest);
 }
 
 function pathMatches(pattern: string, path: string): boolean {

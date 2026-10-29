@@ -8,9 +8,9 @@ so you can customize them on each machine. See the
 - `guardian.json` — semantic reviewer and sandbox-broker settings. The template
   uses `neuralwatt/nw-flash` and loads the Neuralwatt provider extension in the
   reviewer sidecar. `sandboxExceptions.{allow,defer,deny}` carries the
-  `surface:pattern` rules for sandbox exceptions; credentials, the Pi agent
-  directory and secret-file writes are always denied in code and cannot be
-  granted.
+  `surface:pattern` rules for sandbox exceptions; credentials, audit and
+  secret-file writes are denied in code. Agent-directory writes have only the
+  trusted maintenance-workspace carve-out described below.
 - `guardian-policy.md` — the reviewer policy. Workspace-local work is allowed,
   credentials and security configuration are denied, sandbox exceptions need
   trusted-user authorization, and uncertainty fails closed.
@@ -39,7 +39,10 @@ Writes are the guarded side: the agent dir is deny-write for every project excep
 one listed in `agentDirWriteProjects`, `auth.json` and `guardian-sessions` are
 unwritable even there, and `<workspace>/.pi` stays mandatory deny-write. That is
 how the sandbox and reviewer configuration is protected from modification except
-by this repo's own sessions.
+by this repo's own sessions. Both the spelled cwd and its canonical target
+must remain inside the configured project root. Guardian keeps user-deny
+provenance and configured audit protection separate from the liftable lock;
+its published broker is bound to the active session cwd.
 
 ## Paths outside the project
 
@@ -48,8 +51,10 @@ An exception is a reviewed decision, not a config edit:
 1. The agent attaches the request to the **same bash call**: use
    `sandbox_permissions: "with_additional_permissions"`, a `justification`, and
    `additional_permissions.file_system.{read,write}` arrays of exact absolute or
-   `~/…` paths. Native file tools retain baseline policy; there is no separate
-   exception tool or session-grant window.
+   `~/…` paths. Native Read/Write/Edit keep their own schemas and request a
+   grantable exact target through the same path authorizer at their file gate.
+   Neither route changes baseline or opens a session-grant window; recursive
+   traversal is not widened. Do not switch tools after a denial.
 2. Guardian validates and reviews every target before the runtime changes.
    Credentials, secret writes and protected roots/aliases are denied by rules.
    Missing or failed Guardian denies; only a real `defer` asks the human.

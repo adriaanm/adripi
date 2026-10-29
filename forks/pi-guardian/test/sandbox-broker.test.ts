@@ -479,7 +479,8 @@ test("a protected directory root, descendants and aliases are denied before revi
 		const targets: Array<{ surface: "read" | "write"; target: string }> = [
 			{ surface: "write", target: agent },
 			{ surface: "write", target: join(agent, "settings.json") },
-			{ surface: "read", target: join(agent, "sessions") },
+			{ surface: "read", target: join(agent, "auth.json") },
+			{ surface: "write", target: join(agent, "auth.json") },
 			{ surface: "write", target: directoryAlias },
 			{ surface: "write", target: join(directoryAlias, "settings.json") },
 			{ surface: "write", target: join(directoryAlias, "sessions", "missing.json") },
@@ -497,6 +498,16 @@ test("a protected directory root, descendants and aliases are denied before revi
 			assert.equal(decision.kind === "deny" ? decision.review.source : undefined, "rule", entry.target);
 		}
 		assert.equal(reviews, 0);
+		// Other agent-directory files are readable; only the credentials are hidden,
+		// so an ordinary read reaches the reviewer instead of being refused here.
+		for (const target of [join(agent, "settings.json"), join(agent, "sessions"), join(directoryAlias, "settings.json")]) {
+			const decision = await broker.review(
+				request({ id: `readable-${target}`, scope: "once", surface: "read", target }),
+			);
+			assert.equal(decision.kind, "allow", target);
+			assert.equal(decision.kind === "allow" ? decision.review.source : undefined, "reviewer", target);
+		}
+		assert.equal(reviews, 3);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

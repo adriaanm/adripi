@@ -572,6 +572,12 @@ export default function guardianExtension(pi: ExtensionAPI) {
 					rules: config.sandboxExceptions,
 					projectRules: () => projectRules,
 					agentDir: config.agentDir,
+					sessionDir: config.guardianSessionDir,
+					// Maintenance authority comes from the trusted global config only.
+					// Neither the project policy (`projectRules`) nor the request may
+					// name a maintenance root.
+					maintenanceRoots: config.permissions.agentDirWriteProjects ?? [],
+					sessionCwd: ctx.cwd,
 					review: reviewSandboxException,
 					audit: (record) => pi.appendEntry(SANDBOX_EXCEPTION_ENTRY, record),
 					maxConsecutiveDenials: config.maxConsecutiveDenials,

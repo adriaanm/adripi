@@ -136,12 +136,12 @@ const disposers: Array<() => void> = [];
 const shutdowns: Array<() => Promise<void>> = [];
 let projectRoot = "";
 
-function setup(options: { allowUnsandboxedCommands?: boolean; failIfUnavailable?: boolean; exclude?: string[] } = {}) {
+function setup(options: { allowUnsandboxedCommands?: boolean; failIfUnavailable?: boolean; exclude?: string[]; denyRead?: string[] } = {}) {
   projectRoot = mkdtempSync(join(tmpdir(), "pi-sbx-dispatch-"));
   const agentDir = join(projectRoot, "agent");
   mkdirSync(join(agentDir, "extensions"), { recursive: true });
   writeFileSync(join(agentDir, "extensions", "sandbox.json"), JSON.stringify({
-    filesystem: { allowWrite: ["."] },
+    filesystem: { allowWrite: ["."], ...(options.denyRead ? { denyRead: options.denyRead } : {}) },
     ...(options.allowUnsandboxedCommands === false ? { allowUnsandboxedCommands: false } : {}),
     ...(options.failIfUnavailable === false ? { failIfUnavailable: false } : {}),
     ...(options.exclude ? { excludedCommands: options.exclude } : {}),
@@ -201,7 +201,7 @@ type BashTool = {
 };
 
 async function start(
-  options: { allowUnsandboxedCommands?: boolean; failIfUnavailable?: boolean; exclude?: string[] } = {},
+  options: { allowUnsandboxedCommands?: boolean; failIfUnavailable?: boolean; exclude?: string[]; denyRead?: string[] } = {},
   ctxOptions: { hasUI?: boolean; select?: unknown; confirm?: unknown } = {},
 ) {
   setup(options);
@@ -416,8 +416,10 @@ describe("registered bash tool as one execution seam", () => {
     expect(state.sandboxCalls).toHaveLength(0);
   });
 
-  it("serializes executions, keeps scoped grants local, and leaves file tools static", async () => {
-    publishBroker();
+  it("serializes executions and keeps a scoped grant out of the native gate", async () => {
+    const broker = publishBroker(async (request) => request.surface === "write" && request.command === "scoped"
+      ? { kind: "allow", scope: "once", review: { rationale: "scoped command", source: "reviewer" } }
+      : { kind: "deny", reason: "a native write needs its own decision", review: { rationale: "no", source: "reviewer" } });
     const release = deferred();
     const started = deferred();
     state.sandboxExecute = async (params) => {
@@ -440,10 +442,12 @@ describe("registered bash tool as one execution seam", () => {
     const scopedRuntime = state.sandboxCalls[0]!.runtime as { filesystem: { allowWrite: string[] } };
     expect(scopedRuntime.filesystem.allowWrite).toContain(scopedPath);
 
-    // A native write to the transient path never sees the scoped grant.
+    // A native write to the path the scoped command may write is still decided
+    // against the baseline, not against the temporary OS widening.
     const gate = handlers.get("tool_call")! as unknown as (event: unknown, ctx: unknown) => Promise<unknown>;
     const blocked = await gate({ toolName: "write", input: { path: join(scopedPath, "x") } }, ctx);
-    expect(blocked).toEqual({ block: true, reason: expect.stringContaining("Sandbox policy blocks writing") });
+    expect(blocked).toMatchObject({ block: true, reason: expect.stringContaining("its own decision") });
+    expect(broker.requests.some((request) => request.surface === "write" && request.target.endsWith("/x"))).toBe(true);
     const allowed = await gate({ toolName: "write", input: { path: join(projectRoot, "ok.txt") } }, ctx);
     expect(allowed).toBeUndefined();
 
@@ -460,6 +464,106 @@ describe("registered bash tool as one execution seam", () => {
     expect(secondRuntime.filesystem.allowWrite).not.toContain(scopedPath);
     const restored = state.runtimeCurrent as { filesystem: { allowWrite: string[] } };
     expect(restored.filesystem.allowWrite).not.toContain(scopedPath);
+  });
+
+  it("routes one native path action through the same broker and fails closed when headless", async () => {
+    const broker = publishBroker(async (request) => request.surface === "write" && request.target.endsWith("/native.txt")
+      ? { kind: "defer", review: { rationale: "ask a human", source: "reviewer" } }
+      : { kind: "allow", scope: "once", review: { rationale: "allowed", source: "reviewer" } });
+    const select = vi.fn();
+    const { handlers } = await start({}, { hasUI: false, select });
+    const headless = context({ hasUI: false, select });
+    const gate = handlers.get("tool_call")! as unknown as (event: unknown, ctx: unknown) => Promise<unknown>;
+    const outside = join(tmpdir(), `pi-sbx-native-${process.pid}`, "native.txt");
+
+    const result = await gate({ toolName: "write", input: { path: outside, content: "x" } }, headless);
+    expect(result).toMatchObject({ block: true, reason: expect.stringContaining("Sandbox exception deferred") });
+    expect((result as { reason: string }).reason).toContain("no human approval channel");
+    expect(broker.requests).toEqual([expect.objectContaining({ surface: "write", scope: "once", origin: "tool" })]);
+    expect(broker.requests[0]?.target.endsWith("/native.txt")).toBe(true);
+    expect(select).not.toHaveBeenCalled();
+    expect(state.sandboxCalls).toHaveLength(0);
+    expect(state.localCalls).toHaveLength(0);
+  });
+
+  it("uses the real human adapter for a deferred native write and retains no grant", async () => {
+    const broker = publishBroker(async () => ({ kind: "defer", review: { rationale: "ask", source: "rule" } }));
+    const select = vi.fn(async () => "Allow this one file change");
+    const { handlers, ctx } = await start({}, { select });
+    const gate = handlers.get("tool_call")!;
+    const path = join(tmpdir(), `pi-sbx-native-ui-${process.pid}`, "new.txt");
+    expect(await gate({ toolName: "write", input: { path, content: "x" } }, ctx)).toBeUndefined();
+    expect(select).toHaveBeenCalledTimes(1);
+    expect(select.mock.calls[0]).toEqual(expect.arrayContaining([expect.stringContaining("\nwrite:")]));
+    expect(await gate({ toolName: "write", input: { path, content: "y" } }, ctx)).toBeUndefined();
+    expect(select).toHaveBeenCalledTimes(2);
+    expect(broker.requests).toHaveLength(2);
+    expect(state.sandboxCalls).toHaveLength(0);
+    expect(state.localCalls).toHaveLength(0);
+  });
+
+  it("reviews scoped reads, installs their carve-out once and restores baseline", async () => {
+    const broker = publishBroker();
+    const deniedRoot = join(tmpdir(), `pi-sbx-readable-${process.pid}`);
+    const { tool, ctx, handlers } = await start({ denyRead: [deniedRoot] });
+    const agentDir = state.agentDir;
+    const target = join(deniedRoot, "public.txt");
+    await invoke(tool, ctx, "read-once", {
+      command: "build", sandbox_permissions: "with_additional_permissions", justification: "read build input",
+      additional_permissions: { file_system: { read: [target] } },
+    });
+    expect(broker.requests).toEqual([expect.objectContaining({ surface: "read", command: "build" })]);
+    expect((state.sandboxCalls[0]!.runtime as { filesystem: { allowRead: string[] } }).filesystem.allowRead).toContain(target);
+    expect((state.runtimeCurrent as { filesystem: { allowRead: string[] } }).filesystem.allowRead).not.toContain(target);
+    const history = state.runtimeHistory.length;
+    const credential = await invoke(tool, ctx, "auth", {
+      command: "build", sandbox_permissions: "with_additional_permissions", justification: "not allowed",
+      additional_permissions: { file_system: { read: [join(agentDir, "auth.json")] } },
+    });
+    expect(contentText(credential)).toContain("never grantable");
+    expect(broker.requests).toHaveLength(1);
+    expect(state.runtimeHistory).toHaveLength(history);
+    expect(await handlers.get("tool_call")!({ toolName: "read", input: { path: target } }, ctx)).toBeUndefined();
+    expect(broker.requests).toHaveLength(2);
+  });
+
+  it("uses the event signal and baseline for a native action during a scoped command", async () => {
+    const broker = publishBroker();
+    const release = deferred();
+    const started = deferred();
+    state.sandboxExecute = async () => {
+      started.resolve();
+      await release.promise;
+      return { content: [{ type: "text", text: "sandbox:scoped" }], details: {} };
+    };
+    const { tool, ctx, handlers } = await start();
+    const commandSignal = new AbortController();
+    const first = tool.execute("hold", {
+      command: "scoped",
+      sandbox_permissions: "with_additional_permissions",
+      justification: "needs the cache",
+      additional_permissions: { file_system: { write: ["/tmp/pi-sbx-extra"] } },
+    }, commandSignal.signal, undefined, ctx);
+    await started.promise;
+
+    const gate = handlers.get("tool_call")! as unknown as (event: unknown, ctx: unknown) => Promise<unknown>;
+    const outside = join(tmpdir(), `pi-sbx-native-parallel-${process.pid}`, "x.txt");
+    try {
+      // The active command is not cancelled, so the native action is admitted
+      // by its own decision while the scoped OS profile is installed.
+      const granted = await gate({ toolName: "write", input: { path: outside, content: "x" } }, ctx);
+      expect(granted).toBeUndefined();
+      expect(broker.requests.some((request) => request.target.endsWith("/x.txt"))).toBe(true);
+
+      // An aborted event signal refuses even though the command signal is live.
+      const aborted = new AbortController();
+      aborted.abort();
+      const blocked = await gate({ toolName: "write", input: { path: join(outside, "y.txt") } }, { ...ctx, signal: aborted.signal });
+      expect(blocked).toMatchObject({ block: true, reason: expect.stringContaining("cancelled") });
+    } finally {
+      release.resolve();
+      await first;
+    }
   });
 
   it("restores the baseline on errors, cancellations and partial approval", async () => {
@@ -485,7 +589,7 @@ describe("registered bash tool as one execution seam", () => {
 
     // Partial approval: the first path is allowed, the second denied, nothing runs.
     unpublishBroker();
-    publishBroker(async (request) => request.target === "/tmp/pi-sbx-extra"
+    publishBroker(async (request) => request.target.endsWith("/pi-sbx-extra")
       ? { kind: "allow", scope: "once", review: { rationale: "ok", source: "reviewer" } }
       : { kind: "deny", reason: "no", review: { rationale: "no", source: "reviewer" } });
     const historyBefore = state.runtimeHistory.length;

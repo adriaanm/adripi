@@ -34,7 +34,11 @@ merge it (see the agent-dir grant step) or the human edits the live file.
 - Human session settings and copied command-local path layers are additive.
   Model exceptions do not mutate session policy. Every path is decided before
   SRT changes; serialized bash restores baseline in `finally`, and native file
-  tools always read baseline. Network decisions apply to one connection without
+  tools always read baseline. Native Read/Write/Edit and scoped Bash use one
+  action-bound path authorizer: native grants admit only that operation, never
+  mutate baseline and never widen recursive traversal. Mandatory reads precede
+  allowRead carve-outs; other read denies need a strictly more-specific exact
+  carve-out. Network decisions apply to one connection without
   adding an allowlist entry. Numeric Guardian port rules match only that port;
   bare hosts and `host:*` mean all ports.
 - Writes are allowlist-based: lifting a deny is not enough, an `allowWrite` root
@@ -74,8 +78,12 @@ not blocked.
 - `<workspace>/.pi` stays mandatory deny-write, so a granted project still cannot
   edit its own project policy.
 - Guardian decides file-tool maintenance calls in its **rule engine**
-  (`agentDirWriteProjects(<path>)`), not via the reviewer: the reviewer cannot
-  see which project holds the grant and would refuse its own maintenance path.
+  (`permissions.agentDirWriteProjects(<path>) root=<root>`), not via the reviewer:
+  the reviewer cannot see which project holds the grant. The file-tool and
+  exception rule engines share that resolver; both OS and Guardian require
+  spelled/canonical cwd containment. The published broker rejects another cwd
+  rather than borrowing that workspace's authority. Explicit user/project
+  restrictions and auth/audit/policy exclusions still win.
 
 ## Commit regularly
 
@@ -134,8 +142,10 @@ Two rules follow from that shape and must stay true:
   service no standing permission is saved; there is no fallback policy store.
 - **One public API.** `request_sandbox_exception` is retired, and
   `dangerouslyDisableSandbox` is explicitly rejected. Filesystem overrides
-  support only `additional_permissions.file_system.{read,write}`; network is
-  reviewed by the proxy per connection. Missing/failed Guardian denies rather
+  support only `additional_permissions.file_system.{read,write}`. Native tools
+  retain their own schemas and request exact-target authority at their gate,
+  through the same path authorizer; never rewrite a denied Edit as Bash. Network
+  is reviewed by the proxy per connection. Missing/failed Guardian denies rather
   than bypassing its hard restrictions through a local human fallback.
 - **Failure is the trigger.** The guidance tells the model to re-run a
   sandbox-failing command with escalation attached, without messaging the user

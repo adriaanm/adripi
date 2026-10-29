@@ -7,6 +7,7 @@ import { open, rename, unlink } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { buildHardeningPaths, protectedAgentDirWrites, type HardeningPaths } from "./hardening.ts";
+import { canonicalizeTarget, isWithin } from "./path-policy.ts";
 
 export interface ExtensionConfigFields {
   enabled: boolean;
@@ -200,10 +201,8 @@ function agentDirWriteAllowed(cwd: string, value: unknown, warnings: string[]): 
     warnings.push("Ignored agentDirWriteProjects: expected an array of absolute project roots");
     return false;
   }
-  return value.some((root) => {
-    const rel = relative(resolve(root), resolve(cwd));
-    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-  });
+  return value.some((root) => isWithin(resolve(cwd), resolve(root)) &&
+    isWithin(canonicalizeTarget(cwd, cwd), canonicalizeTarget(root, cwd)));
 }
 
 /**

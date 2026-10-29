@@ -116,8 +116,11 @@ The only model-facing API is on bash itself:
 ```
 
 All scoped targets are decided before installing a copied runtime profile for
-one serialized execution. Native file tools retain baseline policy. Baseline
-restores in `finally`; failed rollback blocks future execution. Host eligibility,
+one serialized execution. Native Read/Write/Edit use the same path authorizer,
+but keep their own tool schemas and exact one-call enforcement: a grant never
+mutates baseline or authorizes recursive traversal. Mandatory read/write locks
+and configured deny-write entries are final; other read denies require a
+strictly more-specific reviewed carve-out. Baseline restores in `finally`; failed rollback blocks future execution. Host eligibility,
 host-enabled policy and prefix binding precede Guardian review. Host execution
 is full-host authority, not a credential jail.
 

@@ -2,7 +2,7 @@
 
 Fork of [`pi-sbx@0.1.3`](https://github.com/RiverAi7z/pi-sbx), an SRT-backed
 Pi bash sandbox. License: see `LICENSE`. Base is upstream except for the deltas
-below. These describe current source after round 1; old grant/exclusion/supervisor
+below. These describe current source through round 2's first wave; old grant/exclusion/supervisor
 routes in Git history are retired, not additional supported APIs.
 
 ## Current deltas
@@ -60,18 +60,37 @@ routes in Git history are retired, not additional supported APIs.
 11. **Maintenance** (`src/hardening.ts`, config): agent-dir reads deny only
     `auth.json`; global-only `agentDirWriteProjects` authorizes maintainer roots
     to write the agent directory. Credentials and Guardian audit writes remain
-    denied, and workspace `.pi` stays mandatory deny-write.
+    denied, and workspace `.pi` stays mandatory deny-write. Both the spelled cwd
+    and its canonical target must stay inside the configured project root; a
+    symlink out of a maintainer workspace cannot retain its OS maintenance scope.
 12. **Guidance/hints** (`src/guidance.ts`, `src/trap-hints.ts`): system-prompt
     sandbox section, workspace/scratch/credential conventions, exact inline retry
     examples and authenticated-network-git hints. Local Git remains sandboxed.
     Denial is final; switching tools is not a workaround. No old tool signature
     or mandatory request-then-rerun protocol remains in current guidance.
-13. **Tests:** registered bash dispatch with mocked execution/runtime, concurrent
+13. **Shared path authority** (`src/path-authorizer.ts`, `src/file-gate.ts`,
+    `src/index.ts`): one action-bound decision for command-scoped Bash paths and
+    native read/write/edit. Grant feasibility runs before any review or human
+    question: mandatory policy/credential/audit locks (lexical and canonical),
+    configured deny-write entries and mandatory reads are final refusals.
+    Non-mandatory read denies may accept a strictly more-specific exact allowRead
+    carve-out, preserving the advertised scoped-read API. A native grant admits only the
+    resolved target of that one call; nothing is stored, the next call starts
+    from baseline, and grep/find/ls traversal is never widened. Gate decisions
+    use the event's cwd and signal, so a parallel Bash call cannot lend its
+    context or cancellation. Missing/throwing Guardian, a headless defer and
+    cancellation fail closed with an actionable result. Mandatory reads precede
+    baseline allowRead entries and cannot be reopened by them, including recursive
+    traversal. Native targets are resolved again after an asynchronous decision;
+    changed targets fail closed (not a hostile same-user filesystem-race defence).
+    This is sandbox adapter behavior, not a child approval transport.
+14. **Tests:** registered bash dispatch with mocked execution/runtime, concurrent
     scoped versus plain/native-file actions, partial approval, queue cancellation,
     prompt cancellation, setting serialization, partial refresh/rollback failure,
     host admission/fallback, per-connection decisions, policy prepare-before-prompt,
-    legacy input rejection, helper/config/file-gate/lifecycle coverage. These are
-    not live nested OS-sandbox tests.
+    legacy input rejection, path-authorizer feasibility/defer/cancel cases,
+    registered native-gate grant/deny/headless/cancellation/isolation coverage,
+    helper/config/lifecycle coverage. These are not live nested OS-sandbox tests.
 
 ## Failure modes repaired in round 1
 
@@ -84,7 +103,7 @@ closed unavailable-SRT host fallback, bound save snapshots before prompts,
 checked late cancellation and fail-closed rollback, and serialized settings.
 
 See [current contract](../../docs/product.md),
-[round evidence](../../docs/round-1.md), and
+[round-1 evidence](../../docs/round-1.md), [round 2](../../docs/round-2.md), and
 [archived baseline](../../docs/product-baseline.md). Earlier macOS probes in the
 Git history exercised the now-retired session-grant protocol; they do not verify
 this round's installed runtime.

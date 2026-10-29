@@ -21,6 +21,8 @@ export interface HumanRequest {
    * the human may save. Only guardian's project-policy service persists it.
    */
   standingRule?: string;
+  /** Wording for the once-only option when the action is not a command. */
+  onceLabel?: string;
 }
 
 export type HumanDecision =
@@ -36,7 +38,7 @@ export type HumanDecision =
 export function approvalUnavailableReason(input: { cwd: string; policyPath: string }): string {
   return [
     "no human approval channel is available in this mode (ctx.hasUI is false: print, JSON or headless)",
-    "a deferred sandbox exception needs a person to decide, so the command did not run",
+    "a deferred sandbox exception needs a person to decide, so the action did not run",
     `re-run in an interactive session (TUI or RPC), or ask the user to add the standing rule to the project policy (${input.policyPath}) for ${input.cwd}`,
   ].join("; ");
 }
@@ -46,10 +48,13 @@ export class HumanChannel {
   private closed = false;
   private readonly abortController = new AbortController();
 
-  constructor(
-    private readonly getContext: () => ExtensionContext | undefined,
-    private readonly policyPath: () => string,
-  ) {}
+  private readonly getContext: () => ExtensionContext | undefined;
+  private readonly policyPath: () => string;
+
+  constructor(getContext: () => ExtensionContext | undefined, policyPath: () => string) {
+    this.getContext = getContext;
+    this.policyPath = policyPath;
+  }
 
   private enqueue<T>(
     fallback: T,
@@ -82,7 +87,7 @@ export class HumanChannel {
   /** Ask once for one execution (or one connection). */
   ask(request: HumanRequest, commandSignal?: AbortSignal): Promise<HumanDecision> {
     if (this.closed) return Promise.resolve({ kind: "deny", reason: "the sandbox approval channel is closed" });
-    return this.enqueue<HumanDecision>({ kind: "deny", reason: "the sandbox approval question could not be answered, so the command did not run" }, async (ctx, signal) => {
+    return this.enqueue<HumanDecision>({ kind: "deny", reason: "the sandbox approval question could not be answered, so the action did not run" }, async (ctx, signal) => {
       if (!ctx.hasUI) {
         return {
           kind: "unavailable",
@@ -90,8 +95,9 @@ export class HumanChannel {
         };
       }
       const standingLabel = request.standingRule ? `Always allow ${request.standingRule}` : undefined;
-      const allowLabel = request.surface === "command" ? "Run once outside the sandbox"
-        : request.surface === "network" ? "Allow this connection" : "Allow for this command";
+      const allowLabel = request.onceLabel
+        ?? (request.surface === "command" ? "Run once outside the sandbox"
+          : request.surface === "network" ? "Allow this connection" : "Allow for this command");
       const options = [allowLabel, ...(standingLabel ? [standingLabel] : []), "Deny"];
       const title = [
         request.surface === "command"

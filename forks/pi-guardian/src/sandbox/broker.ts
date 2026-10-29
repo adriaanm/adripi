@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+import { resolveMaintenanceAuthority } from "../maintenance.ts";
 import { evaluateLayeredSandboxRules, sandboxTargetProblem } from "./rules.ts";
 import type {
 	SandboxAuditRecord,
@@ -35,6 +37,17 @@ export interface SandboxBrokerOptions {
 	 */
 	projectRules?: (cwd: string) => SandboxExceptionRules | undefined;
 	agentDir: string;
+	/** Guardian's audit directory, when it is configured away from the default. */
+	sessionDir?: string;
+	/**
+	 * Trusted *global* project roots permitted to maintain the agent directory
+	 * (`permissions.agentDirWriteProjects`). This is the only maintenance input:
+	 * project policy and request fields cannot name roots. The production publisher
+	 * also supplies sessionCwd so a caller cannot impersonate another workspace.
+	 */
+	maintenanceRoots?: readonly string[];
+	/** Trusted publishing session's cwd, bound before any request is accepted. */
+	sessionCwd?: string;
 	review: SandboxReviewFn;
 	audit?: (record: SandboxAuditRecord) => void;
 	now?: () => Date;
@@ -99,6 +112,10 @@ export function createSandboxBroker(options: SandboxBrokerOptions): SandboxBroke
 		async review(request: SandboxExceptionRequest): Promise<SandboxExceptionDecision> {
 			const invalid = validateRequest(request);
 			if (invalid) return deny(request, invalid, `Invalid sandbox exception request: ${invalid}`, "rule");
+			if (options.sessionCwd && resolve(request.cwd) !== resolve(options.sessionCwd)) {
+				return deny(request, "Sandbox request cwd does not match the active Guardian session; no authority was delegated",
+					"Request rejected at the session authority boundary.", "rule");
+			}
 
 			// An exception grants one exact capability. A wildcard, URL, relative path,
 			// multi-line command or wrapper shape would promise more than the eventual
@@ -128,6 +145,10 @@ export function createSandboxBroker(options: SandboxBrokerOptions): SandboxBroke
 				rules,
 				request,
 				options.agentDir,
+				{
+					sessionDir: options.sessionDir,
+					maintenance: resolveMaintenanceAuthority(options.maintenanceRoots, request.cwd),
+				},
 			);
 			if (ruled.outcome === "deny") {
 				return deny(

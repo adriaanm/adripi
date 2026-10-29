@@ -299,6 +299,7 @@ describe("agent dir read policy", () => {
       allowRead: config.runtime.filesystem.allowRead ?? [],
       allowWrite: config.runtime.filesystem.allowWrite,
       denyWrite: config.runtime.filesystem.denyWrite ?? [],
+      mandatoryDenyRead: config.hardening.denyRead,
       mandatoryDenyWrite: config.hardening.mandatoryDenyWrite,
     });
 

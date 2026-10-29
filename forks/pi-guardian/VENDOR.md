@@ -40,8 +40,8 @@ deltas are listed below; nothing else is modified.
    required because 1 makes the field non-optional under strict `tsc`.
 8. `src/sandbox/{types,rules,broker,review}.ts` — the sandbox exception broker:
    `Symbol.for` slot published at `session_start`, request validation, always-deny
-   classes (credentials, the agent directory, secret writes, repo config and
-   HEAD), `sandboxExceptions.{allow,defer,deny}` `surface:pattern` rules,
+   classes (credentials, audit writes, secret writes, repo config and HEAD;
+   agent-directory writes have the bounded maintenance carve-out in item 15), `sandboxExceptions.{allow,defer,deny}` `surface:pattern` rules,
    reviewer prompt with scope narrowing, durable audit entries, and a denial
    breaker. Built-in command restrictions are a reviewer-side backstop; pi-sbx
    owns executable eligibility and host dispatch. Host execution is full-host
@@ -62,10 +62,11 @@ deltas are listed below; nothing else is modified.
 11. `src/{types,config,permissions}.ts` — `permissions.agentDirWriteProjects`:
     absolute project roots whose sessions may maintain the agent directory
     (that is how this repo installs and repairs the profile it ships). It lifts
-    it lifts `Edit(<agentDir>/**)` and decides the maintenance file-tool calls in
-    the rule engine; `auth.json` and `guardian-sessions/**` stay write-denied, and
-    every user deny still applies. `install.sh` adds this repo's own root; delete
-    the entry to revoke.
+    `Edit(<agentDir>/**)` and decides the maintenance file-tool calls in the rule
+    engine; `auth.json` and the audit directory stay write-denied, and every user
+    deny still applies. `install.sh` adds this repo's own root; delete the entry
+    to revoke. Root resolution and provenance come from the one helper in
+    `src/maintenance.ts` (see change 15).
 12. `src/project-policy.ts` + `src/sandbox/{rules,broker}.ts` — per-project
     Guardian policy at `<workspace>/.pi/guardian.json`, holding only
     `sandboxExceptions` (`allow`/`defer`/`deny`). It is applied only when its
@@ -97,6 +98,60 @@ deltas are listed below; nothing else is modified.
     protected path (a README explaining the sandbox, say) un-editable, which
     blocked legitimate maintenance twice. Shells, codemode, MCP and extension
     inputs keep the literal scan.
+
+15. `src/maintenance.ts` + `src/permissions.ts` + `src/sandbox/{rules,broker}.ts`
+    + `src/config.ts` + `src/index.ts` — one trusted maintenance-authority seam,
+    because the two gates disagreed: the file-tool rules lifted the agent-dir edit
+    lock for a globally granted project while `builtinSandboxDenyRules`
+    blanket-denied **both** `read:<agentDir>/**` and `write:<agentDir>/**` for
+    every request, so one session could maintain its profile through Read/Write/
+    Edit and be refused the identical path through the sandbox broker. The
+    contract now matches pi-sbx's OS-level hardening and `AGENTS.md`:
+
+    - `resolveMaintenanceAuthority(roots, cwd)` is the only resolver, with
+      provenance (`MAINTENANCE_AUTHORITY_SOURCE`), and returns a grant only while
+      **both** the spelled and the symlink-resolved cwd stay inside the same
+      listed root. A cwd spelled under a granted project but symlinked out of it
+      keeps nothing, and neither a `..` spelling nor a symlink *into* the project
+      stands in for the trusted directory. `canonicalPath`/`pathSpellings` are
+      shared by both gates, so canonical and deepest-existing-ancestor targets are
+      decided the same way on both sides.
+    - The broker publisher in `index.ts` passes
+      `config.permissions.agentDirWriteProjects` and `config.guardianSessionDir`
+      into `createSandboxBroker`. Nothing else can name a maintenance root: not
+      `<workspace>/.pi/guardian.json`, not the request, and there is no model
+      input for it. `evaluateSandboxRules` keeps the grant in the rule engine (the
+      reviewer cannot see which project holds it) and reports
+      `permissions.agentDirWriteProjects(<target>) root=<root>` as the rule, which
+      is also what the durable exception audit row shows. The publisher binds
+      requests to its session cwd; a different request cwd is rejected rather
+      than treated as another workspace's authority.
+    - Only `read:<agentDir>/auth.json` is built in as a read deny; skills,
+      packages, transcripts, settings and reviewer configuration are readable, so
+      an ordinary read reaches the reviewer instead of being refused.
+    - Exactly one built-in rule is liftable: the broad `write:<agentDir>/**` lock
+      (`liftableSandboxDenyRules`). `write:<agentDir>/auth.json` and
+      `write:<guardianSessionDir>/**` are separate, never liftable rules, so the
+      built-ins are no longer merged into `sandboxExceptions.deny` — that merge
+      would have made a built-in look like a human deny and made the lift both
+      impossible and unsafe. A user or project deny that *repeats* the broad
+      lock's spelling is not lifted either, and a global `defer` still reaches the
+      human first. Native permissions retain user-deny provenance separately from
+      the merged display list. Audit and broad-lock rules are kept apart by
+      provenance, even when an audit root equals the agent root (including aliases).
+    - Exception admission now also refuses `write:<request cwd>/.pi/**`, the
+      workspace policy-directory backstop the file-tool rules already had (both
+      gates compare the spelled and the canonical directory).
+    - A project policy cannot create maintenance authority. Its deny/defer
+      restrictions still win over a globally granted maintenance root.
+    - Tests: `test/maintenance-authority.test.ts` covers the helper's root
+      boundary, the file-tool grant, exception admission, credential/audit/`.pi`
+      negatives, user/project restriction precedence and the *published* broker
+      through `guardianExtension`, including a relocated audit root and spoofed
+      cwd refusal. `maintenance-exclusions.test.ts` covers explicit duplicate
+      denies and equal/aliased audit roots; `tool-authority-integration.test.ts`
+      exercises the real native pi-sbx gate consuming the published Guardian
+      broker and compares both forks' canonical maintenance-root decisions.
 
 Upstream 0.2.0 already covers the rest of what the 0.1.0 fork needed: the
 deterministic `permissions.allow` / `permissions.deny` rule family (evaluated

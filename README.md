@@ -21,7 +21,9 @@ maintenance workspaces have deliberately greater authority.
 
 [Round 1](docs/round-1.md) consolidates escalation, isolates scoped permissions,
 fixes port matching and binds standing approval to trusted policy snapshots.
-It is source-verified, not deployed; lifecycle, child transport/containment and
+[Round 2's first wave](docs/round-2.md) shares action authorization across Bash
+and native file tools and aligns trusted maintenance admission. These changes
+are source-verified, not deployed; lifecycle, child transport/containment and
 OS-level smoke tests remain open. Treat the product guide as the current contract;
 this README is the installation overview, not a claim of complete containment or
 feature parity.

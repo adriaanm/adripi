@@ -223,7 +223,7 @@ test("agentDirWriteProjects lifts only the agent-dir self-protection rules", asy
 	const project = join(directory, "project");
 	const other = join(directory, "other");
 	const config = loadGuardianConfig(directory, "/policy");
-	const permissions = { allow: ["Write", "Edit", "Read"], deny: config.permissions.deny, agentDirWriteProjects: [project] };
+	const permissions = { ...config.permissions, allow: ["Write", "Edit", "Read"], agentDirWriteProjects: [project] };
 	void other;
 
 	const write = (cwd: string, path: string) =>

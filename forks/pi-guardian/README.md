@@ -113,7 +113,7 @@ Guardian adds three protections beyond Claude-style matching:
 
 - **Directory containment:** a deny `Read` (or other read-path) rule also blocks grep/find/ls when their root could contain a matching path. `Read(~/.codex/**)` therefore blocks searches rooted at home or `/`. Edit/Write rules don't do this, since reading those files is allowed, and allows never do. Broad searches can consequently be blocked even when their result filters would exclude protected files.
 - **Literal path detection:** deny path rules also check serialized inputs of shell, codemode, MCP, and other tools for the rule's non-glob prefix, resolved to an absolute path (including its realpath spelling). Rules for paths under the home directory, whether written with `~/` or as absolute paths, additionally check `~/...`, `$HOME/...`, and `${HOME}/...`. The literal must end at a path boundary, so `/root/.pi` doesn't match `/root/.pip`. Patterns with no literal target prefix skip this check. It is deliberately conservative and can block harmless mentions. Read-only file tools may inspect and list files protected only by Edit/Write rules, so skills under the agent dir and Guardian's source/policy stay readable.
-- **Non-removable built-in denies:** in this stable order, `Edit` protects `<agentDir>/**` (everything Pi loads: settings, auth, extensions, `mcp.json`, system prompts, skills), `<guardianSessionDir>/**`, and `<Guardian packageDir>/**` (resolved from `import.meta.url`); identical directories are listed once. Then `Read` protects `<agentDir>/auth.json`, `<agentDir>/guardian.json`, and `<guardianSessionDir>/**` (the reviewer's transcripts). Edit covers Write, so no separate Write entries are needed. These rules use absolute `//` spellings and precede user deny rules. Config cannot remove them.
+- **Built-in protection and bounded maintenance:** `Edit` protects `<agentDir>/**`, `<guardianSessionDir>/**`, and `<Guardian packageDir>/**` (resolved from `import.meta.url`); identical directories are listed once. Only `<agentDir>/auth.json` is read-denied there; configuration, skills, packages and transcripts remain readable. A project named in the trusted global `permissions.agentDirWriteProjects` may lift only the broad agent-directory edit lock, with both spelled and canonical cwd containment checked. Auth and audit writes and the workspace's own `.pi` stay denied. User-deny provenance is retained separately, so even a user deny identical to the broad lock is not lifted. The exception broker uses the same maintenance resolver, keeps global/project restrictions authoritative and binds requests to the publishing session cwd. These are rule decisions, not permission inferred by the reviewer.
 
 Fixed denies produce assessment records and count toward the same consecutive-denial streak as reviewer denies. Rule allows produce no records, preserving the previous exemption volume; they also preserve the previous exemption behavior for the streak. The reviewer prompt includes the active deny list and asks it to reject obfuscated or indirect attempts at those targets.
 
@@ -159,10 +159,11 @@ Pi 1.0.0 emits custom entries appended through `pi.appendEntry()` as stdout JSON
           "Edit(//example/agent/**)",
           "Edit(//example/agent/guardian-sessions/**)",
           "Edit(//example/pi-guardian/**)",
-          "Read(//example/agent/auth.json)",
-          "Read(//example/agent/guardian.json)",
-          "Read(//example/agent/guardian-sessions/**)"
-        ]
+          "Read(//example/agent/auth.json)"
+        ],
+        "userDeny": [],
+        "auditDir": "/example/agent/guardian-sessions",
+        "agentDirWriteProjects": []
       },
       "permissionsSha256": "<64 lowercase hexadecimal SHA-256 characters>",
       "configError": null

@@ -8,6 +8,8 @@ export interface FilePolicy {
   allowRead: string[];
   allowWrite: string[];
   denyWrite: string[];
+  /** Reads a one-call grant must never lift: credentials and `auth.json`. */
+  mandatoryDenyRead: string[];
   mandatoryDenyWrite: string[];
 }
 
@@ -93,15 +95,23 @@ function patternMatches(path: string, rawPattern: string, cwd: string): boolean 
   });
 }
 
-function specificity(pattern: string): number {
-  return pattern.replace(/[*?[]/g, "").length;
+function specificity(pattern: string, cwd: string): number {
+  // Compare effective paths, not spelling length: /private/var must not beat
+  // an equal /var exclusion merely by containing more characters.
+  return canonicalizePattern(expandPolicyPath(pattern, cwd), cwd).replace(/[*?[]/g, "").length;
+}
+
+/** Expose the one pattern-matching rule so grant feasibility uses policy admission, not a copy. */
+export function matchesPolicyPath(path: string, pattern: string, cwd: string): boolean {
+  return patternMatches(path, pattern, cwd);
 }
 
 export function canRead(path: string, cwd: string, policy: FilePolicy): boolean {
-  const denied = policy.denyRead.filter((p) => patternMatches(path, p, cwd)).sort((a, b) => specificity(b) - specificity(a))[0];
-  const allowed = policy.allowRead.filter((p) => patternMatches(path, p, cwd)).sort((a, b) => specificity(b) - specificity(a))[0];
+  if (policy.mandatoryDenyRead.some((pattern) => patternMatches(path, pattern, cwd))) return false;
+  const denied = policy.denyRead.filter((p) => patternMatches(path, p, cwd)).sort((a, b) => specificity(b, cwd) - specificity(a, cwd))[0];
+  const allowed = policy.allowRead.filter((p) => patternMatches(path, p, cwd)).sort((a, b) => specificity(b, cwd) - specificity(a, cwd))[0];
   if (!denied) return true;
-  return Boolean(allowed && specificity(allowed) > specificity(denied));
+  return Boolean(allowed && specificity(allowed, cwd) > specificity(denied, cwd));
 }
 
 export function canWrite(path: string, cwd: string, policy: FilePolicy): boolean {
@@ -119,25 +129,32 @@ function staticPrefix(pattern: string, cwd: string): string {
 export function canTraverse(root: string, cwd: string, policy: FilePolicy): boolean {
   const canonicalRoot = canonicalizeTarget(root, cwd);
   if (!canRead(canonicalRoot, cwd, policy)) return false;
+  if (policy.mandatoryDenyRead.some((pattern) => {
+    const deniedRoot = staticPrefix(pattern, cwd);
+    return Boolean(deniedRoot && isWithin(deniedRoot, canonicalRoot));
+  })) return false;
   return !policy.denyRead.some((pattern) => {
     const deniedRoot = staticPrefix(pattern, cwd);
     if (!deniedRoot || !isWithin(deniedRoot, canonicalRoot)) return false;
-    return !policy.allowRead.some((allow) => isWithin(deniedRoot, staticPrefix(allow, cwd)) && specificity(allow) > specificity(pattern));
+    return !policy.allowRead.some((allow) => isWithin(deniedRoot, staticPrefix(allow, cwd)) && specificity(allow, cwd) > specificity(pattern, cwd));
   });
 }
 
 export function createFilePolicy(config: {
   filesystem: { denyRead: string[]; allowRead?: string[]; allowWrite: string[]; denyWrite: string[] };
   credentialFiles?: Array<{ path: string }>;
+  mandatoryDenyRead?: string[];
   mandatoryDenyWrite: string[];
 }): FilePolicy {
+  const credentials = (config.credentialFiles ?? []).map((entry) => entry.path);
   return {
     // Pi file tools cannot present masked credential files, so both deny and
     // mask entries are unreadable outside the OS sandbox.
-    denyRead: [...new Set([...config.filesystem.denyRead, ...(config.credentialFiles ?? []).map((entry) => entry.path)])],
+    denyRead: [...new Set([...config.filesystem.denyRead, ...credentials])],
     allowRead: config.filesystem.allowRead ?? [],
     allowWrite: config.filesystem.allowWrite,
     denyWrite: config.filesystem.denyWrite,
+    mandatoryDenyRead: [...new Set([...credentials, ...(config.mandatoryDenyRead ?? [])])],
     mandatoryDenyWrite: config.mandatoryDenyWrite,
   };
 }

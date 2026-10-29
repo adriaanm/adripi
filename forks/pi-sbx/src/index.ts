@@ -37,7 +37,8 @@ import { HumanChannel } from "./human-channel.ts";
 import { registerFileGate } from "./file-gate.ts";
 import { buildHardeningPaths } from "./hardening.ts";
 import { SandboxController, RuntimeSandboxManager } from "./manager.ts";
-import { createFilePolicy } from "./path-policy.ts";
+import { authorizePathAction } from "./path-authorizer.ts";
+import { canonicalizeTarget, createFilePolicy, resolveTarget, type FilePolicy } from "./path-policy.ts";
 import { createScratchpad, SCRATCH_ENV, sweepScratchpads, withScratchpad, type Scratchpad } from "./scratch.ts";
 import { SandboxSettingsComponent, type RuleKind, type SandboxSettingId } from "./settings-ui.ts";
 import { removeSandboxViolationTags, ViolationTracker } from "./violations.ts";
@@ -152,6 +153,18 @@ export default function sandboxExtension(pi: ExtensionAPI) {
   const policyPath = () => getProjectPolicyService()?.path
     ?? join(currentContext?.cwd ?? process.cwd(), CONFIG_DIR_NAME, "guardian.json");
   let humanChannel = new HumanChannel(() => currentContext, policyPath);
+
+  /**
+   * The baseline native-file policy. Both the native gate and command-scoped
+   * feasibility use this one construction, so they agree on which path a grant
+   * could admit without ever including another call's temporary widening.
+   */
+  const filePolicyFor = (active: EffectiveSandboxConfig): FilePolicy => createFilePolicy({
+    filesystem: active.runtime.filesystem,
+    credentialFiles: active.runtime.credentials?.files,
+    mandatoryDenyRead: active.hardening.denyRead,
+    mandatoryDenyWrite: active.hardening.mandatoryDenyWrite,
+  });
 
   const baseBash = createBashToolDefinition(process.cwd());
 
@@ -498,28 +511,25 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     if (!controller.canRunSandboxed()) {
       return refusal("the sandbox is unavailable, so a command-scoped path permission cannot be applied");
     }
-    for (const target of plan.targets) {
-      const decision = await decideSandboxException({
-        surface: target.surface,
-        target: target.target,
-        scope: "once",
-        origin: "tool",
+    const policy = filePolicyFor(activeConfig);
+    for (const requested of plan.targets) {
+      // Decide the path the operation will actually address; the lexical spelling
+      // is still checked for mandatory locks.
+      const resolved = resolveTarget(requested.target, ctx.cwd);
+      const canonical = canonicalizeTarget(requested.target, ctx.cwd);
+      const authorization = await authorizePathAction({
+        surface: requested.surface,
+        target: canonical,
+        aliases: resolved === canonical ? [] : [resolved],
         reason: plan.justification,
+        origin: "tool",
         command: params.command,
-        cwd: ctx.cwd,
-      });
-      if (decision.kind === "deny") {
-        return refusal(`guardian denied ${target.surface} ${target.target}: ${decision.reason}`);
-      }
-      if (decision.kind === "defer") {
-        const human = await humanChannel.ask({
-          surface: target.surface,
-          target: target.target,
-          reason: plan.justification,
-        }, signal);
-        if (human.kind === "unavailable") return deferred(human.reason);
-        if (human.kind === "deny") return refusal(human.reason);
-      }
+        violation: "the command-local sandbox profile does not include this path",
+      }, { cwd: ctx.cwd, policy, human: humanChannel, signal });
+      if (authorization.kind === "allow") continue;
+      if (authorization.kind === "deferred") return deferred(authorization.reason);
+      if (authorization.kind === "cancelled") return refusal(authorization.reason);
+      return refusal(`${requested.surface} ${requested.target} was denied: ${authorization.reason}`);
     }
     if (signal?.aborted) return refusal("the command was cancelled before it started");
 
@@ -611,7 +621,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
         ? `Write temporary files under ${scratchpad.dir} (also ${SCRATCH_ENV}); it is writable inside the sandbox and removed when the session ends.`
         : "Write temporary files inside the project; paths outside it may need an exception.",
       "When a command fails because of the sandbox, re-run the same bash call with the request attached: `sandbox_permissions: \"with_additional_permissions\"`, `additional_permissions.file_system.{read,write}`, and a `justification` (widened for that command only), or `sandbox_permissions: \"require_escalated\"` when it must run on the host (host credentials, host services). `prefix_rule` may propose a narrow standing rule such as [\"git\", \"push\"], but only the user can save it.",
-      "There is no separate exception tool: network destinations are asked per connection by the proxy, and a path or host exception belongs to the bash call that needs it.",
+      "There is no separate exception tool: network destinations are asked per connection by the proxy. Bash path/host exceptions belong to this bash call; native Read/Write/Edit keep their own tool and request exact-target authority through the same decision service. Never rewrite a denied native operation as Bash.",
       "Local git work (status, diff, log, commit, branch, merge, rebase, stash) runs sandboxed; only network git that authenticates with a remote (clone, fetch, pull, push, ls-remote, submodule --remote) and gh/ssh cannot. For those, re-run with `sandbox_permissions: \"require_escalated\"` and a `justification`, and never ask for read access to gh's config or ~/.ssh — permanently denied.",
     ],
     renderResult(result, options, theme, renderContext) {
@@ -719,7 +729,6 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     const paths = getConfigPaths(cwd, getAgentDir(), CONFIG_DIR_NAME);
     const hardening = buildHardeningPaths(cwd, getAgentDir(), paths.global, paths.project);
     return {
-      cwd,
       policy: createFilePolicy({
         filesystem: { denyRead: [], allowRead: [], allowWrite: [], denyWrite: [] },
         mandatoryDenyWrite: hardening.mandatoryDenyWrite,
@@ -731,19 +740,13 @@ export default function sandboxExtension(pi: ExtensionAPI) {
   // Native file tools always read the baseline policy. A command-scoped grant
   // lives only in the SRT runtime for the duration of one serialized bash call,
   // so `write`/`edit`/`read` can never observe another execution's transient
-  // widening.
-  registerFileGate(pi, () => {
-    const cwd = currentContext?.cwd ?? process.cwd();
-    if (!config) return fallbackGatePolicy(cwd);
-    return {
-      cwd,
-      policy: createFilePolicy({
-        filesystem: config.runtime.filesystem,
-        credentialFiles: config.runtime.credentials?.files,
-        mandatoryDenyWrite: config.hardening.mandatoryDenyWrite,
-      }),
-      enabled: sessionEnabled,
-    };
+  // widening. The event's own context decides cwd and cancellation.
+  registerFileGate(pi, {
+    getPolicy: (ctx) => {
+      if (!config) return fallbackGatePolicy(ctx.cwd);
+      return { policy: filePolicyFor(config), enabled: sessionEnabled };
+    },
+    getHuman: () => humanChannel,
   });
 
   pi.on("session_start", async (_event, ctx) => {

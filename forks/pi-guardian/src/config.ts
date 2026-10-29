@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { builtInDenyRules, DEFAULT_ALLOW_RULES, normalizeTool, validateRules } from "./permissions.ts";
-import { builtinSandboxDenyRules, validateSandboxRules } from "./sandbox/rules.ts";
+import { validateSandboxRules } from "./sandbox/rules.ts";
 import type { GuardianConfig, GuardianPermissions, TranscriptBounds } from "./types.ts";
 import type { SandboxExceptionRules } from "./sandbox/types.ts";
 
@@ -168,7 +168,7 @@ export function loadGuardianConfig(agentDir: string, bundledPolicyPath: string):
 		piCommand: file.piCommand === undefined ? undefined : nonEmptyString(file.piCommand, "", "piCommand"),
 		exemptTools: new Set(exemptTools),
 		permissions,
-		sandboxExceptions: loadSandboxExceptions(file, agentDir),
+		sandboxExceptions: loadSandboxExceptions(file),
 		agentDir,
 		transcript,
 	};
@@ -199,21 +199,30 @@ function loadPermissions(file: GuardianConfigFile, agentDir: string, sessionDir:
 	return {
 		allow: [...new Set([...allow, ...legacy])],
 		deny: [...new Set([...builtInDenyRules(agentDir, sessionDir), ...deny])],
+		userDeny: [...deny],
+		auditDir: sessionDir,
 		agentDirWriteProjects: validateAgentDirWriteProjects(configured?.agentDirWriteProjects),
 	};
 }
 
 /**
- * Sandbox exception rules: user denies add to the always-applied built-in
- * denies (credentials, the agent directory, secret-file writes). Allow rules
- * short-circuit review but never override a deny.
+ * Sandbox exception rules from the global config: allow rules short-circuit
+ * review but never override a deny, and `defer` classes reach the human.
+ *
+ * The always-applied built-in denies are *not* merged in here. They are applied
+ * by the rule engine (`builtinSandboxDenyRules`), which needs the built-in
+ * provenance to drop exactly the broad agent-directory write lock for a project
+ * the trusted global `permissions.agentDirWriteProjects` names. Merging them into
+ * the user's list would make that built-in look like a human deny and lose the
+ * distinction the maintenance grant depends on.
  */
-function loadSandboxExceptions(file: GuardianConfigFile, agentDir: string): SandboxExceptionRules {
+function loadSandboxExceptions(file: GuardianConfigFile): SandboxExceptionRules {
 	const configured = file.sandboxExceptions;
-	const allow = validateSandboxRules(configured?.allow, "sandboxExceptions.allow");
-	const defer = validateSandboxRules(configured?.defer, "sandboxExceptions.defer");
-	const deny = validateSandboxRules(configured?.deny, "sandboxExceptions.deny");
-	return { allow, defer, deny: [...new Set([...builtinSandboxDenyRules(agentDir), ...deny])] };
+	return {
+		allow: validateSandboxRules(configured?.allow, "sandboxExceptions.allow"),
+		defer: validateSandboxRules(configured?.defer, "sandboxExceptions.defer"),
+		deny: validateSandboxRules(configured?.deny, "sandboxExceptions.deny"),
+	};
 }
 
 export function persistGuardianEnabled(agentDir: string, enabled: boolean): void {

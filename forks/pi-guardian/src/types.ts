@@ -73,11 +73,20 @@ export interface TranscriptBounds {
 export interface GuardianPermissions {
 	allow: string[];
 	deny: string[];
+	/** Config-loader provenance: user denies remain authoritative when a built-in is lifted. */
+	userDeny?: readonly string[];
+	/** Trusted configured audit root; never inferred from a request. */
+	auditDir?: string;
 	/**
 	 * Absolute project roots (from `permissions.agentDirWriteProjects`) that may
-	 * edit the agent directory, so the repo that installs this stack can maintain
-	 * it. Everything else — credentials, Guardian's own config, the session
-	 * transcripts — stays denied for those projects too.
+	 * maintain the agent directory, so the repo that installs this stack can repair
+	 * the profile it ships. Only this global list grants it; see
+	 * `src/maintenance.ts` for the shared root resolution used by file-tool rules
+	 * and sandbox exception admission. A grant lifts the directory-wide edit lock
+	 * and nothing else: `auth.json`, Guardian's audit trail (`guardianSessionDir`)
+	 * and the workspace's own `.pi` stay write-denied, every user deny and `defer`
+	 * still wins. Other agent files remain readable; unrelated host commands gain
+	 * no authorization from a maintenance root.
 	 */
 	agentDirWriteProjects?: string[];
 }

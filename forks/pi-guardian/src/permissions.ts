@@ -1,7 +1,13 @@
-import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+	canonicalPath,
+	isWithinDirectory,
+	maintenanceRuleText,
+	pathSpellings,
+	resolveMaintenanceAuthority,
+} from "./maintenance.ts";
 import type { GuardianPermissions } from "./types.ts";
 
 export type PermissionDecision = { outcome: "allow" | "deny"; rule: string } | { outcome: "review" };
@@ -102,23 +108,6 @@ export function builtInDenyRules(agentDir: string, sessionDir: string): string[]
 function expandHome(path: string): string {
 	if (path === "~") return homedir();
 	return path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
-}
-
-// Resolve symlinks in the deepest existing ancestor too, so a new file inside a
-// symlinked directory still matches rules written for the link's target.
-function canonical(path: string): string {
-	try {
-		return realpathSync(path);
-	} catch {
-		const parent = dirname(path);
-		if (parent === path) return path;
-		const name = path.slice(parent.length + (parent === "/" ? 0 : 1));
-		return join(canonical(parent), name);
-	}
-}
-
-function pathSpellings(path: string): string[] {
-	return [...new Set([path, canonical(path)])];
 }
 
 function escapeRegex(char: string): string {
@@ -325,7 +314,7 @@ function inputMentionsRulePath(specifier: string, call: ToolCall): boolean {
 	else if (specifier.startsWith("/")) literal = resolve(call.agentDir, raw.slice(1));
 	else literal = resolve(call.cwd, expandHome(raw));
 	if (literal === "/") return false;
-	const literals = [literal, canonical(literal)];
+	const literals = [literal, canonicalPath(literal)];
 	// A shell can name a path under home without spelling out the home directory.
 	const home = homedir();
 	if (literal.startsWith(`${home}/`)) {
@@ -403,43 +392,48 @@ export function evaluatePermissions(
 		agentDir,
 	};
 
-	// A project root listed in permissions.agentDirWriteProjects may maintain the
-	// agent directory (that is how the repo installing this stack keeps its own
-	// profile). Only the directory-wide edit lock is lifted; credentials and
-	// every user deny still apply.
-	// The file tools on that directory are decided here, not by the reviewer.
-	const writable = (permissions.agentDirWriteProjects ?? []).some((root) => {
-		const rel = relative(resolve(root), resolve(cwd));
-		return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-	});
+	// A project root listed in the trusted global permissions.agentDirWriteProjects
+	// may maintain the agent directory (that is how the repo installing this stack
+	// keeps its own profile). The shared helper decides that boundary, and only the
+	// directory-wide edit lock is lifted; credentials, the audit trail, the
+	// workspace policy directory and every user deny still apply. The file tools on
+	// that directory are decided here, not by the reviewer.
+	const authority = resolveMaintenanceAuthority(permissions.agentDirWriteProjects, cwd);
 	const baseAgentDir = `/${resolve(agentDir)}`;
 	const lifted = new Set([`Edit(${baseAgentDir}/**)`]);
-	if (writable) {
-		// Maintaining the profile never includes touching provider credentials or
-		// rewriting Guardian's own audit trail.
-		for (const text of [`Edit(${baseAgentDir}/auth.json)`, `Edit(${baseAgentDir}/guardian-sessions/**)`]) {
+	// Keep these exclusions separate from the liftable broad lock, even if the
+	// configured audit root is equal to (or contains) the agent directory.
+	const auditDir = `/${resolve(permissions.auditDir ?? join(agentDir, "guardian-sessions"))}`;
+	if (authority) {
+		for (const text of [`Read(${baseAgentDir}/auth.json)`, `Edit(${baseAgentDir}/auth.json)`,
+			`Edit(${baseAgentDir}/guardian-sessions/**)`, `Edit(${auditDir}/**)`]) {
 			if (denies(parseRule(text), call)) return { outcome: "deny", rule: text };
 		}
 	}
 	for (const text of permissions.deny) {
-		if (writable && lifted.has(text)) continue;
+		// Without loader provenance an equal rule is ambiguous, so do not lift it.
+		if (authority && lifted.has(text) && permissions.userDeny !== undefined && !permissions.userDeny.includes(text)) continue;
 		if (denies(parseRule(text), call)) return { outcome: "deny", rule: text };
 	}
 	// The workspace's own policy directory is never agent-writable: a project
 	// could otherwise pre-authorize itself. pi-sbx enforces this at the OS level;
-	// this is the reviewer-independent backstop.
-	const projectPolicyDir = join(resolve(cwd), ".pi");
-	if ((call.tool === "write" || call.tool === "edit") &&
-		call.paths.some((path) => path === projectPolicyDir || path.startsWith(`${projectPolicyDir}/`))) {
-		return { outcome: "deny", rule: `Edit(${projectPolicyDir}/**)` };
+	// this is the reviewer-independent backstop. Both the spelled and the resolved
+	// directory are compared, so a symlinked `.pi` or a canonical alias of it is
+	// still the workspace's policy directory.
+	const projectPolicyDirs = pathSpellings(join(resolve(cwd), ".pi"));
+	const reachesProjectPolicyDir = (path: string) =>
+		projectPolicyDirs.some((directory) => isWithinDirectory(directory, path));
+	if ((call.tool === "write" || call.tool === "edit") && call.paths.some(reachesProjectPolicyDir)) {
+		return { outcome: "deny", rule: `Edit(${projectPolicyDirs[0]}/**)` };
 	}
 	// A granted project maintains the profile with the file tools. Decide it here
 	// rather than falling through to "review": the reviewer cannot see which
 	// project holds the grant, so it would deny the maintenance path itself.
-	const agentDirPath = resolve(agentDir);
-	if (writable && (call.tool === "read" || call.tool === "write" || call.tool === "edit") &&
-		call.paths.some((path) => path === agentDirPath || path.startsWith(`${agentDirPath}/`))) {
-		return { outcome: "allow", rule: `agentDirWriteProjects(${call.paths[0]})` };
+	const agentDirPaths = pathSpellings(resolve(agentDir));
+	const inAgentDir = (path: string) => agentDirPaths.some((directory) => isWithinDirectory(directory, path));
+	if (authority && (call.tool === "read" || call.tool === "write" || call.tool === "edit") &&
+		call.paths.some(inAgentDir)) {
+		return { outcome: "allow", rule: maintenanceRuleText(authority, call.paths[0]) };
 	}
 	const allow = permissions.allow.map(parseRule);
 	const rule = SHELL_TOOLS.has(tool) ? shellAllowRule(allow, call) : allow.find((candidate) => allows(candidate, call));

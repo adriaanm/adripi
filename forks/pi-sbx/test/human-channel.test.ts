@@ -79,7 +79,7 @@ describe("human approval channel", () => {
     await vi.waitFor(() => expect(select).toHaveBeenCalledTimes(1));
     channel.shutdown();
     expect(sawSignal?.aborted).toBe(true);
-    expect(await pending).toEqual({ kind: "deny", reason: "the sandbox approval question could not be answered, so the command did not run" });
+    expect(await pending).toEqual({ kind: "deny", reason: "the sandbox approval question could not be answered, so the action did not run" });
     expect(await channel.ask({ surface: "read", target: "/data" })).toEqual({
       kind: "deny",
       reason: "the sandbox approval channel is closed",

@@ -1,11 +1,12 @@
 # adripi: the product as built
 
-This is the source contract after [implementation round 1](round-1.md), not a
+This is the source contract through [round 2's first wave](round-2.md), following
+[implementation round 1](round-1.md), not a
 claim of Claude/Codex parity or proof about a running installation. The original
 review of `2e86f45` is preserved in [product-baseline.md](product-baseline.md),
 [findings](review/recommendations.md) and [evidence](review/verification.md).
 [Product requirements](product-requirements.md) records the dogfooding failures
-and decisions still needing an operator interview.
+and confirmed operator decisions; remaining delegation gates are not implemented.
 
 **Deployment status:** this round changes repository source and templates only.
 No installation, live-policy mutation, restart or push was performed. Pi normally
@@ -32,7 +33,8 @@ This round reviews local integration, not upstream SRT internals as a whole.
 | Surface | Protection |
 |---|---|
 | Agent `bash` | Guardian tool gate, then pi-sbx's single serialized dispatcher: normal SRT, scoped SRT or approved host execution |
-| Native `read`, `write`, `edit`, `grep`, `find`, `ls` | In-process baseline file policy; Guardian fixed rules, then exemption or semantic review |
+| Native `read`, `write`, `edit` | Baseline file policy plus exact one-call path authorization through the same broker/human service as scoped Bash; Guardian tool rules/review still apply |
+| Native `grep`, `find`, `ls` | Baseline read/traversal checks only; no recursive exception widening |
 | Other extension/MCP tools | Applicable Guardian hooks, but not automatically OS-sandboxed by pi-sbx |
 | Nested-tool API | Applicable tool hooks; Guardian includes parent-action evidence |
 | Extension-internal I/O/process creation | Trusted extension implementation; not routed through bash automatically |
@@ -49,9 +51,13 @@ material. Allowed package hosts are multi-tenant services, not safe-data-flow
 proof. A host exception grants the process tree host credentials and services;
 it is **not a credential jail**.
 
-## 2. One model-facing escalation API
+## 2. One action permission mechanism, tool-specific enforcement
 
-Only the bash action requests model-driven filesystem/host exceptions:
+Bash and native Read/Write/Edit share one path authorizer, Guardian broker and
+human adapter. Native tools keep their schemas: their gate may request one
+exact, otherwise grantable path without rewriting the operation as Bash. No
+grant is stored or borrowed from another action. Recursive traversal remains
+baseline-only. Bash expresses requested filesystem/host exceptions inline:
 
 ```ts
 bash({
@@ -81,8 +87,13 @@ not request targets. There is no global network-enable switch.
 `request_sandbox_exception` is no longer registered.
 `dangerouslyDisableSandbox` is rejected explicitly, even when false, rather
 than silently ignored. Host/session/next-command grant stores and their expiry
-routes were removed. Native file tools retain their baseline policy: use a
-scoped bash action when outside-policy filesystem work is necessary.
+routes were removed. Never rewrite a denied native operation as Bash. Native
+grants cover only their actual resolved target and do not mutate baseline.
+Mandatory read/write locks and configured deny-write entries are final. Other
+read denies may accept a strictly more-specific exact allowRead carve-out;
+credentials cannot be reopened by such a grant or an existing allowRead entry.
+Native targets are checked again after asynchronous approval; a changed target
+is refused. This is not hostile same-user filesystem-race protection.
 
 ### Dispatch and isolation
 
@@ -93,6 +104,9 @@ bash -> canonical parameter/plan validation -> serialized dispatch
                  -> execute -> restore baseline in finally
        host   -> host-enabled + executable/shape/prefix admission
                  -> decide exact command -> execute reviewed string once
+
+native Read/Write/Edit -> baseline/mandatory checks -> shared path authorizer
+                       -> exact one-call gate (no OS-profile mutation)
 
 exception decision -> Guardian target admission -> restrictions/standing rules
                    -> reviewer -> allow / deny / real defer to human
@@ -215,11 +229,25 @@ this repository. This deliberately lets its sessions change what Pi loads next.
 Only `<agentDir>/auth.json` is read-denied there; it and Guardian's audit sessions
 stay write-denied even to maintainers. Workspace `.pi` remains mandatory
 deny-write. This is legitimate maintenance authority, not a policy-bypass
-workaround. Existing live configs are normally preserved by installation.
+workaround. Both spelled and canonical cwd must stay inside the configured root;
+a symlink out of it retains no maintenance scope. Guardian's file-tool and
+exception engines share a trusted resolver with explicit provenance. Its broker
+binds requests to the publishing session cwd, not a caller's claim about another
+workspace. Explicit user/project restrictions remain authoritative, including a
+user deny identical to the broad built-in lock. Audit and lock rules retain
+separate provenance even if their paths coincide. Existing live configs are
+normally preserved by installation.
+
+Guardian protects a configured relocated audit directory in both of its gates;
+pi-sbx's static OS hardening still names the default agent-dir audit path. Do not
+infer complete OS protection for a relocated audit root from these rule tests.
 
 ## 5. Verification, deployment and remaining work
 
-Round 1 tests exercise registered tool dispatch, concurrent commands versus native
+Round 1 and round-2 first-wave tests exercise registered tool dispatch, native
+interactive/headless approval, shared-authorizer read carve-outs and mandatory
+reads, canonical maintenance root equivalence, duplicate-deny/audit-root
+provenance, the session-bound published broker, concurrent commands versus native
 file policy, partial approval, cancellation, rollback failure, setting changes,
 network decisions, and Guardian's actual service through the sandbox consumer.
 They are wiring/helper tests, not nested OS-sandbox proof. The archived baseline
@@ -237,5 +265,7 @@ not claimed merely because prepared saves now have a disposer.
 Deploy only as a separate human step: run `./install.sh`, inspect kept live
 configs for retired exclusions, fully quit and restart Pi, then verify the
 loaded schema, sandbox execution and negative cases. An in-place reload is not
-sufficient evidence. This round stops for a recap and operator interview before
-another improvement wave.
+sufficient evidence. Round 2's child transport and Git/external-worktree gates
+remain blocked on a launch-authority/approval-service integration decision; see
+[the round record](round-2.md). No required-child-extension registration has been
+added speculatively.

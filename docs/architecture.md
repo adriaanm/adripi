@@ -20,7 +20,8 @@ Pi host (trusted process and extensions)
   +-- pi-sbx: named file-tool policy hooks + replacement bash tool
   |     bash -> default SRT execution
   |          -> execution-local scoped SRT profile / approved host execution
-  |     read/write/edit/grep/find/ls -> in-process file-policy checks
+  |     read/write/edit -> baseline + shared one-action path authorizer
+  |     grep/find/ls -> baseline-only traversal checks (no recursive grants)
   |
   +-- sandbox exception broker (published by Guardian)
   |     validate/exact-target admission -> deny/defer/allow rules -> reviewer
@@ -41,8 +42,8 @@ actual launch path, not an assumption about the approved parent call.
 
 | Fork | Main additions |
 |---|---|
-| `pi-sbx` | Scratch space, one inline escalation API/dispatcher, serialized execution-local path policy and rollback, baseline native file gate, per-connection network decisions, one human adapter, additive policy layers, maintenance privilege, guidance and snapshot-bound standing-rule handoff |
-| `pi-guardian` | Explicit reviewer provider extensions, child-runner invocation fix, review-failure reporting, sandbox exception broker/rules/audit, maintenance-workspace rules, trusted project policy and persistence service, target-only matching for file write/edit payloads |
+| `pi-sbx` | Scratch space, one inline escalation API/dispatcher, serialized execution-local path policy and rollback, shared native/Bash path authorizer, per-connection network decisions, one human adapter, additive policy layers, maintenance privilege, guidance and snapshot-bound standing-rule handoff |
+| `pi-guardian` | Explicit reviewer provider extensions, child-runner invocation fix, review-failure reporting, sandbox exception broker/rules/audit, canonical trusted maintenance resolver, session-bound broker, provenance-preserving restrictions, trusted project policy and persistence service, target-only matching for file write/edit payloads |
 
 Detailed provenance and update records:
 [`pi-sbx/VENDOR.md`](../forks/pi-sbx/VENDOR.md) and
@@ -59,10 +60,16 @@ Detailed provenance and update records:
   approval path and merge semantics.
 - **Maintenance authority:** the installer grants this repo permission to modify
   the agent directory. That deliberately weakens self-protection for this
-  workspace; credentials and Guardian session writes remain protected.
+  workspace; credentials and Guardian session writes remain protected. Both cwd
+  spellings must stay within the configured root; Guardian binds broker requests
+  to its session cwd and keeps explicit user-deny/audit provenance. Cross-fork
+  tests compare root projection, not real OS enforcement.
 - **Action state:** one queue owns bash executions and runtime-setting changes.
   A scoped runtime layer is copied and restored, never shared with the baseline
-  read by file tools. No host/network/next-command grant store remains.
+  read by file tools. Native Read/Write/Edit use the same path authorizer but
+  enforce their own exact one-call targets without OS-profile mutation. Mandatory
+  reads cannot be reopened; ordinary read denies need a more-specific carve-out.
+  No host/network/next-command grant store remains.
   Background-descendant lifetimes remain unverified.
 - **Standing permission:** Guardian prepares a rule against trusted policy bytes
   before the human prompt; commit rejects stale/unapproved/symlinked policy and

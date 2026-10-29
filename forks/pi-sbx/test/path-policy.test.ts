@@ -10,6 +10,7 @@ function policy(root: string): FilePolicy {
     allowRead: [join(root, "secret", "public")],
     allowWrite: [root],
     denyWrite: [join(root, "*.key")],
+    mandatoryDenyRead: [],
     mandatoryDenyWrite: [join(root, ".pi")],
   };
 }
@@ -24,6 +25,25 @@ describe("path policy", () => {
     expect(canWrite(join(root, "normal.txt"), root, p)).toBe(true);
     expect(canWrite(join(root, "private.key"), root, p)).toBe(false);
     expect(canWrite(join(root, ".pi", "sandbox.json"), root, p)).toBe(false);
+  });
+
+  it("cannot reopen mandatory reads or traverse them with a more-specific allow", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-mandatory-read-"));
+    const credential = join(root, "credentials");
+    const target = join(credential, "token");
+    const p = { ...policy(root), denyRead: [credential], allowRead: [target], mandatoryDenyRead: [credential] };
+    expect(canRead(target, root, p)).toBe(false);
+    expect(canTraverse(root, root, p)).toBe(false);
+  });
+
+  it("does not treat a longer alias spelling as a more-specific read grant", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-read-specificity-"));
+    const actual = join(root, "long-physical-directory");
+    mkdirSync(actual);
+    symlinkSync(actual, join(root, "s"));
+    const target = canonicalizeTarget(join(actual, "file"), root);
+    const p = { ...policy(root), denyRead: [join(root, "s", "file")], allowRead: [target] };
+    expect(canRead(target, root, p)).toBe(false);
   });
 
   it("canonicalizes existing and non-existing paths through symlinks", () => {
