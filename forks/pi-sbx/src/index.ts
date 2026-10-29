@@ -467,7 +467,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
         ? `Write temporary files under ${scratchpad.dir} (also ${SCRATCH_ENV}); it is writable inside the sandbox and removed when the session ends.`
         : "Write temporary files inside the project; paths outside it may need an exception.",
       "Only set dangerouslyDisableSandbox after explicit user instruction or clear evidence that the immediately preceding command failed because of sandbox restrictions; every request requires user approval.",
-      "Commands that need host credentials — git push/pull/clone/ls-remote against a remote, gh, ssh — cannot authenticate inside the sandbox; request a `command` exception for the exact command line instead of retrying, and never ask for read access to ~/.config/gh or ~/.ssh, which is permanently denied.",
+      "Local git work (status, diff, log, commit, branch, merge, rebase, stash) runs sandboxed; only network git that authenticates with a remote (clone, fetch, pull, push, ls-remote, submodule --remote) and gh/ssh cannot. For those, request a `command` exception for the exact command line instead of retrying, and never ask for read access to gh's config or ~/.ssh — permanently denied.",
     ],
     renderResult(result, options, theme, renderContext) {
       const displayResult = {

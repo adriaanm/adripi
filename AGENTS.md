@@ -112,9 +112,11 @@ do not batch unrelated work into one "update" commit.
 
 `pi-sbx` adds a `<sandbox>` system-prompt section while the sandbox is on
 (`src/guidance.ts`): writable/readable scope, the never-grantable credential
-stores, the exception tool's one-exact-target rule, the host-command path
-(request, then run the exact line unchanged as the next bash call), "a denial is
-final", and "circumvention is not a workaround". Keep it short and behavioural —
+stores, the exception tool's one-exact-target rule, which git needs an exception
+(only network git that authenticates: clone/fetch/pull/push/ls-remote) and which
+does not, the host-command path (request, then run the exact line unchanged as
+the next bash call), "a denial is final", and "circumvention is not a workaround".
+Keep it short and behavioural —
 it is the only place a model learns this harness's conventions, so a new rule
 belongs there as well as in this file.
 

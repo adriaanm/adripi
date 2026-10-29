@@ -122,11 +122,18 @@ becomes a standing permission instead of a prompt every time:
 }
 ```
 
-These pre-authorize the *exception*, not the sandbox: the agent still has to call
-`request_sandbox_exception` with `surface: "command"` and the exact command line,
-which then runs on the host with your credentials. A command run inside the
-sandbox cannot use `gh` or a git credential helper — `~/.config/gh` and friends
-are permanently denied, by design.
+Only **network** git belongs in that list. `status`, `diff`, `log`, `show`, `add`,
+`commit`, `branch`, `switch`, `merge`, `rebase`, `tag`, `stash` and `worktree` run
+inside the sandbox and need neither a rule nor an exception; `clone`, `fetch`,
+`pull`, `push`, `ls-remote` and `submodule update --remote` do, because they
+authenticate with the remote (an anonymous fetch of a public repo may still work
+sandboxed).
+
+These rules pre-authorize the *exception*, not the sandbox: the agent still has
+to call `request_sandbox_exception` with `surface: "command"` and the exact
+command line, which then runs on the host with your credentials. A command run
+inside the sandbox cannot use `gh` or a git credential helper — `~/.config/gh`
+and friends are permanently denied, by design.
 
 - Command rules accept `prefix:*` for "this command with any arguments"; the
   space boundary means `command:git push:*` does not match `git pusher`, and a

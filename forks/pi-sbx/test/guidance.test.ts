@@ -9,6 +9,9 @@ describe("sandbox guidance", () => {
     expect(text).toContain("one exact thing");
     expect(text).toContain("runs that exact string on the host");
     expect(text).toContain("no pipes, redirects, chaining, or interpreter prefixes");
+    expect(text).toContain("Only git operations that authenticate with a remote");
+    expect(text).toContain("status, diff, log, show, add, commit");
+    expect(text).toContain("could not read Username");
     expect(text).toContain("next bash call");
     expect(text).toContain("/tmp/scratch-abc");
     expect(text).toContain(".pi/guardian.json");

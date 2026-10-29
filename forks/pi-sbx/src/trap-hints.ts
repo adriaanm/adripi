@@ -58,6 +58,7 @@ export function buildCredentialHint(output: string): string | undefined {
 	if (!CREDENTIAL_FAILURE.test(output)) return undefined;
 	return [
 		"This command needs the host's credential helper, which is not available inside the sandbox.",
+		"Only network git (clone, fetch, pull, push, ls-remote, submodule --remote) and gh need this; every other git command works sandboxed.",
 		'Call request_sandbox_exception with `surface` "command", the exact command line as `target`',
 		'(for example `git pull --ff-only origin main`), and a reason: an approved command runs on the host with your real credentials.',
 		"Do not retry it in the sandbox, and do not request read access to ~/.config/gh, ~/.ssh or other credential files —",
