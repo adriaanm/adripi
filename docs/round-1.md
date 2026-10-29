@@ -1,6 +1,8 @@
 # Implementation round 1: one action-bound escalation path
 
-Status: planned from `03d05a6`; implementation and parent review pending.
+Status: in progress from `03d05a6`; initial external-worktree attempt paused
+because of a live sandbox/supervisor integration failure. Same-protocol retry
+uses pre-provisioned isolated worktrees inside the already writable workspace.
 
 ## Operator direction
 
@@ -55,9 +57,28 @@ leases share the same dispatcher/state and must be changed together.
 | Guardian target rules | Separate managed worktree from same commit | `forks/pi-guardian/src/sandbox/{rules,broker}.ts`, target/rule tests | Edit named sandbox files/tests only; no index or persistence edits | Sandbox tests + tsc; captured patch | Owns broker target/rule admission; independent of execution/storage |
 | Integration and review | Parent checkout, only after component handoffs | Personally inspect patches, adapt service call site, align templates/guidance/docs and remove retired API references | Integrate/review/test/commit; no deploy or push | Full applicable checks, negative integration tests, coherent commits | No duplicate implementation writer; owns cross-extension contract |
 
-Workers may link the parent checkout's ignored fork `node_modules` into their
-managed worktree for validation. Dependency/runner/provider failures are reported
-as infrastructure blockers; no alternate CLI, model or execution mode fallback.
+Initial managed worktrees were allocated under `/Users/adriaan/g/worktrees/adripi`.
+Their bash profile could not write there. Deferred inline escalation failed with
+`Tool contact_supervisor not found`: the current adapter tries to call a
+model-only tool through the nested-tool API. Attention notices therefore had no
+actual pending supervisor request. The parent paused all three runs, read their
+handoffs and captured owned partial patches; no partial implementation was
+accepted. Original run IDs: sandbox `85d1a57c`, persistence `0941f76b`, targets
+`f2f3e8e5` (workflow `717ec43a`).
+
+Retry isolation paths, provisioned by the parent inside this repo's existing
+ignored `.local/` and existing sandbox write boundary:
+
+- `.local/round-1/sandbox` — fresh execution lane;
+- `.local/round-1/persistence` — captured owned persistence partial patch;
+- `.local/round-1/targets` — captured owned rules partial patch.
+
+Each is a separate detached Git worktree at plan commit `3aa00d0`, with its fork
+`node_modules` linked to the parent checkout. Probe files were not copied. Retry
+uses the same native subagent protocol and exact model; no policy grants, host
+execution fallback, live install or alternate validation location. Workers must
+verify an ordinary write/test fixture in their assigned cwd before implementing
+and stop/report if it fails. Parent owns final integration and review.
 
 ## Acceptance / round boundary
 
