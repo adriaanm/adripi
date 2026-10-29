@@ -31,10 +31,12 @@ merge it (see the agent-dir grant step) or the human edits the live file.
   union project- and session-layer entries instead of replacing them. The
   defaults → global step still replaces, so the global profile can withdraw a
   built-in default. Deny lists and other arrays replace (highest layer wins).
-- Session grants are additive, normalized and validated before they enter the
-  layer. A `host:*` grant (the "any port" spelling) is stored as the bare host;
-  a target the runtime cannot represent is refused instead of making every later
-  `loadConfig` fail, which used to disable the sandbox for the whole session.
+- Human session settings and copied command-local path layers are additive.
+  Model exceptions do not mutate session policy. Every path is decided before
+  SRT changes; serialized bash restores baseline in `finally`, and native file
+  tools always read baseline. Network decisions apply to one connection without
+  adding an allowlist entry. Numeric Guardian port rules match only that port;
+  bare hosts and `host:*` mean all ports.
 - Writes are allowlist-based: lifting a deny is not enough, an `allowWrite` root
   must exist too. Reads are deny-based with `allowRead` carve-outs.
 
@@ -48,10 +50,10 @@ the agent cannot widen its own policy — the human writes it).
   (bind/listen) *and* `network-outbound` (connect) for that directory; the
   directory also needs `allowRead`/`allowWrite` for its non-socket files.
 - Loopback TCP: `network.allowLocalBinding: true`.
-- Host-only commands: `excludedCommands: ["just some-recipe:*"]` runs the whole
-  process tree on the host, unsandboxed. The prefix must start the command line;
-  arguments may follow, a chained or piped line is not excluded. This is the
-  permanent form of a `command` exception — no prompt, no per-session grant.
+- Host-only commands: use a trusted Guardian project rule such as
+  `command:just some-recipe:*`. It pre-authorizes an explicit inline host request,
+  not a plain command. `excludedCommands` and its UI/fallback are retired;
+  nonempty legacy lists fail closed with migration instructions.
 
 ## Agent-dir maintenance
 
@@ -104,9 +106,14 @@ do not batch unrelated work into one "update" commit.
   in both layers, so a policy is never self-granted.
 - Command rules accept `prefix:*` for "this command with any arguments" (space
   boundary); bare globs still work for everything else.
-- A subagent that hits a deferred exception asks its supervisor through
-  `contact_supervisor` and needs an explicit `ALLOW`/`DENY` token; a missing
-  supervisor channel fails closed.
+- A headless deferred exception fails closed with an actionable explanation.
+  `contact_supervisor` is model-only, not a nested-call service; do not invoke it
+  through `ctx.executeTool` or treat a parent `ALLOW` token as human authority.
+  Usable human-only child approval transport remains a product requirement.
+- Guardian's standing-rule service prepares a rule against trusted policy bytes
+  before the human prompt, then commits against that snapshot. Never re-read and
+  trust whatever policy appears after saving. Changed/unapproved/symlinked policy
+  is refused; a disposed service cannot commit a prepared save.
 
 ## Following Codex's escalation pattern
 
@@ -123,8 +130,13 @@ Two rules follow from that shape and must stay true:
 - **A proposed rule is the human's call.** `prefix_rule` becomes a project rule
   only after a "Save a standing permission?" confirmation; the sandbox hands it to
   guardian's `pi-guardian:project-policy` service (guardian owns and trust-hashes
-  `<workspace>/.pi/guardian.json`) and never writes policy itself. Without
-  guardian the fallback is the project's `excludedCommands`.
+  `<workspace>/.pi/guardian.json`) and never writes policy itself. Without that
+  service no standing permission is saved; there is no fallback policy store.
+- **One public API.** `request_sandbox_exception` is retired, and
+  `dangerouslyDisableSandbox` is explicitly rejected. Filesystem overrides
+  support only `additional_permissions.file_system.{read,write}`; network is
+  reviewed by the proxy per connection. Missing/failed Guardian denies rather
+  than bypassing its hard restrictions through a local human fallback.
 - **Failure is the trigger.** The guidance tells the model to re-run a
   sandbox-failing command with escalation attached, without messaging the user
   first. Scope it: prefer the path-scoped tier over host execution, and keep
@@ -134,10 +146,10 @@ Two rules follow from that shape and must stay true:
 
 `pi-sbx` adds a `<sandbox>` system-prompt section while the sandbox is on
 (`src/guidance.ts`): writable/readable scope, the never-grantable credential
-stores, the exception tool's one-exact-target rule, which git needs an exception
-(only network git that authenticates: clone/fetch/pull/push/ls-remote) and which
-does not, the host-command path (request, then run the exact line unchanged as
-the next bash call), "a denial is final", and "circumvention is not a workaround".
+stores, exact scoped paths, which git needs an exception (only network git that
+authenticates: clone/fetch/pull/push/ls-remote) and which does not, the inline
+host-command path (request and execute the reviewed string in the same call),
+"a denial is final", and "circumvention is not a workaround".
 Keep it short and behavioural —
 it is the only place a model learns this harness's conventions, so a new rule
 belongs there as well as in this file.

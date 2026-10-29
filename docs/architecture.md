@@ -19,13 +19,13 @@ Pi host (trusted process and extensions)
   |
   +-- pi-sbx: named file-tool policy hooks + replacement bash tool
   |     bash -> default SRT execution
-  |          -> configured exclusion / approved host execution
+  |          -> execution-local scoped SRT profile / approved host execution
   |     read/write/edit/grep/find/ls -> in-process file-policy checks
   |
   +-- sandbox exception broker (published by Guardian)
-  |     validate -> deny/defer/allow rules -> semantic reviewer
-  |     defer -> human UI, or supported supervisor path
-  |     allow -> sandbox grant or host-command route
+  |     validate/exact-target admission -> deny/defer/allow rules -> reviewer
+  |     defer -> one serialized human UI adapter; no headless channel -> stop
+  |     allow -> one execution or one network connection
   |
   +-- pi-review + pi-subagents: separate advisory diff-review workflow
 ```
@@ -41,7 +41,7 @@ actual launch path, not an assumption about the approved parent call.
 
 | Fork | Main additions |
 |---|---|
-| `pi-sbx` | Session scratch space, Guardian broker client and exception tool, session overlays, trap hints, host-command grants, additive allow-list merging, maintenance-workspace privilege, supervisor fallback, system guidance, Codex-shaped inline escalation and standing-rule handoff |
+| `pi-sbx` | Scratch space, one inline escalation API/dispatcher, serialized execution-local path policy and rollback, baseline native file gate, per-connection network decisions, one human adapter, additive policy layers, maintenance privilege, guidance and snapshot-bound standing-rule handoff |
 | `pi-guardian` | Explicit reviewer provider extensions, child-runner invocation fix, review-failure reporting, sandbox exception broker/rules/audit, maintenance-workspace rules, trusted project policy and persistence service, target-only matching for file write/edit payloads |
 
 Detailed provenance and update records:
@@ -53,17 +53,21 @@ Detailed provenance and update records:
 - **OS boundary:** SRT for sandboxed bash process trees; named built-in file
   tools are gated separately inside Pi.
 - **Semantic authority:** Guardian fixed rules and retained-transcript review.
-  A reviewer failure denies; a missing broker invokes human fallback instead.
+  Reviewer failure and a missing broker deny. Only an actual defer asks a human.
 - **Persistence authority:** human-approved settings and project rules. Project
   Guardian policy is trusted by content hash; project sandbox policy has its own
   approval path and merge semantics.
 - **Maintenance authority:** the installer grants this repo permission to modify
   the agent directory. That deliberately weakens self-protection for this
   workspace; credentials and Guardian session writes remain protected.
-- **Session state:** scratch path, in-memory policy overlays, host grants,
-  network tokens and pending once grants. These are not yet one isolated lease
-  implementation; concurrent scoped grants and differing expiry paths are
-  reviewed gaps.
+- **Action state:** one queue owns bash executions and runtime-setting changes.
+  A scoped runtime layer is copied and restored, never shared with the baseline
+  read by file tools. No host/network/next-command grant store remains.
+  Background-descendant lifetimes remain unverified.
+- **Standing permission:** Guardian prepares a rule against trusted policy bytes
+  before the human prompt; commit rejects stale/unapproved/symlinked policy and
+  trusts/applies only returned bytes. No sandbox-exclusion fallback or post-write
+  policy re-read. Writes are atomic but not locked across separate processes.
 - **Audit:** Guardian status/assessment/exception entries plus reviewer
   transcripts. Complete correlated grant-consumption/revocation auditing is not
   implemented.

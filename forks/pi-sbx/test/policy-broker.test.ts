@@ -22,14 +22,20 @@ describe("project policy service", () => {
     const calls: string[] = [];
     const service = publish({
       path: "/work/project/.pi/guardian.json",
-      persistRule: (rule) => {
-        calls.push(rule);
-        return { ok: true, path: "/work/project/.pi/guardian.json", hash: "abc", added: true };
-      },
+      prepareRule: (rule) => ({
+        ok: true,
+        commit() {
+          calls.push(rule);
+          return { ok: true, path: "/work/project/.pi/guardian.json", hash: "abc", added: true };
+        },
+      }),
     });
     expect(getProjectPolicyService()).toBe(service);
     expect(service.path).toBe("/work/project/.pi/guardian.json");
-    expect(service.persistRule("command:git push:*")).toEqual({
+    const prepared = service.prepareRule("command:git push:*");
+    expect(calls).toEqual([]);
+    if (!prepared.ok) throw new Error(prepared.reason);
+    expect(prepared.commit()).toEqual({
       ok: true,
       path: "/work/project/.pi/guardian.json",
       hash: "abc",
@@ -39,8 +45,8 @@ describe("project policy service", () => {
   });
 
   it("surfaces guardian's refusal verbatim", () => {
-    const service = publish({ path: "/p/.pi/guardian.json", persistRule: () => ({ ok: false, reason: "permission denied" }) });
-    const result = service.persistRule("command:git push:*");
+    const service = publish({ path: "/p/.pi/guardian.json", prepareRule: () => ({ ok: false, reason: "permission denied" }) });
+    const result = service.prepareRule("command:git push:*");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe("permission denied");
   });

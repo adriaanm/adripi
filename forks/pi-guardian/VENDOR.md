@@ -77,12 +77,21 @@ deltas are listed below; nothing else is modified.
     (with a space boundary) as "this command with any arguments". Guardian also
     denies agent writes to `<workspace>/.pi/**` as a backstop to pi-sbx's
     mandatory deny-write.
-13. `src/project-policy.ts` + `src/index.ts` — `persistProjectRule()` appends a
-    human-approved rule to the project policy (creating the file, validating the
-    rule, deduping) and the extension publishes
-    `Symbol.for("pi-guardian:project-policy")` so the sandbox layer can hand it a
-    rule instead of writing policy itself. Trust is recorded for the new content,
-    so the rule applies immediately and in later sessions.
+13. `src/project-policy.ts` + `src/index.ts` — snapshot-bound standing saves
+    repair F5: appending one approved rule must not approve unrelated existing
+    entries. `persistProjectRule(cwd, rule, { agentDir, approved })` refuses
+    unapproved/changed/newly appeared/removed/wrong-path content and symlinked or
+    escaping policy directories/files. Parse/hash share one read; exclusive 0600
+    temporary files, fsync and atomic rename avoid partial policy/trust files.
+    The `Symbol.for("pi-guardian:project-policy")` service exposes `prepareRule`,
+    capturing the trusted snapshot **before** the sandbox's human save prompt;
+    its commit closure is bound to that rule/base and refuses a disposed session.
+    Only returned bytes/rules are trusted/applied — no post-write re-read. Both
+    service disposal and the consumer's prepare-before-prompt order are tested.
+    Separate processes are not locked, so simultaneous external saves may lose
+    an update; this is not protection from hostile same-user filesystem races.
+    Tests cover primitive negative cases and the actual registered service via
+    pi-sbx's consumer (`test/project-policy-service.test.ts`).
 14. `src/permissions.ts` — `write`/`edit` calls are matched on their target
     `path` only. Scanning the payload made a document that merely *mentions* a
     protected path (a README explaining the sandbox, say) un-editable, which
@@ -108,7 +117,7 @@ supplies the behaviour. When upstream publishes 0.2.0, re-pin `packages.txt`.
 
 1. Check out the new upstream version.
 2. Reapply or reconcile **all** local changes above, including the broker,
-   maintenance rules and project-policy persistence. Consult the
+   maintenance rules and snapshot-bound project-policy persistence. Consult the
    [product review](../../docs/review/recommendations.md) for integration gaps and
    acceptance criteria; the original changes 1-5 are no longer the whole fork.
 3. Keep `test/fork-reviewer-extensions.test.ts` (adapt fixtures if upstream

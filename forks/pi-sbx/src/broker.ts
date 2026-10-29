@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { JsonObject } from "./config.ts";
 
 /**
  * Client side of the guardian sandbox broker.
@@ -85,33 +86,46 @@ export function buildRequest(options: DecideOptions): SandboxExceptionRequest {
 }
 
 /**
- * Optional project-policy service published by guardian. When the user answers
- * "always allow" to an escalation, the rule belongs in the project's standing
- * permissions (`<workspace>/.pi/guardian.json`), which guardian owns — the sandbox
- * must not write the policy it is governed by. Absent guardian, the caller falls
- * back to its own project sandbox config.
+ * Optional project-policy service published by guardian. A standing permission
+ * belongs in the project's Guardian policy (`<workspace>/.pi/guardian.json`),
+ * which guardian owns — the sandbox must not write the policy it is governed by.
+ * There is no fallback that writes sandbox configuration instead.
  *
  * Contract mirrored from `pi-guardian/src/project-policy.ts`, same as the broker.
+ * Rules use guardian's `<surface>:<pattern>` spelling, so callers pass a target
+ * through `projectPolicyRule` rather than inventing their own prefix.
  */
 export const PROJECT_POLICY_KEY = Symbol.for("pi-guardian:project-policy");
 
+export type PreparedProjectRule =
+	| { ok: true; commit(): { ok: true; path: string; hash: string; added: boolean } | { ok: false; reason: string } }
+	| { ok: false; reason: string };
+
 export interface ProjectPolicyService {
 	readonly path: string;
-	persistRule(rule: string): { ok: true; path: string; hash: string; added: boolean } | { ok: false; reason: string };
+	/** Capture the trusted policy snapshot BEFORE asking the human to save. */
+	prepareRule(rule: string): PreparedProjectRule;
 }
 
 export function getProjectPolicyService(): ProjectPolicyService | undefined {
 	return (globalThis as Record<symbol, unknown>)[PROJECT_POLICY_KEY] as ProjectPolicyService | undefined;
 }
 
+/** Guardian's rule text: `command:git push:*`, `network:example.com`, `read:/data`. */
+export function projectPolicyRule(surface: SandboxSurface, pattern: string): string {
+	return `${surface}:${pattern}`;
+}
+
 /**
- * Ask the broker. No broker means `defer` (the caller's human prompt decides);
- * a broker that throws is a denial, never an allow.
+ * Ask the sole policy authority. Missing/failed Guardian is a denial, not a
+ * synthetic defer: without its hard-deny admission, a UI approval could expose
+ * a credential path that is never grantable. Only an actual defer asks a human.
  */
 export async function decideSandboxException(options: DecideOptions): Promise<SandboxExceptionDecision> {
 	const broker = options.broker ?? getGuardianBroker();
 	if (!broker) {
-		return { kind: "defer", review: { rationale: "No guardian sandbox broker is published.", source: "rule" } };
+		const reason = "No guardian sandbox broker is published; restart with Guardian loaded before requesting an exception. Nothing was granted.";
+		return { kind: "deny", reason, review: { rationale: reason, source: "rule" } };
 	}
 	const request = buildRequest(options);
 	try {
@@ -126,11 +140,8 @@ export async function decideSandboxException(options: DecideOptions): Promise<Sa
 	}
 }
 
-/** Session-layer config fragment; the shape `loadConfig` merges last. */
-export interface SessionLayer {
-	filesystem?: { allowRead?: string[]; allowWrite?: string[] };
-	network?: { allowedDomains?: string[] };
-	excludedCommands?: string[];
+function isObject(value: unknown): value is JsonObject {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function addUnique(existing: unknown, value: string): string[] {
@@ -138,107 +149,20 @@ function addUnique(existing: unknown, value: string): string[] {
 	return list.includes(value) ? list : [...list, value];
 }
 
-/**
- * The config shape has no `:*` port wildcard: a bare host already matches every
- * port, and srt's schema rejects `host:*` ("Invalid domain pattern ... An
- * optional ':port' suffix (1-65535)"). The trap and the tool spell "any port"
- * as `host:*`, so translate it before it lands in a config layer, and translate
- * on lookup/removal too so the three helpers agree.
- */
-export function configNetworkTarget(target: string): string {
-	return target.endsWith(":*") ? target.slice(0, -2) : target;
-}
+export type ScopedPath = { surface: "read" | "write"; target: string };
 
 /**
- * Apply one session-scope grant to the session config layer. Returns a new
- * object; the on-disk config is never touched, and reloads rebuild the layer
- * from scratch, so a grant cannot outlive the session.
+ * Build a command-local session layer with extra readable/writable paths. The
+ * caller installs it in the SRT runtime for one execution and restores the
+ * baseline afterwards; the session layer itself, and therefore every native file
+ * tool, never sees these paths. No read/write/network/command grant outlives the
+ * execution, so there is no grant store to expire.
  */
-export function withSessionException(
-	layer: SessionLayer,
-	surface: SandboxSurface,
-	target: string,
-): SessionLayer {
-	const next: SessionLayer = {
-		...layer,
-		filesystem: { ...(layer.filesystem ?? {}) },
-		network: { ...(layer.network ?? {}) },
-	};
-	if (surface === "write" || surface === "read") {
-		const key = surface === "write" ? "allowWrite" : "allowRead";
-		next.filesystem = { ...next.filesystem, [key]: addUnique(next.filesystem?.[key], target) };
-		return next;
+export function withScopedPaths(layer: JsonObject, paths: readonly ScopedPath[]): JsonObject {
+	const filesystem: JsonObject = { ...(isObject(layer.filesystem) ? layer.filesystem : {}) };
+	for (const entry of paths) {
+		const key = entry.surface === "write" ? "allowWrite" : "allowRead";
+		filesystem[key] = addUnique(filesystem[key], entry.target);
 	}
-	if (surface === "network") {
-		next.network = { ...next.network, allowedDomains: addUnique(next.network?.allowedDomains, configNetworkTarget(target)) };
-		return next;
-	}
-	next.excludedCommands = addUnique(layer.excludedCommands, target);
-	return next;
-}
-
-export type ExceptionPlan =
-	| { action: "grant"; scope: SandboxScope }
-	| { action: "deny"; message: string }
-	| { action: "ask-human" };
-
-/**
- * What the caller should do with a broker decision. Kept pure so the tool path
- * (allow → grant, deny → tell the model, defer → ask the human) is testable
- * without a Pi runtime.
- */
-export function planExceptionOutcome(decision: SandboxExceptionDecision): ExceptionPlan {
-	if (decision.kind === "allow") return { action: "grant", scope: decision.scope };
-	if (decision.kind === "deny") return { action: "deny", message: decision.reason };
-	return { action: "ask-human" };
-}
-
-function removeValue(existing: unknown, value: string): string[] | undefined {
-	const list = Array.isArray(existing) ? existing.filter((item): item is string => typeof item === "string") : [];
-	const next = list.filter((item) => item !== value);
-	return next.length > 0 ? next : undefined;
-}
-
-/** Inverse of `withSessionException`, used to expire `once` grants. */
-export function withoutSessionException(
-	layer: SessionLayer,
-	surface: SandboxSurface,
-	target: string,
-): SessionLayer {
-	const next: SessionLayer = {
-		...layer,
-		filesystem: { ...(layer.filesystem ?? {}) },
-		network: { ...(layer.network ?? {}) },
-	};
-	if (surface === "write" || surface === "read") {
-		const key = surface === "write" ? "allowWrite" : "allowRead";
-		const remaining = removeValue(next.filesystem?.[key], target);
-		if (remaining) next.filesystem = { ...next.filesystem, [key]: remaining };
-		else if (next.filesystem) delete next.filesystem[key];
-		return next;
-	}
-	if (surface === "network") {
-		const remaining = removeValue(next.network?.allowedDomains, configNetworkTarget(target));
-		if (remaining) next.network = { ...next.network, allowedDomains: remaining };
-		else if (next.network) delete next.network.allowedDomains;
-		return next;
-	}
-	const remaining = removeValue(layer.excludedCommands, target);
-	if (remaining) next.excludedCommands = remaining;
-	else delete next.excludedCommands;
-	return next;
-}
-
-/** Whether the session layer already grants this surface/target. */
-export function hasSessionException(layer: SessionLayer, surface: SandboxSurface, target: string): boolean {
-	if (surface === "write" || surface === "read") {
-		const key = surface === "write" ? "allowWrite" : "allowRead";
-		const list = layer.filesystem?.[key];
-		return Array.isArray(list) && list.includes(target);
-	}
-	if (surface === "network") {
-		const list = layer.network?.allowedDomains;
-		return Array.isArray(list) && list.includes(configNetworkTarget(target));
-	}
-	return Array.isArray(layer.excludedCommands) && layer.excludedCommands.includes(target);
+	return { ...layer, filesystem };
 }

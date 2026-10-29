@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { HostCommandGrants, hostCommandRefusal, isHostCommandEligible } from "../src/host-command.ts";
+import { checkPrefixRule, isBannedExecutable, parseHostCommand } from "../src/host-command.ts";
 
-describe("hostCommandRefusal", () => {
-	it("accepts a single plain command", () => {
-		expect(isHostCommandEligible("git push -u origin main")).toBe(true);
-		expect(isHostCommandEligible("git clone https://github.com/a/b.git")).toBe(true);
-		expect(hostCommandRefusal("git pull --ff-only")).toBeUndefined();
+describe("parseHostCommand", () => {
+	it("accepts one plain command and splits it into words", () => {
+		const parsed = parseHostCommand("git push -u origin main");
+		expect(parsed).toEqual({
+			ok: true,
+			command: { command: "git push -u origin main", argv: ["git", "push", "-u", "origin", "main"], executable: "git" },
+		});
+		expect(parseHostCommand("  gh pr view 42  ").ok).toBe(true);
+		expect(parseHostCommand("git clone 'https://example.test/a b.git'").ok).toBe(true);
 	});
 
 	it("refuses anything that could run a second command", () => {
@@ -18,54 +22,78 @@ describe("hostCommandRefusal", () => {
 			"git push < /etc/passwd",
 			"git push $(whoami)",
 			"git push `whoami`",
-			"git push\ngit clone https://github.com/a/b",
+			'git push "$(whoami)"',
+			"git push \"`whoami`\"",
+			"git push & sleep 1",
+			"! sh -c x",
+			"SAFE=1 git push",
+			"g?t push",
+			"/tmp/{a,b} x",
+			"git\u0000 push",
+			"git push\ngit clone https://example.test/a/b",
+			"git push \"unbalanced",
 		]) {
-			expect(isHostCommandEligible(command), command).toBe(false);
+			expect(parseHostCommand(command).ok, command).toBe(false);
 		}
 	});
 
-	it("refuses interpreters and wrappers", () => {
-		for (const command of ["sh -c 'git push'", "bash -c x", "env git push", "sudo git push", "eval git push", "xargs git push"]) {
-			expect(isHostCommandEligible(command), command).toBe(false);
+	it("refuses interpreters and wrappers in every spelling", () => {
+		for (const command of [
+			"sh -c 'git push'",
+			"bash -c x",
+			'"/bin/sh" -c "git push"',
+			"/bin/zsh -c 'git push'",
+			"/usr/bin/env git push",
+			"env git push",
+			"sudo git push",
+			"eval git push",
+			"xargs git push",
+			"python3.12 -c 'import os'",
+			"/usr/local/bin/node -e x",
+			"node20 x.js",
+			"osascript -e 'tell app'",
+			"find . -exec git push ';'",
+		]) {
+			const parsed = parseHostCommand(command);
+			expect(parsed.ok, command).toBe(false);
 		}
+		expect(isBannedExecutable("/bin/sh")).toBe(true);
+		expect(isBannedExecutable("'python3'")).toBe(true);
+		expect(isBannedExecutable("git")).toBe(false);
+		expect(isBannedExecutable("gh")).toBe(false);
+	});
+
+	it("allows literal values inside single quotes", () => {
+		const parsed = parseHostCommand("git push '$HOME'");
+		expect(parsed.ok).toBe(true);
+		if (parsed.ok) expect(parsed.command.argv).toEqual(["git", "push", "$HOME"]);
 	});
 
 	it("refuses an empty command", () => {
-		expect(hostCommandRefusal("   ")).toBe("empty command");
+		expect(parseHostCommand("   ")).toMatchObject({ ok: false, reason: "empty command" });
 	});
 });
 
-describe("HostCommandGrants", () => {
-	it("requires an exact match", () => {
-		const grants = new HostCommandGrants();
-		grants.grant("git push -u origin main", "session");
-		expect(grants.consume("git push -u origin main")).toBe(true);
-		expect(grants.consume("git push -u origin main --force")).toBe(false);
-		expect(grants.consume("git push -u origin main; rm -rf build")).toBe(false);
-		expect(grants.consume("git push -u origin main")).toBe(true); // session grant persists
+describe("checkPrefixRule", () => {
+	const command = parseHostCommand("git push -u origin main");
+	if (!command.ok) throw new Error("fixture should be eligible");
+
+	it("accepts a true categorical prefix of the current command", () => {
+		expect(checkPrefixRule(command.command, ["git", "push"])).toEqual({ ok: true, pattern: "git push:*" });
+		expect(checkPrefixRule(command.command, ["git"])).toEqual({ ok: true, pattern: "git:*" });
 	});
 
-	it("consumes a once grant exactly once", () => {
-		const grants = new HostCommandGrants();
-		grants.grant("git push", "once");
-		expect(grants.consume("git push")).toBe(true);
-		expect(grants.consume("git push")).toBe(false);
+	it("refuses a rule for another command", () => {
+		expect(checkPrefixRule(command.command, ["git", "pull"]).ok).toBe(false);
+		expect(checkPrefixRule(command.command, ["gh", "pr"]).ok).toBe(false);
+		expect(checkPrefixRule(command.command, ["git", "push", "origin", "main", "extra"]).ok).toBe(false);
 	});
 
-	it("trims whitespace but keeps the command otherwise identical", () => {
-		const grants = new HostCommandGrants();
-		grants.grant("  git push  ", "once");
-		expect(grants.has("git push")).toBe(true);
-		expect(grants.consume(" git push ")).toBe(true);
-	});
-
-	it("clears both grant kinds", () => {
-		const grants = new HostCommandGrants();
-		grants.grant("git push", "once");
-		grants.grant("git pull", "session");
-		expect(grants.list()).toEqual({ session: ["git pull"], once: ["git push"] });
-		grants.clear();
-		expect(grants.has("git push")).toBe(false);
-		expect(grants.has("git pull")).toBe(false);
+	it("refuses patterns, metacharacters and banned heads", () => {
+		for (const rule of [["git", "push*"], ["git push"], ["git", "push;rm"], ["bash"], ["/bin/sh"]]) {
+			expect(checkPrefixRule(command.command, rule).ok, JSON.stringify(rule)).toBe(false);
+		}
+		expect(checkPrefixRule(command.command, []).ok).toBe(false);
+		expect(checkPrefixRule(command.command, undefined)).toEqual({ ok: true });
 	});
 });

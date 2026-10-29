@@ -179,7 +179,9 @@ only after review; relocation/copy-based test runs do not silently masquerade as
 testing the original blocked environment.
 
 **Evidence:** E6 and this round's recovery. Original and retry artifacts remain
-evidence; no completed fix has yet been inferred from a paused worker.
+evidence; no fix was inferred from a paused worker. Retry patches were later
+personally reviewed/integrated; see [round 1](round-1.md) for source checks and
+the unresolved full headless-suite failure.
 
 ### PR10 — Measure whether the setup gets out of the way
 

@@ -17,8 +17,10 @@ maintenance workspaces have deliberately greater authority.
 - **[Verification record](docs/review/verification.md)** — checks, reproducible
   mocked counterexamples, deployment observations and unverified integrations.
 
-The review found inconsistencies in host escalation, command-scoped grants and
-standing-rule trust. Treat the product guide as the current detailed contract;
+[Round 1](docs/round-1.md) consolidates escalation, isolates scoped permissions,
+fixes port matching and binds standing approval to trusted policy snapshots.
+It is source-verified, not deployed; lifecycle, child transport/containment and
+OS-level smoke tests remain open. Treat the product guide as the current contract;
 this README is the installation overview, not a claim of complete containment or
 feature parity.
 
@@ -202,8 +204,8 @@ copies, not the templates.
 
 `reviewer.extensions` accepts local paths and package sources (`npm:...`). The
 sidecar runs with `--no-tools` and `--no-extensions`; only the listed package
-extensions load. `exemptTools` includes `request_sandbox_exception`, because the
-sandbox broker's own review is the review for that call.
+extensions load. The separate exception tool is retired; bash escalation still
+passes the ordinary tool gate as well as its in-action exception decision.
 
 When the selected model comes from an extension-provided provider (Neuralwatt),
 set `defaultProvider` as well as `defaultModel`; a bare provider/model string in
@@ -214,17 +216,20 @@ falls back to another provider.
 
 Project writes run inside the sandbox with no prompt; each session also gets a
 private scratch directory (`PI_SANDBOX_SCRATCH`). Anything else is a reviewed
-exception: the agent calls `request_sandbox_exception` with one target and a
-reason, `pi-guardian` decides, and you are asked only when it defers. Grants
-last for one command (`once`) or the session, in memory only.
+exception attached to the same bash call: `sandbox_permissions`, a
+`justification`, and `additional_permissions.file_system.{read,write}` for
+command-scoped paths, or `require_escalated` for a host command. Guardian decides;
+a real defer uses one human UI adapter. Headless defer and missing/failed
+Guardian fail closed. No model-requested permission opens a session grant window.
 
 Sessions in this repo are additionally allowed to write the agent dir
 (`agentDirWriteProjects`, added by `install.sh`), so the setup can be repaired
 in place; credentials and Guardian's transcripts stay denied. See
 [`config/README.md`](config/README.md).
 
-Remote git uses the same mechanism with a `command` exception: ask for the exact
-command (`git push -u origin main`), guardian reviews it, and on approval that
+Remote git uses the same mechanism: attach `require_escalated` and a
+justification to the exact command (`git push -u origin main`). Guardian reviews
+it, and on approval that
 string runs once on the host with your normal git credentials — the token never
 enters the sandbox or the conversation. Chained commands, redirects and
 interpreters are refused.
@@ -232,13 +237,16 @@ interpreters are refused.
 To make a path permanently writable, add it to `filesystem.allowWrite` in
 `sandbox.json` yourself; for a host, add it to `network.allowedDomains`; for a
 Unix socket directory, add it to `network.allowUnixSockets` (that grants bind
-*and* connect); for a command that must run on the host, add a `prefix:*` entry
-to `excludedCommands`. Project-level policy goes in `<workspace>/.pi/sandbox.json`
+*and* connect). Standing host permissions belong in Guardian's
+`<workspace>/.pi/guardian.json`, e.g. `command:git push:*`; they pre-authorize an
+explicit exception, not a plain command. Nonempty `excludedCommands` lists now
+fail closed and must be migrated by the human. Project sandbox policy goes in
+`<workspace>/.pi/sandbox.json`
 and requires trust: selected allow lists are additive, but other settings and
 deny arrays can be replaced, so a trusted project profile can relax policy.
 Prefer narrow entries. See
 [`config/README.md`](config/README.md) and
-[`docs/plan-sandbox-broker.md`](docs/plan-sandbox-broker.md).
+[`docs/product.md`](docs/product.md).
 
 ## Layout
 
@@ -250,7 +258,7 @@ adripi/
   config/                   # portable config templates
   docs/architecture.md
   forks/pi-guardian/        # vendored fork; reviewer.extensions + sandbox broker
-  forks/pi-sbx/             # vendored fork; scratchpad, broker client, exception tool
+  forks/pi-sbx/             # vendored fork; scratchpad, inline escalation, dispatcher
   scripts/
     check-configs.mjs
     set-npm-command.mjs
@@ -275,10 +283,10 @@ the upstream-update procedure; the sandbox fork is documented in
 
 - The vendored `pi-sbx` fork is the OS boundary; `pi-guardian` is the semantic
   gate and the sandbox broker. Guardian decides exceptions and cannot widen the
-  sandbox itself; a human decides `forever` cases.
-- Guardian review failures are fail-closed denials. An absent broker is a
-  different state: the sandbox uses its human fallback (headless behavior depends
-  on the request route). See the product guide for current lifecycle gaps.
+  sandbox itself; a human decides standing project rules.
+- Guardian review failures and an absent broker fail closed. Only a real defer
+  reaches human UI; absent headless approval transport never implies consent.
+  See the product guide for current lifecycle gaps.
 - The agent must not edit permission, guardian, reviewer, or sandbox config to
   bypass a denial. Human recovery paths are `/guardian status` and explicit config
   edits; bare `/guardian` toggles. The installer grants this repository maintainer

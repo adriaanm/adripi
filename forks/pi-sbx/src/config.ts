@@ -12,7 +12,6 @@ export interface ExtensionConfigFields {
   enabled: boolean;
   failIfUnavailable: boolean;
   allowUnsandboxedCommands: boolean;
-  excludedCommands: string[];
   environment: { deny: string[] };
 }
 
@@ -63,7 +62,6 @@ const DEFAULT_CONFIG: JsonObject = {
   enabled: true,
   failIfUnavailable: true,
   allowUnsandboxedCommands: true,
-  excludedCommands: [],
   environment: { deny: [] },
   network: {
     allowedDomains: [
@@ -262,6 +260,28 @@ export function hasProjectConfig(cwd: string, agentDir: string, configDirName: s
   return existsSync(getConfigPaths(cwd, agentDir, configDirName).project);
 }
 
+/**
+ * `excludedCommands` used to run matching commands outside the sandbox: a second
+ * host-execution path with no shape gate and no broker review. It is retired
+ * rather than read. A non-empty value fails the whole config closed with a
+ * migration instruction; an empty array stays harmless and accepted.
+ */
+function assertNoRetiredExclusions(raw: JsonObject, options: LoadConfigOptions): void {
+  const value = raw.excludedCommands;
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new Error("excludedCommands must be an array of strings (it is retired; remove it)");
+  }
+  if (value.length === 0) return;
+  const policyPath = join(options.cwd, options.configDirName, "guardian.json");
+  throw new Error([
+    "excludedCommands is retired: it ran matching commands outside the sandbox, without the host eligibility gate or a reviewer.",
+    `Found: ${value.join(", ")}.`,
+    `Migrate each standing host permission to the Guardian project policy (${policyPath}) as {"sandboxExceptions": {"allow": ["command:<prefix>:*"]}}`,
+    "and remove excludedCommands from the sandbox configuration. The sandbox stays disabled until that is done.",
+  ].join(" "));
+}
+
 export function loadConfig(options: LoadConfigOptions): EffectiveSandboxConfig {
   const warnings: string[] = [];
   const paths = getConfigPaths(options.cwd, options.agentDir, options.configDirName);
@@ -287,12 +307,12 @@ export function loadConfig(options: LoadConfigOptions): EffectiveSandboxConfig {
   const enabled = bool(hardened.enabled, "enabled");
   const failIfUnavailable = bool(hardened.failIfUnavailable, "failIfUnavailable");
   const allowUnsandboxedCommands = bool(hardened.allowUnsandboxedCommands, "allowUnsandboxedCommands");
-  const excludedCommands = stringArray(hardened.excludedCommands, "excludedCommands");
+  assertNoRetiredExclusions(hardened, options);
   const environment = isObject(hardened.environment)
     ? { deny: stringArray(hardened.environment.deny ?? [], "environment.deny") }
     : { deny: [] };
 
-  const runtimeInput = Object.fromEntries(Object.entries(hardened).filter(([key]) => !["enabled", "failIfUnavailable", "allowUnsandboxedCommands", "excludedCommands", "environment", "agentDirWriteProjects"].includes(key)));
+  const runtimeInput = Object.fromEntries(Object.entries(hardened).filter(([key]) => !["enabled", "failIfUnavailable", "allowUnsandboxedCommands", "environment", "agentDirWriteProjects"].includes(key)));
   const parsed = SandboxRuntimeConfigSchema.safeParse(runtimeInput);
   if (!parsed.success) throw new Error(`Invalid sandbox runtime config: ${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`);
 
@@ -300,7 +320,6 @@ export function loadConfig(options: LoadConfigOptions): EffectiveSandboxConfig {
     enabled,
     failIfUnavailable,
     allowUnsandboxedCommands,
-    excludedCommands,
     environment,
     runtime: parsed.data,
     hardening,
@@ -515,14 +534,3 @@ export function getArrayLayer(
   return source;
 }
 
-export function addAllowedDomain(raw: JsonObject, host: string): JsonObject {
-  const network = isObject(raw.network) ? { ...raw.network } : {};
-  const allowed = Array.isArray(network.allowedDomains) ? network.allowedDomains.filter((value): value is string => typeof value === "string") : [];
-  network.allowedDomains = dedupe([...allowed, host]);
-  return { ...raw, network };
-}
-
-export function setExcludedCommand(raw: JsonObject, pattern: string, add: boolean): JsonObject {
-  const current = Array.isArray(raw.excludedCommands) ? raw.excludedCommands.filter((value): value is string => typeof value === "string") : [];
-  return { ...raw, excludedCommands: add ? dedupe([...current, pattern]) : current.filter((value) => value !== pattern) };
-}

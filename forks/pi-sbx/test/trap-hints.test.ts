@@ -31,7 +31,7 @@ describe("buildTrapHint", () => {
 		expect(buildTrapHint("ok", { cwd: "/work" })).toBeUndefined();
 	});
 
-	it("skips scratch paths and already-granted targets", () => {
+	it("skips the scratchpad", () => {
 		const output = [
 			"touch: /tmp/pi-sbx-scratch-x/p: Operation not permitted",
 			"touch: /Users/a/.gradle/caches: Operation not permitted",
@@ -39,27 +39,21 @@ describe("buildTrapHint", () => {
 		const onlyGradle = buildTrapHint(output, { cwd: "/work", scratchDir: "/tmp/pi-sbx-scratch-x" });
 		expect(onlyGradle).toContain("/Users/a/.gradle/caches");
 		expect(onlyGradle).not.toContain("pi-sbx-scratch-x");
-		expect(
-			buildTrapHint(output, {
-				cwd: "/work",
-				scratchDir: "/tmp/pi-sbx-scratch-x",
-				granted: ["/Users/a/.gradle"],
-			}),
-		).toBeUndefined();
 	});
 
-	it("names the tool and the exact target", () => {
+	it("names the exact target and the inline parameter", () => {
 		const hint = buildTrapHint("touch: /Users/a/.gradle/x: Operation not permitted", { cwd: "/work" });
 		expect(hint).toContain("/Users/a/.gradle/x");
-		expect(hint).toContain("request_sandbox_exception");
-		expect(hint).toContain('"write"');
+		expect(hint).toContain('sandbox_permissions: "with_additional_permissions"');
+		expect(hint).toContain("additional_permissions.file_system.write");
+		expect(hint).not.toContain("request_sandbox_exception");
 	});
 
 	it("appends to a tool result without touching non-text results", () => {
 		const result = { content: [{ type: "text", text: "touch: /a: Operation not permitted" }], details: { x: 1 } };
 		const next = withTrapHint(result, "touch: /a: Operation not permitted", { cwd: "/work" });
 		expect(next.content).toHaveLength(2);
-		expect(String(next.content[1].text)).toContain("request_sandbox_exception");
+		expect(String(next.content[1].text)).toContain("sandbox_permissions");
 		expect(next.details).toEqual({ x: 1 });
 		expect(withTrapHint(result, "all good", { cwd: "/work" })).toBe(result);
 	});
@@ -74,9 +68,9 @@ describe("credential failures", () => {
     ].join("\n");
     const hint = buildTrapHint(output, { cwd: "/work" }) ?? "";
     // The credential path is never grantable, so it is not offered as a target.
-    expect(hint).not.toContain("surface\" \\\"read\\\" for a read denial");
+    expect(hint).not.toContain("additional_permissions.file_system.write");
     expect(hint).toContain("permanently denied credential store");
-    expect(hint).toContain("`command` exception");
+    expect(hint).toContain('sandbox_permissions: "require_escalated"');
     const credential = buildCredentialHint(output) ?? "";
     expect(credential).toContain("git pull --ff-only origin main");
     expect(credential).toContain("Do not retry it in the sandbox");
@@ -85,7 +79,7 @@ describe("credential failures", () => {
   it("stays quiet for ordinary failures and ordinary denials", () => {
     expect(buildCredentialHint("error: failed to compile")).toBeUndefined();
     const ordinary = buildTrapHint("touch: /data/x: Operation not permitted", { cwd: "/work" }) ?? "";
-    expect(ordinary).toContain("call request_sandbox_exception");
+    expect(ordinary).toContain('sandbox_permissions: "with_additional_permissions"');
     expect(ordinary).not.toContain("permanently denied");
   });
 });

@@ -29,7 +29,6 @@ export type RuleKind =
   | "readDeny"
   | "writeAllow"
   | "writeDeny"
-  | "command"
   | "environment";
 
 export interface SandboxSettingsActions {
@@ -47,7 +46,7 @@ export interface SandboxSettingsActions {
   reportError(error: unknown): void;
 }
 
-type TabId = "sandbox" | "network" | "read" | "write" | "commands" | "environment" | "advanced" | "config";
+type TabId = "sandbox" | "network" | "read" | "write" | "environment" | "advanced" | "config";
 type Row =
   | { type: "setting"; id: SandboxSettingId; label: string; value: string; description: string }
   | { type: "rule"; kind: RuleKind; label: string; value: string; source: string; mandatory: boolean }
@@ -60,7 +59,6 @@ const TABS: Array<{ id: TabId; label: string }> = [
   { id: "network", label: "Network" },
   { id: "read", label: "Read" },
   { id: "write", label: "Write" },
-  { id: "commands", label: "Commands" },
   { id: "environment", label: "Environment" },
   { id: "advanced", label: "Advanced" },
   { id: "config", label: "Config" },
@@ -114,7 +112,6 @@ export function formatEffectiveConfig(config: EffectiveSandboxConfig, sessionEna
     enabled: sessionEnabled,
     failIfUnavailable: config.failIfUnavailable,
     allowUnsandboxedCommands: config.allowUnsandboxedCommands,
-    excludedCommands: config.excludedCommands,
     environment: config.environment,
     ...config.runtime,
   }, null, 2);
@@ -172,8 +169,6 @@ export class SandboxSettingsComponent implements Component, Focusable {
           ...scopedRuleRows(config, scope, "writeDeny", "Denied path", "filesystem", "denyWrite", config.hardening.denyWrite),
         ];
       }
-      case "commands":
-        return scopedRuleRows(config, scope, "command", "Excluded command", undefined, "excludedCommands");
       case "environment":
         return scopedRuleRows(config, scope, "environment", "Denied variable", "environment", "deny");
       case "advanced":

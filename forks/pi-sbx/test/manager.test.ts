@@ -19,7 +19,6 @@ function config(overrides: Partial<EffectiveSandboxConfig> = {}): EffectiveSandb
     enabled: true,
     failIfUnavailable: true,
     allowUnsandboxedCommands: true,
-    excludedCommands: [],
     environment: { deny: [] },
     runtime: {
       network: { allowedDomains: [], deniedDomains: [] },

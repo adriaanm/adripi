@@ -1,5 +1,6 @@
+import { join } from "node:path";
 import { Type } from "typebox";
-import type { BashToolDetails, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, BashToolDetails, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   CONFIG_DIR_NAME,
   createBashToolDefinition,
@@ -9,13 +10,12 @@ import {
 import type { NetworkHostPattern } from "@anthropic-ai/sandbox-runtime";
 import { createSandboxedBashOperations } from "./bash-operations.ts";
 import {
-  addAllowedDomain,
   getInheritedConfigArray,
   getInheritedConfigBoolean,
+  getConfigPaths,
   hasProjectConfig,
   loadConfig,
   mutateConfigArrayValue,
-  setExcludedCommand,
   toggleConfigBoolean,
   updateGlobalConfig,
   updateProjectConfig,
@@ -23,41 +23,29 @@ import {
   type EffectiveSandboxConfig,
   type JsonObject,
 } from "./config.ts";
-import { isCommandExcluded } from "./command-policy.ts";
-import { parseSupervisorDecision, supervisorQuestion } from "./supervisor-ask.ts";
-import { sandboxGuidance } from "./guidance.ts";
-import { planInlineEscalation } from "./inline-escalation.ts";
-import { getConfigPaths } from "./config.ts";
-import { registerFileGate } from "./file-gate.ts";
-import { buildHardeningPaths } from "./hardening.ts";
-import { SandboxController, RuntimeSandboxManager } from "./manager.ts";
-import { createScratchpad, SCRATCH_ENV, type Scratchpad, sweepScratchpads, withScratchpad } from "./scratch.ts";
 import {
   decideSandboxException,
   getProjectPolicyService,
-  type SandboxScope,
-  type SandboxSurface,
-  hasSessionException,
-  type SessionLayer,
-  withSessionException,
-  withoutSessionException,
+  projectPolicyRule,
+  withScopedPaths,
+  type PreparedProjectRule,
 } from "./broker.ts";
-import { applyAfterPersist } from "./overlay.ts";
+import { ExecutionQueue } from "./execution-queue.ts";
+import { planInlineEscalation, type InlineEscalationPlan } from "./inline-escalation.ts";
+import { sandboxGuidance } from "./guidance.ts";
+import { HumanChannel } from "./human-channel.ts";
+import { registerFileGate } from "./file-gate.ts";
+import { buildHardeningPaths } from "./hardening.ts";
+import { SandboxController, RuntimeSandboxManager } from "./manager.ts";
 import { createFilePolicy } from "./path-policy.ts";
-import { PromptCoordinator } from "./prompts.ts";
+import { createScratchpad, SCRATCH_ENV, sweepScratchpads, withScratchpad, type Scratchpad } from "./scratch.ts";
+import { SandboxSettingsComponent, type RuleKind, type SandboxSettingId } from "./settings-ui.ts";
 import { removeSandboxViolationTags, ViolationTracker } from "./violations.ts";
 import { resultText, withTrapHint } from "./trap-hints.ts";
-import { HostCommandGrants, hostCommandRefusal } from "./host-command.ts";
-import {
-  SandboxSettingsComponent,
-  type RuleKind,
-  type SandboxSettingId,
-} from "./settings-ui.ts";
 
 const bashSchema = Type.Object({
   command: Type.String({ description: "Bash command to execute" }),
   timeout: Type.Optional(Type.Number({ description: "Timeout in seconds" })),
-  dangerouslyDisableSandbox: Type.Optional(Type.Boolean({ description: "Request explicit user approval to run this command outside the sandbox" })),
   // Codex-shaped inline escalation: the request travels with the command, so the
   // model asks and runs in one call instead of requesting, waiting, and re-running.
   sandbox_permissions: Type.Optional(Type.Union([
@@ -66,28 +54,39 @@ const bashSchema = Type.Object({
     Type.Literal("with_additional_permissions"),
   ], { description: "Per-command sandbox override. Defaults to use_default; widen for this command with \"with_additional_permissions\", or run outside the sandbox with \"require_escalated\"." })),
   justification: Type.Optional(Type.String({ description: "Short question for the user; required with require_escalated or with_additional_permissions, omit otherwise." })),
-  prefix_rule: Type.Optional(Type.Array(Type.String(), { description: "Reusable approval prefix for this command, only with require_escalated; for example [\"git\", \"pull\"]." })),
+  prefix_rule: Type.Optional(Type.Array(Type.String(), { description: "A standing-rule proposal for this command, only with require_escalated; it must be a true prefix of the command, for example [\"git\", \"push\"]." })),
   additional_permissions: Type.Optional(Type.Object({
-    network: Type.Optional(Type.Object({ enabled: Type.Optional(Type.Boolean()) })),
     file_system: Type.Optional(Type.Object({
       read: Type.Optional(Type.Array(Type.String())),
       write: Type.Optional(Type.Array(Type.String())),
-    })),
-  }, { description: "Paths to widen for this command only; only with with_additional_permissions." })),
-});
+    }, { additionalProperties: false })),
+  }, { additionalProperties: false, description: "Paths to widen for this command only; only with with_additional_permissions." })),
+}, { additionalProperties: false });
 
 type BashParams = {
   command: string;
   timeout?: number;
-  dangerouslyDisableSandbox?: boolean;
   sandbox_permissions?: "use_default" | "require_escalated" | "with_additional_permissions";
   justification?: string;
   prefix_rule?: string[];
   additional_permissions?: {
-    network?: { enabled?: boolean };
     file_system?: { read?: string[]; write?: string[] };
   };
 };
+
+/**
+ * The only bash parameters this extension accepts. `dangerouslyDisableSandbox`
+ * and a separate exception request are retired; a legacy key is rejected rather
+ * than ignored, so a stale model habit cannot look like a normal call.
+ */
+const CANONICAL_BASH_PARAMS = new Set([
+  "command",
+  "timeout",
+  "sandbox_permissions",
+  "justification",
+  "prefix_rule",
+  "additional_permissions",
+]);
 
 type RuleDefinition = { section?: string; key: string; label: string };
 
@@ -107,7 +106,6 @@ const RULE_DEFINITIONS: Record<RuleKind, RuleDefinition> = {
   readDeny: { section: "filesystem", key: "denyRead", label: "Denied read path" },
   writeAllow: { section: "filesystem", key: "allowWrite", label: "Allowed write path" },
   writeDeny: { section: "filesystem", key: "denyWrite", label: "Denied write path" },
-  command: { key: "excludedCommands", label: "Excluded command" },
   environment: { section: "environment", key: "deny", label: "Denied environment variable" },
 };
 
@@ -119,6 +117,8 @@ function mandatoryRules(kind: RuleKind, active: EffectiveSandboxConfig): string[
     default: return [];
   }
 }
+
+type ToolResult = AgentToolResult<unknown>;
 
 export default function sandboxExtension(pi: ExtensionAPI) {
   pi.registerFlag("no-sandbox", {
@@ -134,14 +134,13 @@ export default function sandboxExtension(pi: ExtensionAPI) {
 
   const controller = new SandboxController();
   const violations = new ViolationTracker();
+  // One bash execution at a time: a scoped command installs a temporary policy
+  // in the SRT singleton, and the next command must not observe it.
+  let executions = new ExecutionQueue();
   let currentContext: ExtensionContext | undefined;
+  let executionSignal: AbortSignal | undefined;
   let config: EffectiveSandboxConfig | undefined;
   let scratchpad: Scratchpad | undefined;
-  /** `once` grants expire after the next sandboxed command (network: next connection). */
-  let pendingOnceGrants: Array<{ surface: SandboxSurface; target: string; grantedByToolCallId: string }> = [];
-  const pendingNetworkOnce = new Set<string>();
-  /** Exact commands approved to run on the host (remote git operations). */
-  const hostGrants = new HostCommandGrants();
   let configError: string | undefined;
   let sessionEnabled = false;
   let sessionEnabledOverride: boolean | undefined;
@@ -149,129 +148,74 @@ export default function sandboxExtension(pi: ExtensionAPI) {
   let projectApproved = false;
   let sessionConfig: JsonObject = {};
   let settingsScope: ConfigScope = "session";
-  let prompts = new PromptCoordinator(() => currentContext);
-  // Session-scoped approvals granted through prompts or /sandbox commands.
-  // They apply without trusting the (possibly attacker-controlled) project
-  // config layer as a whole.
-  const overlay = {
-    allowedDomains: new Set<string>(),
-    excludedCommands: new Set<string>(),
-    unexcludedCommands: new Set<string>(),
-  };
 
-  const applyOverlay = (target: EffectiveSandboxConfig) => {
-    target.runtime.network.allowedDomains = [
-      ...new Set([...target.runtime.network.allowedDomains, ...overlay.allowedDomains]),
-    ];
-    target.excludedCommands = [
-      ...new Set([...target.excludedCommands, ...overlay.excludedCommands]),
-    ].filter((pattern) => !overlay.unexcludedCommands.has(pattern));
-  };
+  const policyPath = () => getProjectPolicyService()?.path
+    ?? join(currentContext?.cwd ?? process.cwd(), CONFIG_DIR_NAME, "guardian.json");
+  let humanChannel = new HumanChannel(() => currentContext, policyPath);
 
   const baseBash = createBashToolDefinition(process.cwd());
 
-  const notifyUntrustedPersist = (ctx: ExtensionContext) => {
-    if (!projectApproved && hasProjectConfig(ctx.cwd, getAgentDir(), CONFIG_DIR_NAME)) {
-      ctx.ui.notify(
-        "Saved to project sandbox.json, but the rest of the untrusted project config stays ignored until you approve it",
-        "warning",
-      );
+  /**
+   * Standing permissions are Guardian-owned. There is no fallback that writes
+   * sandbox configuration (or a command exclusion) when guardian is absent: the
+   * rule is simply not saved, and the user is told why.
+   */
+  const prepareStandingRule = (rule: string): PreparedProjectRule => {
+    const policy = getProjectPolicyService();
+    if (!policy) {
+      return {
+        ok: false,
+        reason: `guardian's project-policy service is not published, so no standing rule was saved; add ${rule} to ${policyPath()} by hand if it should persist`,
+      };
     }
+    return policy.prepareRule(rule);
   };
 
-  const persistDomain = async (host: string) => {
-    if (!config || !currentContext) throw new Error("Sandbox has no active session");
-    const activeConfig = config;
-    const ctx = currentContext;
-    await applyAfterPersist(
-      () => updateProjectConfig(activeConfig.projectConfigPath, ctx.cwd, (raw) => addAllowedDomain(raw, host)),
-      () => overlay.allowedDomains.add(host),
-    );
-    notifyUntrustedPersist(ctx);
-    await reloadConfig(ctx, false);
+  const saveStandingRule = (prepared: PreparedProjectRule): void => {
+    const saved = prepared.ok ? prepared.commit() : prepared;
+    if (!saved.ok) currentContext?.ui.notify(`Standing permission not saved: ${saved.reason}`, "warning");
   };
 
   /**
-   * Persist a proposed `prefix_rule` once the human says yes. Guardian's project
-   * policy is the right home: the command still has to ask for the exception, the
-   * rule just pre-authorizes the decision. Without guardian, fall back to this
-   * project's own `excludedCommands` (no sandbox at all), which is what the
-   * "always allow" answer has always meant here.
+   * The network callback is one decision per connection through the same broker
+   * and human adapter as every other surface. Nothing is stored: an approved
+   * connection does not pre-approve the next one, and a standing rule is only
+   * saved through guardian's project policy.
    */
-  const offerStandingRule = async (ctx: ExtensionContext, rule: string) => {
-    if (!ctx.hasUI) return;
-    const policy = getProjectPolicyService();
-    try {
-      const approved = await ctx.ui.confirm(
-        "Save a standing permission?",
-        `Allow ${rule} for this project? It will be written to ${policy?.path ?? `${CONFIG_DIR_NAME}/sandbox.json`} and apply in future sessions; the command still has to request the exception.`,
-      );
-      if (!approved) return;
-      const saved = policy?.persistRule(rule);
-      if (saved && !saved.ok) {
-        ctx.ui.notify(`Could not save the standing permission: ${saved.reason}`, "warning");
-        return;
-      }
-      if (!policy) await persistExclusion(rule);
-      ctx.ui.notify(`Standing permission saved for this project: ${rule}`, "info");
-    } catch (error) {
-      ctx.ui.notify(`Could not save the standing permission: ${error instanceof Error ? error.message : String(error)}`, "warning");
-    }
-  };
-
-  /** Persist a rule the human just approved (guardian policy if present). */
-  const persistStandingRule = async (rule: string) => {
-    const policy = getProjectPolicyService();
-    if (!policy) {
-      await persistExclusion(rule);
-      return;
-    }
-    const saved = policy.persistRule(rule);
-    if (!saved.ok) throw new Error(saved.reason);
-  };
-
-  const persistExclusion = async (pattern: string) => {
-    if (!config || !currentContext) throw new Error("Sandbox has no active session");
-    const activeConfig = config;
-    const ctx = currentContext;
-    await applyAfterPersist(
-      () => updateProjectConfig(activeConfig.projectConfigPath, ctx.cwd, (raw) => setExcludedCommand(raw, pattern, true)),
-      () => {
-        overlay.excludedCommands.add(pattern);
-        overlay.unexcludedCommands.delete(pattern);
-      },
-    );
-    notifyUntrustedPersist(ctx);
-    await reloadConfig(ctx, false);
-  };
-
-  const networkAsk = async (host: NetworkHostPattern) => {
-    const target = `${host.host}:${host.port ?? "*"}`;
-    if (pendingNetworkOnce.delete(target)) return true;
+  const networkAsk = async (host: NetworkHostPattern): Promise<boolean> => {
+    const signal = executionSignal;
+    if (signal?.aborted) return false;
+    const hostname = host.host.includes(":") && !host.host.startsWith("[") ? `[${host.host}]` : host.host;
+    const target = `${hostname}:${host.port ?? "*"}`;
     const decision = await decideSandboxException({
       surface: "network",
       target,
-      scope: "session",
+      scope: "once",
       origin: "trap",
       violation: "network destination is not in the static allowlist",
       cwd: currentContext?.cwd ?? process.cwd(),
     });
-    if (decision.kind === "allow") {
-      if (decision.scope === "session") {
-        if (!currentContext) return false;
-        const applied = await applySessionGrant(currentContext, "network", target);
-        if (!applied.ok) {
-          currentContext.ui.notify(`Sandbox network exception refused: ${applied.reason}`, "error");
-          return false;
-        }
-      }
-      return true;
-    }
+    if (signal?.aborted) return false;
+    if (decision.kind === "allow") return true;
     if (decision.kind === "deny") {
       currentContext?.ui.notify(`Sandbox network denied: ${decision.reason}`, "warning");
       return false;
     }
-    return prompts.requestNetwork(host, persistDomain);
+    const rule = projectPolicyRule("network", target);
+    const prepared = prepareStandingRule(rule);
+    const human = await humanChannel.ask({
+      surface: "network",
+      target,
+      reason: "the sandbox network allowlist does not include this destination",
+      standingRule: prepared.ok ? rule : undefined,
+    }, signal);
+    if (human.kind !== "allow") {
+      currentContext?.ui.notify(`Sandbox network denied: ${human.reason}`, "warning");
+      return false;
+    }
+    if (signal?.aborted) return false;
+    if (human.standing) saveStandingRule(prepared);
+    return true;
   };
 
   async function resolveProjectApproval(ctx: ExtensionContext): Promise<boolean> {
@@ -285,20 +229,25 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     );
   }
 
+  /** Effective config for a session layer; used for the baseline and per-command snapshots. */
+  function buildConfig(ctx: ExtensionContext, sessionLayer: JsonObject): EffectiveSandboxConfig {
+    let next = loadConfig({
+      cwd: ctx.cwd,
+      agentDir: getAgentDir(),
+      configDirName: CONFIG_DIR_NAME,
+      allowProjectConfig: projectApproved,
+      sessionConfig: sessionLayer,
+    });
+    // The scratchpad is policy, not an exception: the agent can always write
+    // temporary files there, and nothing else under the temp root opens up.
+    if (scratchpad) next = withScratchpad(next, scratchpad.dir);
+    return next;
+  }
+
   async function reloadConfig(ctx: ExtensionContext, resetRuntime: boolean): Promise<void> {
     configError = undefined;
     try {
-      config = loadConfig({
-        cwd: ctx.cwd,
-        agentDir: getAgentDir(),
-        configDirName: CONFIG_DIR_NAME,
-        allowProjectConfig: projectApproved,
-        sessionConfig,
-      });
-      // The scratchpad is policy, not an exception: the agent can always write
-      // temporary files there, and nothing else under the temp root opens up.
-      if (scratchpad) config = withScratchpad(config, scratchpad.dir);
-      applyOverlay(config);
+      config = buildConfig(ctx, sessionConfig);
       for (const warning of config.warnings) ctx.ui.notify(warning, "warning");
       sessionEnabled = (sessionEnabledOverride ?? config.enabled) && !Boolean(pi.getFlag("no-sandbox"));
       if (resetRuntime) await controller.reset();
@@ -383,7 +332,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
   const applySettingsMutation = async (
     ctx: ExtensionContext,
     mutator: ScopedConfigMutator,
-  ): Promise<void> => {
+  ): Promise<void> => executions.run(async () => {
     if (!config) throw new Error("No valid sandbox configuration");
     const scope = settingsScope;
     if (!await ensureSettingsProjectApproved(ctx)) return;
@@ -408,7 +357,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       await updateProjectConfig(active.projectConfigPath, ctx.cwd, (raw) => mutator(raw, active, scope));
     }
     await reloadConfig(ctx, false);
-  };
+  });
 
   const changeRule = async (ctx: ExtensionContext, kind: RuleKind, value: string, add: boolean): Promise<void> => {
     const definition = RULE_DEFINITIONS[kind];
@@ -421,91 +370,6 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       add,
       mandatoryRules(kind, active),
     ));
-  };
-
-  type SessionGrantResult = { ok: true } | { ok: false; reason: string };
-
-  /**
-   * Apply a session-scope grant to the in-memory layer and refresh the runtime.
-   * The candidate layer is validated first: the runtime schema rejects some
-   * targets (e.g. `host:*`, a URL, a relative path), and adopting one would make
-   * every later loadConfig fail — which disables the sandbox for the rest of the
-   * session instead of refusing that one request.
-   */
-  const applySessionGrant = async (
-    ctx: ExtensionContext,
-    surface: SandboxSurface,
-    target: string,
-  ): Promise<SessionGrantResult> => {
-    const candidate = withSessionException(sessionConfig as SessionLayer, surface, target) as typeof sessionConfig;
-    try {
-      loadConfig({
-        cwd: ctx.cwd,
-        agentDir: getAgentDir(),
-        configDirName: CONFIG_DIR_NAME,
-        allowProjectConfig: projectApproved,
-        sessionConfig: candidate,
-      });
-    } catch (error) {
-      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
-    }
-    sessionConfig = candidate;
-    await reloadConfig(ctx, false);
-    return { ok: true };
-  };
-
-  type HumanExceptionDecision = { kind: "allow"; scope: SandboxScope } | { kind: "deny"; reason?: string };
-
-  /**
-   * `executeTool` exists on the context passed to a tool's `execute()` (Pi 1.0+);
-   * the vendored types predate it, so it is discovered structurally and its
-   * absence is a plain denial.
-   */
-  type SupervisorChannel = {
-    executeTool?: (name: string, args: unknown) => Promise<{
-      isError: boolean;
-      result: { content: ReadonlyArray<{ type: string; text?: string }> };
-    }>;
-  };
-
-  /**
-   * Human fallback, reached only when guardian defers or is absent. A subagent
-   * has no UI, so it asks its supervisor instead (pi-subagents'
-   * `contact_supervisor`), which surfaces the question in the parent session.
-   */
-  const askHumanForException = async (
-    ctx: ExtensionContext,
-    surface: SandboxSurface,
-    target: string,
-    reason?: string,
-  ): Promise<HumanExceptionDecision> => {
-    if (ctx.hasUI) {
-      const choice = await ctx.ui.select(`Allow a sandbox exception for ${surface} ${target}?`, [
-        "Allow for this session",
-        "Deny",
-      ]);
-      return choice === "Allow for this session" ? { kind: "allow", scope: "session" } : { kind: "deny" };
-    }
-    const escalate = (ctx as unknown as SupervisorChannel).executeTool;
-    if (typeof escalate !== "function") {
-      return { kind: "deny", reason: "no UI and no supervisor channel is available" };
-    }
-    try {
-      const outcome = await escalate.call(ctx, "contact_supervisor", {
-        reason: "need_decision",
-        message: supervisorQuestion({ surface, target, reason, cwd: ctx.cwd }),
-      });
-      const text = outcome.result.content
-        .map((block) => (block.type === "text" ? (block.text ?? "") : ""))
-        .join("\n")
-        .trim();
-      const decision = parseSupervisorDecision(text);
-      if (decision) return decision;
-      if (outcome.isError) return { kind: "deny", reason: `the supervisor channel failed: ${text.slice(0, 200)}` };
-      return { kind: "deny", reason: `the supervisor reply was not a decision: ${text.slice(0, 200)}` };
-    } catch (error) {
-      return { kind: "deny", reason: error instanceof Error ? error.message : String(error) };
-    }
   };
 
   function localTool(cwd: string) {
@@ -524,6 +388,218 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     });
   }
 
+  const refusal = (reason: string, details: Record<string, unknown> = {}): ToolResult => ({
+    content: [{ type: "text", text: `Sandbox escalation rejected: ${reason}. The command did not run.` }],
+    details: { refusal: reason, ...details },
+  });
+
+  const deferred = (reason: string): ToolResult => ({
+    content: [{
+      type: "text",
+      text: `Sandbox exception deferred: ${reason}. The command did not run; do not retry it in the same mode.`,
+    }],
+    details: { deferred: true, reason },
+  });
+
+  const runSandboxed = async (
+    id: string,
+    params: BashParams,
+    signal: AbortSignal | undefined,
+    onUpdate: Parameters<typeof baseBash.execute>[3],
+    ctx: ExtensionContext,
+  ): Promise<ToolResult> => {
+    const input = { command: params.command, timeout: params.timeout };
+    const result = await sandboxedTool(ctx.cwd).execute(id, input, signal, onUpdate, ctx);
+    // A denied command names the exact path; tell the model how to ask for it.
+    return withTrapHint(result, resultText(result), { cwd: ctx.cwd, scratchDir: scratchpad?.dir });
+  };
+
+  /**
+   * Host execution, the reviewed full-host tier. `allowUnsandboxedCommands` and
+   * the shape/prefix gate are checked before the broker or a human is asked, so
+   * a disabled policy or an ineligible shape never spends a review.
+   */
+  const runOnHost = async (
+    id: string,
+    plan: Extract<InlineEscalationPlan, { kind: "host" }>,
+    params: BashParams,
+    signal: AbortSignal | undefined,
+    onUpdate: Parameters<typeof baseBash.execute>[3],
+    ctx: ExtensionContext,
+    activeConfig: EffectiveSandboxConfig,
+  ): Promise<ToolResult> => {
+    if (!activeConfig.allowUnsandboxedCommands) {
+      return refusal("unsandboxed commands are disabled by sandbox policy (allowUnsandboxedCommands is false)");
+    }
+    const decision = await decideSandboxException({
+      surface: "command",
+      target: plan.command.command,
+      scope: "once",
+      origin: "tool",
+      reason: plan.justification,
+      command: plan.command.command,
+      cwd: ctx.cwd,
+    });
+    if (decision.kind === "deny") return refusal(`guardian denied host execution: ${decision.reason}`);
+
+    const standingRule = plan.prefixRule ? projectPolicyRule("command", plan.prefixRule) : undefined;
+    const prepared = standingRule ? prepareStandingRule(standingRule) : undefined;
+    let standingApproved = false;
+    if (decision.kind === "defer") {
+      const human = await humanChannel.ask({
+        surface: "command",
+        target: plan.command.command,
+        reason: plan.justification,
+        standingRule: prepared?.ok ? standingRule : undefined,
+      }, signal);
+      if (human.kind === "unavailable") return deferred(human.reason);
+      if (human.kind === "deny") return refusal(human.reason);
+      standingApproved = human.standing;
+    } else if (standingRule) {
+      // Guardian allowed this call; saving a rule is still the human's decision.
+      if (prepared?.ok) standingApproved = await humanChannel.confirmStanding(standingRule, signal);
+      else if (prepared) ctx.ui.notify(`Standing permission not saved: ${prepared.reason}`, "warning");
+    }
+    if (signal?.aborted) return refusal("the command was cancelled before it started");
+    if (standingApproved && prepared) saveStandingRule(prepared);
+
+    // Run the reviewed string, not a differently-spaced spelling of it.
+    const input = { command: plan.command.command, timeout: params.timeout };
+    return localTool(ctx.cwd).execute(id, input, signal, onUpdate, ctx);
+  };
+
+  const restoreBaseline = async (baseline: EffectiveSandboxConfig): Promise<void> => {
+    try {
+      controller.refresh(baseline);
+    } catch (error) {
+      // If rollback itself fails, no later command may use a possibly widened
+      // singleton. Poison dispatch before attempting cleanup, even if reset fails.
+      configError = `Scoped sandbox policy could not be restored: ${error instanceof Error ? error.message : String(error)}`;
+      await controller.reset();
+      throw new Error(configError);
+    }
+  };
+
+  /**
+   * Widen the sandbox for exactly this execution. Every target is decided
+   * before the runtime is touched, so a partial approval runs nothing and
+   * leaves no trace; the baseline profile is restored in `finally` on success,
+   * failure and cancellation.
+   */
+  const runScoped = async (
+    id: string,
+    plan: Extract<InlineEscalationPlan, { kind: "scoped" }>,
+    params: BashParams,
+    signal: AbortSignal | undefined,
+    onUpdate: Parameters<typeof baseBash.execute>[3],
+    ctx: ExtensionContext,
+    activeConfig: EffectiveSandboxConfig,
+  ): Promise<ToolResult> => {
+    if (!controller.canRunSandboxed()) {
+      return refusal("the sandbox is unavailable, so a command-scoped path permission cannot be applied");
+    }
+    for (const target of plan.targets) {
+      const decision = await decideSandboxException({
+        surface: target.surface,
+        target: target.target,
+        scope: "once",
+        origin: "tool",
+        reason: plan.justification,
+        command: params.command,
+        cwd: ctx.cwd,
+      });
+      if (decision.kind === "deny") {
+        return refusal(`guardian denied ${target.surface} ${target.target}: ${decision.reason}`);
+      }
+      if (decision.kind === "defer") {
+        const human = await humanChannel.ask({
+          surface: target.surface,
+          target: target.target,
+          reason: plan.justification,
+        }, signal);
+        if (human.kind === "unavailable") return deferred(human.reason);
+        if (human.kind === "deny") return refusal(human.reason);
+      }
+    }
+    if (signal?.aborted) return refusal("the command was cancelled before it started");
+
+    let scopedConfig: EffectiveSandboxConfig;
+    try {
+      scopedConfig = buildConfig(ctx, withScopedPaths(sessionConfig, plan.targets));
+    } catch (error) {
+      return refusal(`the sandbox runtime rejected the scoped path: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+      controller.refresh(scopedConfig);
+    } catch (error) {
+      await restoreBaseline(activeConfig);
+      return refusal(`the sandbox runtime rejected the scoped path: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+      return await runSandboxed(id, params, signal, onUpdate, ctx);
+    } finally {
+      await restoreBaseline(activeConfig);
+    }
+  };
+
+  /**
+   * The single execution-dispatch seam. Every bash call — default, scoped or
+   * host — passes through this function, so the legacy parameter check, the
+   * host gate, the review handoff and the baseline restore exist once.
+   */
+  const dispatch = async (
+    id: string,
+    params: BashParams,
+    signal: AbortSignal | undefined,
+    onUpdate: Parameters<typeof baseBash.execute>[3],
+    ctx: ExtensionContext,
+  ): Promise<ToolResult> => {
+    const unknown = Object.keys(params as unknown as Record<string, unknown>)
+      .filter((key) => !CANONICAL_BASH_PARAMS.has(key));
+    if (unknown.length > 0) {
+      return refusal(
+        `unsupported bash parameter${unknown.length > 1 ? "s" : ""} ${unknown.join(", ")}; ` +
+        "escalation is a parameter of this bash call (`sandbox_permissions`, `justification`, `prefix_rule`, `additional_permissions`), " +
+        "and `request_sandbox_exception` / `dangerouslyDisableSandbox` are retired",
+      );
+    }
+
+    if (signal?.aborted) return refusal("the command was cancelled before it started");
+    const plan = planInlineEscalation(params);
+    if (plan.kind === "invalid") return refusal(plan.reason);
+    if (Boolean(pi.getFlag("no-sandbox"))) {
+      const input = { command: params.command, timeout: params.timeout };
+      return localTool(ctx.cwd).execute(id, input, signal, onUpdate, ctx);
+    }
+    if (configError) throw new Error(`Sandbox configuration is invalid: ${configError}`);
+    if (!config) throw new Error("Sandbox is not initialized yet; retry after session start");
+    const activeConfig = config;
+    if (!sessionEnabled) {
+      const input = { command: params.command, timeout: params.timeout };
+      return localTool(ctx.cwd).execute(id, input, signal, onUpdate, ctx);
+    }
+
+    if (plan.kind === "host") return runOnHost(id, plan, params, signal, onUpdate, ctx, activeConfig);
+    if (plan.kind === "scoped") return runScoped(id, plan, params, signal, onUpdate, ctx, activeConfig);
+
+    if (controller.canRunSandboxed()) return runSandboxed(id, params, signal, onUpdate, ctx);
+    if (activeConfig.failIfUnavailable) {
+      throw new Error(`Sandbox required but unavailable: ${controller.getError() ?? "not initialized"}`);
+    }
+    if (!activeConfig.allowUnsandboxedCommands) {
+      throw new Error("Sandbox unavailable and unsandboxed commands are disabled by sandbox policy");
+    }
+    // Availability fallback is not an admission bypass: use the same host
+    // planner, gate and review as an explicit require_escalated request.
+    const fallback = planInlineEscalation({
+      command: params.command,
+      sandbox_permissions: "require_escalated",
+      justification: `The configured sandbox is unavailable: ${controller.getError() ?? "not initialized"}`,
+    });
+    if (fallback.kind !== "host") return refusal(fallback.kind === "invalid" ? fallback.reason : "host fallback is not eligible");
+    return runOnHost(id, fallback, params, signal, onUpdate, ctx, activeConfig);
+  };
+
   pi.registerTool({
     ...baseBash,
     parameters: bashSchema,
@@ -534,8 +610,9 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       scratchpad
         ? `Write temporary files under ${scratchpad.dir} (also ${SCRATCH_ENV}); it is writable inside the sandbox and removed when the session ends.`
         : "Write temporary files inside the project; paths outside it may need an exception.",
-      "When a command fails because of the sandbox, re-run the same call with `sandbox_permissions: \"with_additional_permissions\"` plus `additional_permissions.file_system.{read,write}` and a `justification` (widened for that command only), or `sandbox_permissions: \"require_escalated\"` when it must run on the host (host credentials, host services). `prefix_rule` may propose a narrow standing rule such as [\"git\", \"push\"].",
-      "Local git work (status, diff, log, commit, branch, merge, rebase, stash) runs sandboxed; only network git that authenticates with a remote (clone, fetch, pull, push, ls-remote, submodule --remote) and gh/ssh cannot. For those, request a `command` exception for the exact command line instead of retrying, and never ask for read access to gh's config or ~/.ssh — permanently denied.",
+      "When a command fails because of the sandbox, re-run the same bash call with the request attached: `sandbox_permissions: \"with_additional_permissions\"`, `additional_permissions.file_system.{read,write}`, and a `justification` (widened for that command only), or `sandbox_permissions: \"require_escalated\"` when it must run on the host (host credentials, host services). `prefix_rule` may propose a narrow standing rule such as [\"git\", \"push\"], but only the user can save it.",
+      "There is no separate exception tool: network destinations are asked per connection by the proxy, and a path or host exception belongs to the bash call that needs it.",
+      "Local git work (status, diff, log, commit, branch, merge, rebase, stash) runs sandboxed; only network git that authenticates with a remote (clone, fetch, pull, push, ls-remote, submodule --remote) and gh/ssh cannot. For those, re-run with `sandbox_permissions: \"require_escalated\"` and a `justification`, and never ask for read access to gh's config or ~/.ssh — permanently denied.",
     ],
     renderResult(result, options, theme, renderContext) {
       const displayResult = {
@@ -547,142 +624,16 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       };
       return baseBash.renderResult!(displayResult, options, theme, renderContext);
     },
-    async execute(id, params: BashParams, signal, onUpdate, ctx) {
-      currentContext = ctx;
-      const input = { command: params.command, timeout: params.timeout };
-      const local = localTool(ctx.cwd);
-
-      if (Boolean(pi.getFlag("no-sandbox"))) {
-        return local.execute(id, input, signal, onUpdate, ctx);
-      }
-      if (configError) throw new Error(`Sandbox configuration is invalid: ${configError}`);
-      if (!config) throw new Error("Sandbox is not initialized yet; retry after session start");
-      if (!sessionEnabled) {
-        return local.execute(id, input, signal, onUpdate, ctx);
-      }
-
-      if (isCommandExcluded(params.command, config.excludedCommands)) {
-        return local.execute(id, input, signal, onUpdate, ctx);
-      }
-
-      // Guardian-approved host execution: exact command only, consumed here, so a
-      // granted `git push` can never authorise `git push; something-else`.
-      if (hostGrants.consume(params.command)) {
-        return local.execute(id, input, signal, onUpdate, ctx);
-      }
-
-      const runOutsideSandbox = async (reason: string, prefixRule?: string) => {
-        if (!config?.allowUnsandboxedCommands) throw new Error("Unsandboxed commands are disabled by sandbox policy");
-        const brokerDecision = await decideSandboxException({
-          surface: "command",
-          target: params.command,
-          scope: "once",
-          origin: "tool",
-          reason,
-          command: params.command,
-          cwd: ctx.cwd,
-        });
-        if (brokerDecision.kind === "deny") {
-          throw new Error(`Sandbox exception denied: ${brokerDecision.reason}`);
-        }
-        if (brokerDecision.kind === "defer") {
-          const human = await prompts.requestUnsandboxed(params.command, persistStandingRule, prefixRule);
-          if (human === "deny") throw new Error("User denied running this command outside the sandbox");
-          if (human === "always") await applySessionGrant(ctx, "command", params.command);
-          return local.execute(id, input, signal, onUpdate, ctx);
-        }
-        if (brokerDecision.scope === "session") await applySessionGrant(ctx, "command", params.command);
-        // The reviewer already allowed it, but a proposed prefix rule still needs
-        // the human: standing permissions are the user's decision, and guardian
-        // owns the project policy file.
-        if (prefixRule) await offerStandingRule(ctx, prefixRule);
-        return local.execute(id, input, signal, onUpdate, ctx);
-      };
-
-      const escalation = planInlineEscalation(params);
-      if (escalation.kind === "invalid") {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Sandbox escalation request rejected: ${escalation.reason}. The command did not run.`,
-            },
-          ],
-          details: { refusal: escalation.reason },
-        };
-      }
-      if (escalation.kind === "host") {
-        return runOutsideSandbox(escalation.justification, escalation.prefixRule);
-      }
-      if (escalation.kind === "scoped") {
-        // Widen the sandbox for this one command, run it inside, then take the
-        // widening back out — no request round trip, nothing left behind.
-        const applied: Array<{ surface: SandboxSurface; target: string }> = [];
-        const preexisting = escalation.targets.filter((entry) =>
-          hasSessionException(sessionConfig as SessionLayer, entry.surface, entry.target),
-        );
-        const rollback = async () => {
-          const revoke = applied.filter((entry) => !preexisting.some((kept) => kept.surface === entry.surface && kept.target === entry.target));
-          if (revoke.length === 0) return;
-          for (const entry of revoke) {
-            sessionConfig = withoutSessionException(sessionConfig as SessionLayer, entry.surface, entry.target) as typeof sessionConfig;
-          }
-          await reloadConfig(ctx, false);
-        };
-        const refuse = async (reason: string) => {
-          await rollback();
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Sandbox escalation refused (${reason}). The command did not run; do not retry it or rephrase the request.`,
-              },
-            ],
-            details: { reason },
-          };
-        };
-        for (const entry of escalation.targets) {
-          const decision = await decideSandboxException({
-            surface: entry.surface,
-            target: entry.target,
-            scope: "session",
-            origin: "tool",
-            reason: escalation.justification,
-            cwd: ctx.cwd,
-          });
-          if (decision.kind === "deny") return refuse(decision.reason);
-          if (decision.kind === "defer") {
-            const human = await askHumanForException(ctx, entry.surface, entry.target, escalation.justification);
-            if (human.kind !== "allow") return refuse(human.reason ?? "the user declined");
-          }
-          const granted = await applySessionGrant(ctx, entry.surface, entry.target);
-          if (!granted.ok) return refuse(granted.reason);
-          applied.push(entry);
-        }
+    async execute(id, params, signal, onUpdate, ctx) {
+      return executions.run(async () => {
+        currentContext = ctx;
+        executionSignal = signal;
         try {
-          const result = await sandboxedTool(ctx.cwd).execute(id, input, signal, onUpdate, ctx);
-          return withTrapHint(result, resultText(result), { cwd: ctx.cwd, scratchDir: scratchpad?.dir });
+          return await dispatch(id, params, signal, onUpdate, ctx);
         } finally {
-          await rollback();
+          executionSignal = undefined;
         }
-      }
-
-      if (params.dangerouslyDisableSandbox) {
-        return runOutsideSandbox("Model requested an unsandboxed retry via dangerouslyDisableSandbox.");
-      }
-
-      if (controller.canRunSandboxed()) {
-        const sandboxedResult = await sandboxedTool(ctx.cwd).execute(id, input, signal, onUpdate, ctx);
-        // A denied command names the exact path; tell the model how to ask for it.
-        return withTrapHint(sandboxedResult, resultText(sandboxedResult), {
-          cwd: ctx.cwd,
-          scratchDir: scratchpad?.dir,
-        });
-      }
-      if (config.failIfUnavailable) {
-        throw new Error(`Sandbox required but unavailable: ${controller.getError() ?? "not initialized"}`);
-      }
-      return local.execute(id, input, signal, onUpdate, ctx);
+      });
     },
   });
 
@@ -708,7 +659,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       .join("\n\n");
   });
 
-  pi.on("user_bash", (event) => {
+  pi.on("user_bash", (event, ctx) => {
     if (Boolean(pi.getFlag("no-sandbox"))) return;
     if (!sessionStarted) {
       return {
@@ -731,13 +682,26 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       };
     }
     if (!config || !sessionEnabled) return;
-    if (isCommandExcluded(event.command, config.excludedCommands)) return;
     if (controller.canRunSandboxed()) {
+      // A human's own command must not run while a model command holds a
+      // temporary policy in the SRT singleton either.
+      const operations = createSandboxedBashOperations();
       return {
-        operations: createSandboxedBashOperations(),
+        operations: {
+          exec: (command, cwd, options) => executions.run(async () => {
+            currentContext = ctx;
+            executionSignal = options.signal;
+            try {
+              if (options.signal?.aborted) throw new Error("Command cancelled before execution");
+              return await operations.exec(command, cwd, options);
+            } finally {
+              executionSignal = undefined;
+            }
+          }),
+        },
       };
     }
-    if (config.failIfUnavailable) {
+    if (config.failIfUnavailable || !config.allowUnsandboxedCommands) {
       return {
         result: {
           output: `Sandbox required but unavailable: ${controller.getError() ?? "not initialized"}`,
@@ -764,25 +728,17 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     };
   };
 
+  // Native file tools always read the baseline policy. A command-scoped grant
+  // lives only in the SRT runtime for the duration of one serialized bash call,
+  // so `write`/`edit`/`read` can never observe another execution's transient
+  // widening.
   registerFileGate(pi, () => {
     const cwd = currentContext?.cwd ?? process.cwd();
     if (!config) return fallbackGatePolicy(cwd);
-    const filesystem = controller.canRunSandboxed()
-      ? (() => {
-          const read = RuntimeSandboxManager.getFsReadConfig();
-          const write = RuntimeSandboxManager.getFsWriteConfig();
-          return {
-            denyRead: read.denyOnly,
-            allowRead: read.allowWithinDeny ?? [],
-            allowWrite: write.allowOnly,
-            denyWrite: write.denyWithinAllow,
-          };
-        })()
-      : config.runtime.filesystem;
     return {
       cwd,
       policy: createFilePolicy({
-        filesystem,
+        filesystem: config.runtime.filesystem,
         credentialFiles: config.runtime.credentials?.files,
         mandatoryDenyWrite: config.hardening.mandatoryDenyWrite,
       }),
@@ -790,145 +746,15 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     };
   });
 
-  pi.registerTool({
-    name: "request_sandbox_exception",
-    label: "Request sandbox exception",
-    description:
-      "Ask for permission to do one specific thing the sandbox blocks: an exact command, a host:port, or an absolute path. One target per call. A `command` exception runs that exact command on the host (for remote git operations such as push/clone/pull); it must be a single plain command with no chaining, redirection, or interpreter. Guardian reviews the request against the conversation, and the user decides when guardian defers. Scratch files belong in PI_SANDBOX_SCRATCH and need no exception.",
-    parameters: Type.Object({
-      surface: Type.Union([
-        Type.Literal("command"),
-        Type.Literal("network"),
-        Type.Literal("read"),
-        Type.Literal("write"),
-      ]),
-      target: Type.String({
-        description: "Exact command, host:port, or absolute path. No wildcards.",
-      }),
-      scope: Type.Union([Type.Literal("once"), Type.Literal("session")]),
-      reason: Type.String({
-        description: "Why this exception is needed for the user's current task.",
-      }),
-    }),
-    async execute(id, params, _signal, _onUpdate, ctx) {
-      currentContext = ctx;
-      const surface = params.surface as SandboxSurface;
-      const scope = params.scope as SandboxScope;
-      const decision = await decideSandboxException({
-        surface,
-        target: params.target,
-        scope,
-        reason: params.reason,
-        origin: "tool",
-        cwd: ctx.cwd,
-      });
-      if (decision.kind === "deny") {
-        return {
-          content: [{ type: "text" as const, text: `Sandbox exception denied. ${decision.reason}` }],
-          details: { decision },
-        };
-      }
-      let human: HumanExceptionDecision | undefined;
-      if (decision.kind === "defer") {
-        human = await askHumanForException(ctx, surface, params.target, params.reason);
-        if (human.kind !== "allow") {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `The user did not allow this sandbox exception${human.reason ? ` (${human.reason})` : ""}. Do not retry it or rephrase it; ask how to proceed if the step matters.`,
-              },
-            ],
-            details: { decision, refusal: human.reason },
-          };
-        }
-      }
-      const grantedScope: SandboxScope = decision.kind === "allow" ? decision.scope : (human?.kind === "allow" ? human.scope : "session");
-      if (surface === "command") {
-        // Host execution, exact match only. Refuse shapes that could run a
-        // second command before spending a review on them.
-        const refusal = hostCommandRefusal(params.target);
-        if (refusal) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Sandbox exception refused: ${refusal}. Ask for one plain command (for example \`git push -u origin main\`) without chaining, redirection, or an interpreter.`,
-              },
-            ],
-            details: { refusal },
-          };
-        }
-        hostGrants.grant(params.target, grantedScope);
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Host execution granted (${grantedScope}) for exactly: ${params.target.trim()}. Run that command unchanged as the next bash call; it will not run inside the sandbox. ${decision.review.rationale}`,
-            },
-          ],
-          details: { decision },
-        };
-      }
-
-      const preexisting = hasSessionException(sessionConfig as SessionLayer, surface, params.target);
-      if (grantedScope === "once" && surface === "network") {
-        // A one-shot connection grant: the proxy asks again for the next one.
-        pendingNetworkOnce.add(params.target);
-      } else {
-        const applied = await applySessionGrant(ctx, surface, params.target);
-        if (!applied.ok) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Sandbox exception refused: ${applied.reason}. Nothing was granted and the sandbox config is unchanged; pick one target the runtime accepts (a bare host, host:port, or an absolute path) instead of retrying this shape.`,
-              },
-            ],
-            details: { decision, refusal: applied.reason },
-          };
-        }
-        // Expiry is keyed to the tool-call boundary: the grant survives the call
-        // that granted it, is usable by the next tool call (bash, write, edit,
-        // read...), and is removed once that call returns. A target that already
-        // had a session grant stays granted.
-        if (grantedScope === "once" && !preexisting) {
-          pendingOnceGrants.push({ surface, target: params.target, grantedByToolCallId: id });
-        }
-      }
-      const rationale = decision.review.rationale;
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Sandbox exception granted (${grantedScope}): ${surface} ${params.target}. ${rationale} Re-run the command now; it will run inside the same sandbox with this grant.`,
-          },
-        ],
-        details: { decision },
-      };
-    },
-  });
-
-  pi.on("tool_result", async (event, ctx) => {
-    // `once` grants live for exactly one tool call: not the call that granted
-    // them, the next one. Expiring here (not only after sandboxed bash) covers
-    // write/edit/read and the excluded/unsandboxed bash paths too.
-    const expiring = pendingOnceGrants.filter((grant) => grant.grantedByToolCallId !== event.toolCallId);
-    pendingOnceGrants = pendingOnceGrants.filter((grant) => grant.grantedByToolCallId === event.toolCallId);
-    pendingNetworkOnce.clear();
-    if (expiring.length === 0) return;
-    for (const grant of expiring) {
-      sessionConfig = withoutSessionException(sessionConfig as SessionLayer, grant.surface, grant.target) as typeof sessionConfig;
-    }
-    if (ctx) await reloadConfig(ctx, false);
-  });
-
   pi.on("session_start", async (_event, ctx) => {
     sessionStarted = false;
+    humanChannel.shutdown();
+    await executions.close();
+    executions = new ExecutionQueue();
     sessionEnabledOverride = undefined;
     currentContext = ctx;
     ctx.ui.setStatus("sandbox", undefined);
-    prompts = new PromptCoordinator(() => currentContext);
+    humanChannel = new HumanChannel(() => currentContext, policyPath);
     // Scratch: sweep leftovers from crashed sessions, then create this one's.
     try {
       await sweepScratchpads();
@@ -943,7 +769,8 @@ export default function sandboxExtension(pi: ExtensionAPI) {
 
   pi.on("session_shutdown", async () => {
     currentContext?.ui.setStatus("sandbox", undefined);
-    prompts.shutdown();
+    humanChannel.shutdown();
+    await executions.close();
     violations.stop();
     currentContext = undefined;
     config = undefined;
@@ -951,9 +778,6 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     sessionEnabledOverride = undefined;
     sessionStarted = false;
     await controller.reset();
-    pendingOnceGrants = [];
-    pendingNetworkOnce.clear();
-    hostGrants.clear();
     await scratchpad?.dispose();
     scratchpad = undefined;
   });
@@ -983,7 +807,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
           },
           toggle: async (id: SandboxSettingId) => {
             if (id === "mode") {
-              await setSessionSandboxEnabled(ctx, !sessionEnabled);
+              await executions.run(() => setSessionSandboxEnabled(ctx, !sessionEnabled));
               return;
             }
             const key = SETTING_CONFIG_KEYS[id];
@@ -996,7 +820,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
           add: (kind: RuleKind, value: string) => changeRule(ctx, kind, value, true),
           remove: (kind: RuleKind, value: string) => changeRule(ctx, kind, value, false),
           editRaw: async () => {
-            if (!await ensureSettingsProjectApproved(ctx)) return;
+            if (!await executions.run(() => ensureSettingsProjectApproved(ctx))) return;
             if (!config) throw new Error("No valid sandbox configuration");
             const scope = settingsScope;
             const initial = scope === "session" ? sessionConfig : config.layers[scope];
@@ -1024,12 +848,12 @@ export default function sandboxExtension(pi: ExtensionAPI) {
         return;
       }
       if (args === "off") {
-        await setSessionSandboxEnabled(ctx, false);
+        await executions.run(() => setSessionSandboxEnabled(ctx, false));
         ctx.ui.notify("Sandbox disabled for this session; mandatory policy-file protection remains active", "warning");
         return;
       }
       if (args === "on") {
-        await setSessionSandboxEnabled(ctx, true);
+        await executions.run(() => setSessionSandboxEnabled(ctx, true));
         return;
       }
       if (args === "violations") {
@@ -1041,30 +865,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
         }
         return;
       }
-      const match = args.match(/^(exclude|unexclude)\s+([\s\S]+)$/);
-      if (match) {
-        if (!config) { ctx.ui.notify("No valid sandbox configuration", "error"); return; }
-        const activeConfig = config;
-        const add = match[1] === "exclude";
-        const pattern = match[2]!.trim();
-        await applyAfterPersist(
-          () => updateProjectConfig(activeConfig.projectConfigPath, ctx.cwd, (raw) => setExcludedCommand(raw, pattern, add)),
-          () => {
-            if (add) {
-              overlay.excludedCommands.add(pattern);
-              overlay.unexcludedCommands.delete(pattern);
-            } else {
-              overlay.unexcludedCommands.add(pattern);
-              overlay.excludedCommands.delete(pattern);
-            }
-          },
-        );
-        notifyUntrustedPersist(ctx);
-        await reloadConfig(ctx, false);
-        ctx.ui.notify(`${add ? "Excluded" : "Removed exclusion"}: ${pattern}`, "info");
-        return;
-      }
-      ctx.ui.notify("Usage: /sandbox [on|off|violations|exclude <pattern>|unexclude <pattern>]", "warning");
+      ctx.ui.notify("Usage: /sandbox [on|off|violations]", "warning");
     },
   });
 }

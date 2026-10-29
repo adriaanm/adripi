@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	decideSandboxException,
 	getGuardianBroker,
+	projectPolicyRule,
 	publishGuardianBrokerForTest,
-	withSessionException,
+	withScopedPaths,
 	type SandboxBrokerService,
-	type SessionLayer,
 } from "../src/broker.ts";
 
 const disposers: Array<() => void> = [];
@@ -37,14 +37,14 @@ describe("broker slot", () => {
 });
 
 describe("decideSandboxException", () => {
-	it("defers when no broker is published", async () => {
+	it("fails closed when no broker is published", async () => {
 		const decision = await decideSandboxException({
 			surface: "write",
 			target: "/tmp/x",
 			scope: "once",
 			cwd: "/work",
 		});
-		expect(decision.kind).toBe("defer");
+		expect(decision.kind).toBe("deny");
 	});
 
 	it("passes allow/deny through and turns a throwing broker into a denial", async () => {
@@ -77,7 +77,7 @@ describe("decideSandboxException", () => {
 		await decideSandboxException({
 			surface: "network",
 			target: "registry.npmjs.org:443",
-			scope: "session",
+			scope: "once",
 			origin: "trap",
 			violation: "not allowlisted",
 			cwd: "/work",
@@ -86,118 +86,45 @@ describe("decideSandboxException", () => {
 			origin: "trap",
 			surface: "network",
 			target: "registry.npmjs.org:443",
-			scope: "session",
+			scope: "once",
 			violation: "not allowlisted",
 			cwd: "/work",
 		});
 	});
 });
 
-describe("withSessionException", () => {
-	const base: SessionLayer = {
-		filesystem: { allowWrite: ["."] },
-		network: { allowedDomains: ["example.com"] },
-		excludedCommands: ["make"],
-	};
-
-	it("maps each surface onto the right session-layer key", () => {
-		const write = withSessionException(base, "write", "/home/u/.gradle");
-		expect(write.filesystem?.allowWrite).toEqual([".", "/home/u/.gradle"]);
-		expect(write.filesystem?.allowRead).toBeUndefined();
-
-		const read = withSessionException(base, "read", "/usr/share/x");
-		expect(read.filesystem?.allowRead).toEqual(["/usr/share/x"]);
-
-		const network = withSessionException(base, "network", "repo.maven.apache.org:443");
-		expect(network.network?.allowedDomains).toEqual(["example.com", "repo.maven.apache.org:443"]);
-
-		const command = withSessionException(base, "command", "xcodebuild -resolvePackageDependencies");
-		expect(command.excludedCommands).toEqual(["make", "xcodebuild -resolvePackageDependencies"]);
-	});
-
-	it("never mutates the input layer and never duplicates entries", () => {
-		const once = withSessionException(base, "write", "/home/u/.gradle");
-		const twice = withSessionException(once, "write", "/home/u/.gradle");
-		expect(twice.filesystem?.allowWrite).toEqual([".", "/home/u/.gradle"]);
-		expect(base.filesystem?.allowWrite).toEqual(["."]);
-		expect(base.network?.allowedDomains).toEqual(["example.com"]);
-		expect(base.excludedCommands).toEqual(["make"]);
-	});
-});
-
-describe("planExceptionOutcome", () => {
-	it("maps allow to a grant, deny to a message, defer to the human", async () => {
-		const { planExceptionOutcome } = await import("../src/broker.ts");
-		expect(
-			planExceptionOutcome({ kind: "allow", scope: "session", review: { rationale: "ok", source: "reviewer" } }),
-		).toEqual({ action: "grant", scope: "session" });
-		expect(
-			planExceptionOutcome({ kind: "deny", reason: "no", review: { rationale: "no", source: "reviewer" } }),
-		).toEqual({ action: "deny", message: "no" });
-		expect(planExceptionOutcome({ kind: "defer", review: { rationale: "unsure", source: "rule" } })).toEqual({
-			action: "ask-human",
+describe("scoped path layer", () => {
+	it("adds paths to a copy without mutating the baseline session layer", () => {
+		const baseline = {
+			network: { allowedDomains: ["npmjs.org"] },
+			filesystem: { allowRead: ["/data"], allowWrite: ["."] },
+		};
+		const scoped = withScopedPaths(baseline, [
+			{ surface: "write", target: "/home/u/.gradle" },
+			{ surface: "read", target: "/usr/share/x" },
+		]);
+		expect(scoped).toEqual({
+			network: { allowedDomains: ["npmjs.org"] },
+			filesystem: {
+				allowRead: ["/data", "/usr/share/x"],
+				allowWrite: [".", "/home/u/.gradle"],
+			},
 		});
+		// The baseline is untouched, so native file tools and later commands
+		// never see the transient grant.
+		expect(baseline.filesystem).toEqual({ allowRead: ["/data"], allowWrite: ["."] });
+	});
+
+	it("does not introduce network or command grants", () => {
+		const scoped = withScopedPaths({}, [{ surface: "read", target: "/x" }]);
+		expect(scoped).toEqual({ filesystem: { allowRead: ["/x"] } });
 	});
 });
 
-describe("withoutSessionException", () => {
-	it("removes a grant and drops empty containers", async () => {
-		const { withoutSessionException } = await import("../src/broker.ts");
-		const layer = {
-			filesystem: { allowWrite: ["."], allowRead: ["."] },
-			network: { allowedDomains: ["example.com"] },
-			excludedCommands: ["make"],
-		};
-		const removedWrite = withoutSessionException(layer, "write", ".");
-		expect(removedWrite.filesystem?.allowWrite).toBeUndefined();
-		expect(removedWrite.filesystem?.allowRead).toEqual(["."]);
-
-		const removedNetwork = withoutSessionException(layer, "network", "example.com");
-		expect(removedNetwork.network?.allowedDomains).toBeUndefined();
-
-		const removedCommand = withoutSessionException(layer, "command", "make");
-		expect(removedCommand.excludedCommands).toBeUndefined();
-
-		// Unrelated targets are left alone, and the input is not mutated.
-		expect(withoutSessionException(layer, "write", "/elsewhere").filesystem?.allowWrite).toEqual(["."]);
-		expect(layer.filesystem?.allowWrite).toEqual(["."]);
-	});
-});
-
-describe("hasSessionException", () => {
-	it("reports membership per surface", async () => {
-		const { hasSessionException } = await import("../src/broker.ts");
-		const layer = {
-			filesystem: { allowWrite: ["/a"], allowRead: ["/b"] },
-			network: { allowedDomains: ["h:443"] },
-			excludedCommands: ["make"],
-		};
-		expect(hasSessionException(layer, "write", "/a")).toBe(true);
-		expect(hasSessionException(layer, "write", "/b")).toBe(false);
-		expect(hasSessionException(layer, "read", "/b")).toBe(true);
-		expect(hasSessionException(layer, "network", "h:443")).toBe(true);
-		expect(hasSessionException(layer, "command", "make")).toBe(true);
-		expect(hasSessionException(layer, "command", "other")).toBe(false);
-	});
-});
-
-describe("config-layer network targets", () => {
-	it("stores an unknown-port grant as the bare host the schema accepts", async () => {
-		const { configNetworkTarget } = await import("../src/broker.ts");
-		expect(configNetworkTarget("example.com:*")).toBe("example.com");
-		expect(configNetworkTarget("example.com:443")).toBe("example.com:443");
-		expect(configNetworkTarget("[::1]:*")).toBe("[::1]");
-		expect(configNetworkTarget("[::1]:443")).toBe("[::1]:443");
-
-		const layer = withSessionException({}, "network", "example.com:*");
-		expect(layer.network?.allowedDomains).toEqual(["example.com"]);
-	});
-
-	it("finds and removes `host:*` grants through their config spelling", async () => {
-		const { hasSessionException, withoutSessionException } = await import("../src/broker.ts");
-		const layer = withSessionException({}, "network", "api.example.com:*");
-		expect(hasSessionException(layer, "network", "api.example.com:*")).toBe(true);
-		expect(hasSessionException(layer, "network", "api.example.com")).toBe(true);
-		expect(withoutSessionException(layer, "network", "api.example.com:*").network?.allowedDomains).toBeUndefined();
+describe("project policy rule text", () => {
+	it("uses guardian's <surface>:<pattern> spelling", () => {
+		expect(projectPolicyRule("command", "git push:*")).toBe("command:git push:*");
+		expect(projectPolicyRule("network", "example.test")).toBe("network:example.test");
+		expect(projectPolicyRule("read", "/data")).toBe("read:/data");
 	});
 });

@@ -176,8 +176,14 @@ reviewer and pi-review. They use the same stored credential.
 The OS boundary is the vendored pi-sbx fork. Project writes are allowed; the
 hidden temp root is not, and each session gets a private scratch directory
 (PI_SANDBOX_SCRATCH). Paths outside the project need a reviewed exception: the
-agent calls request_sandbox_exception, guardian decides, and you are asked when
-guardian defers. See config/README.md and docs/plan-sandbox-broker.md.
+agent attaches sandbox_permissions and justification to the same bash call;
+scoped paths use additional_permissions.file_system.{read,write}, and host-only
+commands use require_escalated. Guardian decides; a real defer asks the human
+when UI is available, otherwise it fails closed. See config/README.md.
+
+Standing command exceptions belong in .pi/guardian.json, not excludedCommands.
+Nonempty legacy excludedCommands lists now fail closed: inspect kept live configs
+and migrate them by hand before restarting. The installer does not migrate policy.
 
 This install also grants THIS repository write access to the agent dir
 (agentDirWriteProjects in both configs), so sessions here can maintain Pi's and

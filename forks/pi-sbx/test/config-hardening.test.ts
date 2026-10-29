@@ -9,7 +9,6 @@ import {
   getInheritedConfigArray,
   loadConfig,
   mutateConfigArrayValue,
-  setExcludedCommand,
   updateGlobalConfig,
   updateProjectConfig,
 } from "../src/config.ts";
@@ -23,13 +22,12 @@ describe("config and hardening", () => {
     mkdirSync(join(root, ".pi"));
     mkdirSync(join(agent, "extensions"), { recursive: true });
     writeFileSync(join(agent, "extensions", "sandbox.json"), JSON.stringify({ network: { allowedDomains: ["global.test"], deniedDomains: [] } }));
-    writeFileSync(join(root, ".pi", "sandbox.json"), JSON.stringify({ network: { allowedDomains: ["project.test"] }, excludedCommands: ["docker:*"] }));
+    writeFileSync(join(root, ".pi", "sandbox.json"), JSON.stringify({ network: { allowedDomains: ["project.test"] } }));
 
     const config = loadConfig({ cwd: root, agentDir: agent, configDirName: ".pi", allowProjectConfig: true });
     // The global file owns its policy (it replaces the built-in defaults), but
     // the trusted project layer adds to it instead of replacing it.
     expect(config.runtime.network.allowedDomains).toEqual(["global.test", "project.test"]);
-    expect(config.excludedCommands).toEqual(["docker:*"]);
     // Only the credential file is read-denied; the rest of the agent dir is data.
     expect(config.runtime.filesystem.denyRead).not.toContain(agent);
     expect(config.runtime.filesystem.denyRead).toContain(join(agent, "auth.json"));
@@ -81,11 +79,11 @@ describe("config and hardening", () => {
     expect(config.warnings.some((warning) => warning.includes("Ignored untrusted"))).toBe(true);
   });
 
-  it("atomically updates project exclusions and rejects a symlinked config directory", async () => {
+  it("atomically updates project configuration and rejects a symlinked config directory", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-sbx-write-"));
     const path = join(root, ".pi", "sandbox.json");
-    await updateProjectConfig(path, root, (raw) => setExcludedCommand(raw, "docker:*", true));
-    expect(JSON.parse(readFileSync(path, "utf8")).excludedCommands).toEqual(["docker:*"]);
+    await updateProjectConfig(path, root, (raw) => mutateConfigArrayValue(raw, "network", "allowedDomains", [], "new.test", true));
+    expect(JSON.parse(readFileSync(path, "utf8")).network.allowedDomains).toEqual(["new.test"]);
 
     const unsafeRoot = mkdtempSync(join(tmpdir(), "pi-sbx-unsafe-"));
     const outside = mkdtempSync(join(tmpdir(), "pi-sbx-config-out-"));
@@ -155,20 +153,19 @@ describe("session layer stacking", () => {
     return { root, agent };
   };
 
-  it("adds session grants to the inherited allowlists instead of replacing them", async () => {
-    const { withSessionException } = await import("../src/broker.ts");
+  it("adds a command-scoped path layer to the inherited allowlists instead of replacing them", async () => {
+    const { withScopedPaths } = await import("../src/broker.ts");
     const { root, agent } = setup({
       network: { allowedDomains: ["npmjs.org", "*.npmjs.org"] },
       filesystem: { allowRead: ["/data"], allowWrite: ["."] },
     });
-    const sessionConfig = withSessionException(
-      withSessionException(withSessionException({}, "network", "repo.maven.apache.org:443"), "read", "/usr/share/x"),
-      "write",
-      "/home/u/.gradle",
-    );
+    const sessionConfig = withScopedPaths({}, [
+      { surface: "read", target: "/usr/share/x" },
+      { surface: "write", target: "/home/u/.gradle" },
+    ]);
     const config = loadConfig({ cwd: root, agentDir: agent, configDirName: ".pi", allowProjectConfig: false, sessionConfig: sessionConfig as unknown as JsonObject });
 
-    for (const host of ["npmjs.org", "*.npmjs.org", "repo.maven.apache.org:443"]) {
+    for (const host of ["npmjs.org", "*.npmjs.org"]) {
       expect(config.runtime.network.allowedDomains).toContain(host);
     }
     expect(config.runtime.filesystem.allowRead).toContain("/data");
@@ -177,13 +174,13 @@ describe("session layer stacking", () => {
     expect(config.runtime.filesystem.allowWrite).toContain("/home/u/.gradle");
   });
 
-  it("keeps an any-port network grant loadable (regression: host:* crashed the sandbox)", async () => {
-    const { withSessionException } = await import("../src/broker.ts");
-    const { root, agent } = setup({ network: { allowedDomains: ["npmjs.org"] } });
-    const sessionConfig = withSessionException({}, "network", "registry.example.com:*");
-    const config = loadConfig({ cwd: root, agentDir: agent, configDirName: ".pi", allowProjectConfig: false, sessionConfig: sessionConfig as unknown as JsonObject });
-    expect(config.runtime.network.allowedDomains).toContain("npmjs.org");
-    expect(config.runtime.network.allowedDomains).toContain("registry.example.com");
+  it("fails closed on a nonempty excludedCommands with a migration instruction", async () => {
+    const { root, agent } = setup({ excludedCommands: ["docker:*"] });
+    expect(() => loadConfig({ cwd: root, agentDir: agent, configDirName: ".pi", allowProjectConfig: false }))
+      .toThrow(/excludedCommands is retired[\s\S]*guardian\.json[\s\S]*command:<prefix>:\*/);
+    // An explicitly empty list is not a host-execution path and stays accepted.
+    const { root: emptyRoot, agent: emptyAgent } = setup({ excludedCommands: [] });
+    expect(() => loadConfig({ cwd: emptyRoot, agentDir: emptyAgent, configDirName: ".pi", allowProjectConfig: false })).not.toThrow();
   });
 
   it("does not let a session layer clear inherited entries by naming an empty list", async () => {
@@ -212,7 +209,6 @@ describe("project allow lists", () => {
     writeFileSync(join(root, ".pi", "sandbox.json"), JSON.stringify({
       network: { allowedDomains: ["127.0.0.1:5555"], allowUnixSockets: ["/tmp/sgo-501", "/private/tmp/sgo-501"], allowLocalBinding: true },
       filesystem: { allowRead: ["/tmp/sgo-501"], allowWrite: ["/tmp/sgo-501"] },
-      excludedCommands: ["just ios-device-logs:*"],
     }));
 
     const config = loadConfig({ cwd: root, agentDir: agent, configDirName: ".pi", allowProjectConfig: true });
@@ -224,7 +220,6 @@ describe("project allow lists", () => {
     // The workspace grant must survive a project write grant, or every write
     // inside the repo would need an exception.
     expect(config.runtime.filesystem.allowWrite).toEqual([".", "/tmp/sgo-501"]);
-    expect(config.excludedCommands).toEqual(["just ios-device-logs:*"]);
   });
 });
 

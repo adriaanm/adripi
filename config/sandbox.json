@@ -2,7 +2,6 @@
   "enabled": true,
   "failIfUnavailable": true,
   "allowUnsandboxedCommands": true,
-  "excludedCommands": [],
   "network": {
     "allowedDomains": [
       "npmjs.org",

@@ -13,8 +13,10 @@ describe("sandbox guidance", () => {
     expect(text).toContain('sandbox_permissions: "require_escalated"');
     expect(text).toContain('prefix_rule: ["git", "push"]');
     expect(text).toContain("never a shell, interpreter, or rm");
-    // The bare request tool for destinations and paths.
-    expect(text).toContain("request_sandbox_exception({");
+    // One canonical API: no separate exception tool or legacy host flag.
+    expect(text).toContain("There is no separate exception tool");
+    expect(text).not.toContain("request_sandbox_exception");
+    expect(text).not.toContain("dangerouslyDisableSandbox");
     expect(text).toContain("/tmp/scratch-abc");
     expect(text).toContain(".pi/guardian.json");
   });
@@ -24,7 +26,7 @@ describe("sandbox guidance", () => {
     expect(text).toContain("A denial is final for that target");
     expect(text).toContain("Never reach the same effect another way");
     expect(text).toContain("$PI_SANDBOX_SCRATCH");
-    expect(text).not.toContain("project policy");
+    expect(text).not.toContain(".pi/guardian.json");
   });
 
   it("names the never-grantable credential stores", () => {

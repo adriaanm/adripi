@@ -26,7 +26,11 @@ Allowed network domains are potential exfiltration channels. The defaults favor 
 pi install npm:pi-sbx
 ```
 
-For local development, run `npm install` and start Pi with `pi -e .`. Remove or disable any other sandbox extension first; multiple extensions overriding `bash` or registering `--no-sandbox` conflict.
+This vendored fork is deployed with adripi's `install.sh` alongside Guardian;
+`pi install npm:pi-sbx` alone installs upstream, not these changes. See
+[VENDOR.md](VENDOR.md) and the [bundle contract](../../docs/product.md).
+For local development, install dependencies and load this fork with Guardian.
+Remove other bash sandbox owners; multiple overrides conflict.
 
 ## Configuration
 
@@ -36,7 +40,9 @@ Configuration is merged in this order:
 2. `~/.pi/agent/extensions/sandbox.json`
 3. `<cwd>/.pi/sandbox.json`
 
-Nested objects merge; arrays replace the lower-priority array. Relative filesystem paths are resolved from the active session cwd. An existing configuration file with invalid JSON or schema is rejected rather than silently replaced by defaults.
+Nested objects merge. Allow lists for network hosts/sockets and filesystem
+reads/writes union above the global layer; other arrays and defaults → global
+replace. Relative paths use session cwd. Invalid JSON/schema fails closed.
 
 A project config is repository-controlled and may weaken policy. It is applied only when the project has already passed Pi project trust, when you approve it interactively, or when non-interactive mode uses `--trust-sandbox-config`.
 
@@ -45,7 +51,6 @@ A project config is repository-controlled and may weaken policy. It is applied o
   "enabled": true,
   "failIfUnavailable": true,
   "allowUnsandboxedCommands": true,
-  "excludedCommands": [],
   "environment": {
     "deny": ["MY_PRIVATE_TOKEN"]
   },
@@ -82,7 +87,10 @@ Use `denyWrite` instead when the goal is only to prevent modification. A write d
 
 ### Fail-closed behavior
 
-`failIfUnavailable` defaults to `true`. If the platform or dependencies cannot provide a sandbox, shell commands fail instead of silently running on the host. Set it to `false`, use `/sandbox off`, or start with `--no-sandbox` only when you intentionally accept host execution.
+`failIfUnavailable` defaults to `true`: unavailable sandbox means no execution.
+Setting it false permits only the same eligible, reviewed host path as explicit
+inline escalation, not automatic unsandboxed execution. `/sandbox off` and
+`--no-sandbox` are explicit unsafe human controls.
 
 Mandatory protection for Pi's agent directory, sandbox policy files, project Pi resources, and Git config/hooks remains active for built-in `write`/`edit` even when the session sandbox is off.
 
@@ -94,53 +102,46 @@ Credential files declared with either `deny` or `mask` mode are denied to Pi's b
 
 This is not an exhaustive secret detector. Ordinary environment variables remain available to support build tools.
 
-## Interactive approvals
+## Escalation and approvals
 
-Unknown network hosts show:
+The only model-facing API is on bash itself:
 
-- Allow once
-- Always allow the host in project config
-- Deny
+```ts
+{ command: "go build ./...", sandbox_permissions: "with_additional_permissions",
+  justification: "Use the required build cache?",
+  additional_permissions: { file_system: { write: ["~/.cache/go-build"] } } }
 
-Concurrent requests for the same host share one prompt. All sandbox prompts are serialized.
-
-The bash schema includes `dangerouslyDisableSandbox`. The model is instructed to use it only after explicit user direction or clear evidence of a sandbox-caused failure. Every request is denied in non-interactive mode and requires an interactive choice:
-
-- Run once
-- Always allow this exact command
-- Deny
-
-Set `allowUnsandboxedCommands: false` to disable this escape hatch.
-
-## Excluded commands
-
-`excludedCommands` is explicit pre-approval for host execution:
-
-```json
-{
-  "excludedCommands": [
-    "docker:*",
-    "exact command && approved companion"
-  ]
-}
+{ command: "git push origin main", sandbox_permissions: "require_escalated",
+  justification: "Publish the requested branch?", prefix_rule: ["git", "push"] }
 ```
 
-- A complete exact string approves that exact compound command.
-- `docker:*` matches `docker` and its arguments.
-- Other glob patterns use minimatch.
-- For broad patterns, **every** leaf of a compound command must match. `docker:*` does not exempt `docker ps && curl evil.example`.
-- Command substitutions, heredocs, process substitutions, malformed quoting, and other structures the conservative parser cannot verify remain sandboxed.
+All scoped targets are decided before installing a copied runtime profile for
+one serialized execution. Native file tools retain baseline policy. Baseline
+restores in `finally`; failed rollback blocks future execution. Host eligibility,
+host-enabled policy and prefix binding precede Guardian review. Host execution
+is full-host authority, not a credential jail.
 
-Exclusions are a convenience/pre-approval feature, not a separate security boundary.
+Unknown network hosts use the same Guardian contract per connection, with no
+allowlist mutation. One UI adapter serializes real defers and standing-save
+questions. Headless defer and missing/failed Guardian fail closed. No impossible
+nested call to model-only `contact_supervisor` is attempted.
+
+A human can approve saving a proposed narrow rule in Guardian's project policy.
+Guardian prepares a trusted snapshot before the prompt and refuses stale or
+unapproved policy on commit. There is no sandbox-policy fallback.
+
+`request_sandbox_exception`, `dangerouslyDisableSandbox`, grant stores and
+`excludedCommands` routes are retired. Nonempty legacy exclusion lists fail
+configuration closed with migration instructions. Use trusted Guardian
+`command:<prefix>:*` rules instead; plain bash remains sandboxed.
+`allowUnsandboxedCommands: false` disables model host execution.
 
 ## Commands and flags
 
-- `/sandbox` — open the interactive tabbed settings for sandbox mode, network, filesystem, command exclusions, denied environment variables, advanced options/raw JSON, and the complete effective config (show effective status outside TUI mode). Press `S` to choose session, global, or project scope before editing; mandatory hardening rules are read-only.
+- `/sandbox` — open the interactive tabbed settings for sandbox mode, network, filesystem, denied environment variables, advanced options/raw JSON, and the complete effective config (show effective status outside TUI mode). Press `S` to choose session, global, or project scope before editing; mandatory hardening rules are read-only.
 - `/sandbox on|off` — session-only toggle
-- `/reload` — reload Pi resources, including this extension and its sandbox configuration
+- Extension deployment requires a full Pi quit/restart; `/reload` alone is not proof that the old handlers were replaced
 - `/sandbox violations` — show recent captured violations
-- `/sandbox exclude <pattern>` — persist a project exclusion
-- `/sandbox unexclude <pattern>` — remove it
 - `--no-sandbox` — explicit process-level shell bypass
 - `--trust-sandbox-config` — allow project config in non-interactive mode
 

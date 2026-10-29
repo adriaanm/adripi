@@ -45,14 +45,30 @@ by this repo's own sessions.
 
 An exception is a reviewed decision, not a config edit:
 
-1. the agent calls `request_sandbox_exception` with one target (a command, a
-   `host:port`, or an absolute path) and a reason;
-2. `pi-guardian` reviews it against the conversation; credential stores, the Pi
-   agent directory, `.env`/key/pem writes and `.git/hooks` are hard-denied
-   before the reviewer runs;
-3. when guardian defers, you are asked ("Allow for this session" / "Deny");
-4. a grant applies for that command (`once`) or the session, in memory only —
-   nothing is persisted, and a restart starts from this profile again.
+1. The agent attaches the request to the **same bash call**: use
+   `sandbox_permissions: "with_additional_permissions"`, a `justification`, and
+   `additional_permissions.file_system.{read,write}` arrays of exact absolute or
+   `~/…` paths. Native file tools retain baseline policy; there is no separate
+   exception tool or session-grant window.
+2. Guardian validates and reviews every target before the runtime changes.
+   Credentials, secret writes and protected roots/aliases are denied by rules.
+   Missing or failed Guardian denies; only a real `defer` asks the human.
+3. The command runs inside the sandbox with a copied, execution-local profile.
+   Bash executions and runtime-setting changes serialize; file tools never see
+   transient paths. The baseline is restored on success, failure and cancellation.
+   A failed restore disables further execution rather than leaving a grant live.
+4. For host-only work use `sandbox_permissions: "require_escalated"` and a
+   `justification`. Policy, executable/shape and prefix checks precede broker
+   review. The reviewed string runs once on the host in that call; no token or
+   next-command grant is stored. Host execution is full-host authority.
+5. Unknown network destinations use the same decision contract per connection,
+   without modifying the allowlist. Numeric rules such as
+   `network:example.test:443` match only that port; bare hosts and `:*` mean all
+   ports. IPv6 targets must be bracketed.
+
+All surfaces use one serialized human UI adapter. A headless `defer` fails closed
+with instructions; it does not invoke model-only `contact_supervisor` through
+Pi's nested-tool API. Child approval transport is a remaining requirement.
 
 ## Permanent, per-project policy
 
@@ -66,18 +82,18 @@ file tools, so the agent cannot widen its own policy.
   a project entry adds a grant and never revokes a global one (otherwise
   "write /tmp/sgo-501" would drop the workspace and "add one host" would drop
   the package hosts). Deny lists and every other array keep replace semantics.
-  A session-scope grant follows the same rule.
+  Human session settings and a command-local scoped layer follow the same rule;
+  model-requested permissions do not mutate those session settings.
 - **Unix sockets.** `network.allowUnixSockets: ["/tmp/sgo-501"]` makes the
   runtime emit `network-bind` (bind/listen) *and* `network-outbound` (connect)
   rules for that directory, plus `system-socket AF_UNIX`; the directory also
   needs `allowRead`/`allowWrite` for its non-socket files. `allowLocalBinding`
   adds loopback TCP bind/inbound and connects to `localhost`.
-- **Host-only commands.** `excludedCommands: ["just ios-device-logs:*"]` runs a
-  matching command — and its whole process tree — on the host, unsandboxed.
-  The prefix matches the command start; arguments may follow, and a compound or
-  piped command line is not excluded. This is the permanent form of a
-  `command` exception: narrow, explicit, and chosen by the human who writes the
-  file.
+- **Host-only commands.** Use Guardian's `command:just ios-device-logs:*`
+  project rule (below). It pre-authorizes an explicitly requested host execution,
+  never reroutes a plain command automatically. `excludedCommands` is retired:
+  nonempty legacy lists fail configuration closed with migration instructions.
+  An empty legacy list remains harmless, but new templates omit it.
 
 To make a path permanently writable, add it to `filesystem.allowWrite` in
 `sandbox.json` yourself. For a network host, add it to
@@ -136,14 +152,18 @@ on an escalation (`prefix_rule: ["git", "push"]` → `command:git push:*`) you a
 asked once, "Save a standing permission?", and guardian appends it to this file
 and records trust for the new content. Nothing is written without that yes, and
 the command still has to request the exception each time — the rule skips the
-broker's decision, not the ordinary tool gate. **Known gap:** saving a rule can
-also trust pre-existing unapproved entries in that file; review its entire content
-before accepting persistence until [F5](../docs/review/recommendations.md#f5--p1-saving-a-narrow-standing-rule-can-approve-unrelated-policy)
-is repaired.
+broker's reviewer, not fixed restrictions or the ordinary tool gate. Guardian
+captures a trusted policy snapshot **before** offering to save the rule; a
+changed, newly appeared, invalid or unapproved file is refused rather than
+implicitly trusted. Symlinked policy files/directories are rejected; writes use
+an exclusive temporary file and atomic rename. Guardian trusts and applies only
+the returned bytes, never a post-write re-read. Separate processes are not
+locked: simultaneous external writers can still lose an update; this is not a
+hostile same-user filesystem-race defence.
 
 These rules pre-authorize the *exception*, not the sandbox: the agent still has
-to call `request_sandbox_exception` with `surface: "command"` and the exact
-command line, which then runs on the host with your credentials. A command run
+to attach `sandbox_permissions: "require_escalated"` and a `justification` to
+the exact bash command, which then runs on the host with your credentials. A command run
 inside the sandbox cannot use `gh` or a git credential helper — `~/.config/gh`
 and friends are permanently denied, by design.
 
@@ -166,8 +186,9 @@ and friends are permanently denied, by design.
 ### Remote git
 
 `git push`, `git pull` and clones of private repositories need the host's
-credential helper, so they cannot run inside the sandbox. Ask for a `command`
-exception with the exact command — for example `git push -u origin main`.
+credential helper, so they cannot authenticate inside the sandbox. Attach
+`require_escalated` and a justification to the exact bash command — for example
+`git push -u origin main`.
 Guardian reviews it; on approval that exact string runs once on the host with
 your normal git credentials, and the token never enters the sandbox or the
 conversation. Chained commands, redirects, command substitution and interpreter

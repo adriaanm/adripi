@@ -17,6 +17,7 @@ import {
 	isProjectPolicyTrusted,
 	persistProjectRule,
 	projectPolicyPath,
+	projectPolicySnapshot,
 	readProjectPolicy,
 	recordProjectTrust,
 } from "./project-policy.ts";
@@ -294,21 +295,36 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		const agentDir = config?.agentDir;
 		if (!agentDir) return;
 		const target = globalThis as Record<symbol, unknown>;
+		let active = true;
 		const service = {
 			path: projectPolicyPath(ctx.cwd),
-			persistRule(rule: string) {
-				const result = persistProjectRule(ctx.cwd, rule);
-				if (!result.ok) return result;
-				if (result.added) {
-					recordProjectTrust(agentDir, result.path, result.hash);
-					const reread = readProjectPolicy(ctx.cwd);
-					projectRules = reread.kind === "ok" ? reread.policy.sandboxExceptions : projectRules;
+			// Capture before the human is asked, not after they answer. The closure
+			// binds that approval to one rule and the exact trusted base bytes.
+			prepareRule(rule: string) {
+				const read = readProjectPolicy(ctx.cwd);
+				const approved = projectPolicySnapshot(ctx.cwd, read);
+				if (!active || !approved || (read.kind === "ok" &&
+					!isProjectPolicyTrusted(agentDir, read.policy.path, read.policy.hash))) {
+					return { ok: false as const, reason: "the current project policy is invalid or unapproved; review it before saving a standing rule" };
 				}
-				return result;
+				return {
+					ok: true as const,
+					commit() {
+						if (!active) return { ok: false as const, reason: "the project-policy session has ended" };
+						const result = persistProjectRule(ctx.cwd, rule, { agentDir, approved });
+						if (!result.ok) return result;
+						// Only trust/apply the returned bytes: never re-read a file another
+						// process might have replaced after the approved write.
+						recordProjectTrust(agentDir, result.path, result.hash);
+						projectRules = result.sandboxExceptions;
+						return result;
+					},
+				};
 			},
 		};
 		target[PROJECT_POLICY_KEY] = service;
 		disposeProjectPolicy = () => {
+			active = false;
 			if (target[PROJECT_POLICY_KEY] === service) delete target[PROJECT_POLICY_KEY];
 		};
 	};
@@ -351,6 +367,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		activeCalls.clear();
+		disposeProjectPolicy?.();
 		resolveProjectPolicy(ctx);
 		publishProjectPolicy(ctx);
 		appendStatus();
@@ -383,6 +400,8 @@ export default function guardianExtension(pi: ExtensionAPI) {
 	pi.on("session_shutdown", () => {
 		disposeSandboxBroker?.();
 		disposeSandboxBroker = undefined;
+		disposeProjectPolicy?.();
+		disposeProjectPolicy = undefined;
 		latestCtx = undefined;
 	});
 

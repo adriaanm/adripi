@@ -1,176 +1,104 @@
 # pi-sbx (vendored fork)
 
-Fork of [`pi-sbx@0.1.3`](https://github.com/RiverAi7z/pi-sbx) — an SRT-backed
-bash sandbox for Pi with per-command ids, violation reporting, a session config
-layer, and escalation prompts. Vendor this fork so `adripi` can ship a sandbox
-whose escalation path is decided by `pi-guardian` instead of a human-only prompt.
+Fork of [`pi-sbx@0.1.3`](https://github.com/RiverAi7z/pi-sbx), an SRT-backed
+Pi bash sandbox. License: see `LICENSE`. Base is upstream except for the deltas
+below. These describe current source after round 1; old grant/exclusion/supervisor
+routes in Git history are retired, not additional supported APIs.
 
-- Upstream: `RiverAi7z/pi-sbx` (npm `pi-sbx@0.1.3`)
-- License: see `LICENSE`
-- Base is unmodified upstream except for the deltas below.
+## Current deltas
 
-## Deltas
+1. **Scratch** (`src/scratch.ts`, index wiring/tests): private session temp
+   directory, exported as `PI_SANDBOX_SCRATCH`, added to a copied effective
+   profile, disposed at shutdown and swept by age. Shared temp-root write is not
+   required by the shipped configuration.
+2. **Dependencies:** explicit devDependencies on `@earendil-works/pi-tui` and
+   `typebox`, which upstream imports without declaring.
+3. **Broker client** (`src/broker.ts`): mirrors Guardian's decision JSON and
+   `Symbol.for` slot. Missing/throwing Guardian denies; only a real defer reaches
+   human UI. The sandbox executes decisions, never publishes a second reviewer.
+   `withScopedPaths` copies a command-local layer without changing session state.
+4. **One escalation API** (`src/inline-escalation.ts`, `src/index.ts`): bash
+   `sandbox_permissions`, `justification`, optional `prefix_rule` and
+   `additional_permissions.file_system.{read,write}`. Unknown parameters and
+   invalid combinations fail without running anything. The separate
+   `request_sandbox_exception` tool, legacy `dangerouslyDisableSandbox`, session
+   exception overlays, host/network/next-command grant stores and expiry hooks
+   are removed. Legacy parameters are explicitly rejected.
+5. **One execution seam and queue** (`src/index.ts`, `src/execution-queue.ts`):
+   normal, scoped and host agent execution share dispatch; active human shell
+   execution and runtime-setting changes share the queue. Every scoped target is
+   decided before runtime mutation. Temporary SRT policy never enters baseline
+   `config`/`sessionConfig`, so native file tools cannot borrow another call's
+   grants. Restore baseline on failure/cancellation/partial runtime update; if
+   restoration itself fails, poison dispatch and reset instead of leaving a
+   potentially widened runtime available. Closure rejects queued work and drains
+   active cleanup before reset. Background-descendant lifetime is not certified.
+6. **Host gate** (`src/host-command.ts`): honor `allowUnsandboxedCommands`,
+   reject shell composition/expansion, control characters, assignment heads and
+   known interpreter/wrapper/code-runner shapes; bind prefix proposals to the
+   current parsed command before review. Execute the exact reviewed trimmed
+   string once. Even unavailable-SRT fallback passes this gate/review. Explicit
+   human sandbox-off modes remain unsafe controls. This is not an exhaustive
+   executable capability classifier or a credential jail.
+7. **Human decisions** (`src/human-channel.ts`): one serialized adapter for all
+   surfaces and standing-save questions, with cancellation/shutdown signals.
+   No UI means an actionable fail-closed defer, not a fabricated nested
+   `contact_supervisor` invocation or a parent token treated as human consent.
+8. **Network** (index callback): one decision per off-list connection, no token
+   or static allowlist mutation. Bracket IPv6. Standing proposals name the shown
+   port, not a silent all-port expansion. Long-lived connection containment is
+   not proven by callback serialization.
+9. **Standing rules** (broker client/index): only Guardian owns persistence.
+   Prepare the rule/trusted snapshot before prompting; commit after human yes.
+   No service means no save, not a fallback store. `excludedCommands` and its
+   command/settings UI routes are retired. A nonempty legacy list fails config
+   closed with migration instructions; an empty old array is accepted.
+10. **Additive layers** (`src/config.ts`): network/path allow lists union above
+    the human's global profile; defaults → global and other arrays still replace.
+    Scoped candidates validate before runtime use. Normal human session settings
+    remain distinct from model-requested permissions.
+11. **Maintenance** (`src/hardening.ts`, config): agent-dir reads deny only
+    `auth.json`; global-only `agentDirWriteProjects` authorizes maintainer roots
+    to write the agent directory. Credentials and Guardian audit writes remain
+    denied, and workspace `.pi` stays mandatory deny-write.
+12. **Guidance/hints** (`src/guidance.ts`, `src/trap-hints.ts`): system-prompt
+    sandbox section, workspace/scratch/credential conventions, exact inline retry
+    examples and authenticated-network-git hints. Local Git remains sandboxed.
+    Denial is final; switching tools is not a workaround. No old tool signature
+    or mandatory request-then-rerun protocol remains in current guidance.
+13. **Tests:** registered bash dispatch with mocked execution/runtime, concurrent
+    scoped versus plain/native-file actions, partial approval, queue cancellation,
+    prompt cancellation, setting serialization, partial refresh/rollback failure,
+    host admission/fallback, per-connection decisions, policy prepare-before-prompt,
+    legacy input rejection, helper/config/file-gate/lifecycle coverage. These are
+    not live nested OS-sandbox tests.
 
-1. **Session scratchpad** (`src/scratch.ts`, wired in `src/index.ts`).
-   A unique directory per session under the host temp tree
-   (`pi-sbx-scratch-*`) is created at `session_start`, added to the effective
-   runtime profile's `allowRead`/`allowWrite` — never to the persisted config —
-   exported to sandboxed commands as `PI_SANDBOX_SCRATCH`, named in the bash
-   tool's `promptGuidelines`, removed at `session_shutdown`, and swept by age
-   (24 h) at the next start. Rationale: the agent must have somewhere to put
-   temporary files without spending a guardian-reviewed exception on it.
-   `withScratchpad` returns a copy, so a config reload never mutates the
-   user's layer.
-2. **`test/scratch.test.ts`** — lifecycle, sweep-by-age, prefix isolation, and
-   the copy/dedupe behaviour of `withScratchpad`.
-3. **`package.json` devDependencies** — add `@earendil-works/pi-tui` and
-   `typebox`. Upstream imports both (`src/settings-ui.ts`, tool schemas) without
-   declaring them, so `pnpm typecheck` fails on a fresh checkout.
-4. **Guardian broker client** (`src/broker.ts`). Mirrors guardian's contract
-   (same `Symbol.for` slot), turns a missing broker into `defer`, turns a
-   throwing broker into a denial, and applies session-scope grants to the
-   in-memory session layer (`withSessionException`): write/read → filesystem
-   allow lists, network → `allowedDomains`, command → `excludedCommands`. The
-   persisted config is never touched and the layer is rebuilt on reload.
-5. **`request_sandbox_exception` tool** — one target per call, `reason`
-   required; guardian decides, the human is asked only when the broker defers
-   or is absent (no UI → deny). The network ask callback and the
-   `dangerouslyDisableSandbox` path both consult the broker first instead of
-   prompting immediately.
-6. **`test/broker.test.ts`** — slot lifecycle, defer/allow/deny passthrough,
-   broker failure → denial, request shaping, and the session-layer mapping.
+## Failure modes repaired in round 1
 
-7. **Trap hints** (`src/trap-hints.ts`). A sandboxed command that fails with
-   `Operation not permitted` / `Permission denied` gets an extra text block
-   naming the exact denied path and telling the model to call
-   `request_sandbox_exception` for it. No automatic retry: the surface cannot be
-   inferred reliably from the violation log, and the retry must stay a reviewed
-   decision.
-8. **`once` scope** is real: the grant is applied for exactly the next sandboxed
-   command (or the next network connection) and removed afterwards via
-   `withoutSessionException` + reload. Verified: command A allowed, command B
-   denied in the same session.
-9. **Host-command exceptions** (`src/host-command.ts`). `surface: "command"`
-   grants run one exact command on the host (remote git), exact-match and
-   single-use, with metacharacter/interpreter shapes refused before review.
-   `test/host-command.test.ts` covers eligibility and the grant store.
-10. **Grants are additive and validated** (`src/config.ts`, `src/broker.ts`,
-    `src/index.ts`). Found by an
-    `Invalid sandbox runtime config: network.allowedDomains.0` report:
-    a `host:*` target (the trap's spelling for "any port") is stored as the bare
-    host, since the runtime schema rejects a `:*` port suffix and a bare host
-    already matches every port (`configNetworkTarget`, applied in
-    `withSessionException`/`withoutSessionException`/`hasSessionException`).
-    `merge` now unions the allow lists (`network.allowedDomains`,
-    `network.allowUnixSockets`, `filesystem.allowRead`, `allowWrite`) for every
-    step above the user's own file, so a project or session layer adds grants
-    instead of replacing the inherited ones — previously one
-    `write /tmp/sgo-501` grant dropped the workspace and one `allowedDomains`
-    entry dropped the package hosts. The defaults → global step keeps replace
-    semantics so the global profile can still withdraw the default temp-root
-    write. Finally, `applySessionGrant` validates the candidate layer before
-    adopting it, so an unusable target is refused with a message instead of
-    making every later `loadConfig` fail, which disabled the sandbox for the
-    rest of the session. `test/broker.test.ts` and
-    `test/config-hardening.test.ts` cover all of it.
+Inline host escalation skipped the old validator; consumed host grants bypassed
+host-disabled policy; command-local paths leaked through shared state; a network
+once token expired on its granting tool's own result; policy fallback/exclusions
+created multiple host paths. Consolidation removes those stores and admission
+bypasses rather than adding another compatibility API. Parent integration also
+closed unavailable-SRT host fallback, bound save snapshots before prompts,
+checked late cancellation and fail-closed rollback, and serialized settings.
 
-11. **Agent-dir reads are open except for credentials** (`src/hardening.ts`).
-    `denyRead` names exactly one file, `<agentDir>/auth.json`. Installed packages,
-    skills, session transcripts, subagent artifacts, `settings.json`,
-    `guardian.json`, `extensions/sandbox.json` and Guardian's transcripts are all
-    data a sandboxed command may need, so a plain `read` no longer trips the
-    sandbox.
+See [current contract](../../docs/product.md),
+[round evidence](../../docs/round-1.md), and
+[archived baseline](../../docs/product-baseline.md). Earlier macOS probes in the
+Git history exercised the now-retired session-grant protocol; they do not verify
+this round's installed runtime.
 
-12. **`agentDirWriteProjects`** (`src/config.ts`). An absolute project root
-    listed in the *global* profile may write the agent dir, so the repo that
-    installs this stack can maintain the profile it installs. Read from the global
-    layer only — a project or session layer must not widen it — and matched
-    against the session cwd, including subdirectories. Writes are otherwise
-    deny-all for the agent dir; the grant drops that lock, `auth.json` and
-    `guardian-sessions` stay mandatory deny-write, and `<workspace>/.pi` stays
-    mandatory deny-write too. `install.sh` grants this repo's root; deleting the
-    entry revokes it. `test/config-hardening.test.ts` covers the read matrix, the
-    write boundary, subdirectories, a lookalike sibling, malformed values, and a
-    project-layer attempt to widen it.
+## Deploy/update
 
-13. **Subagent escalation for deferred exceptions** (`src/supervisor-ask.ts`,
-    wired in `src/index.ts`). A subagent has no UI, so a `defer` decision used to
-    be dropped. The exception tool now asks the parent session through
-    pi-subagents' `contact_supervisor` tool (via the tool context's
-    `executeTool`) and accepts only an explicit `ALLOW once|session` / `DENY`
-    token, so prose cannot be read as consent. Without a supervisor channel the
-    request still fails closed. `test/supervisor-ask.test.ts` covers the question
-    text and the token parsing (including the reply wrapper and the
-    must-start-the-line rule).
+`install.sh` installs npm `pi-sbx@0.1.3` and rsyncs this `src/` over the installed
+copy. No deployment happened in round 1. Fully quit/restart Pi after human
+installation; inspect kept live configs for nonempty retired exclusions.
 
-14. **Harness guidance in the system prompt** (`src/guidance.ts`, wired in
-    `src/index.ts` via `before_agent_start`). Models are not trained on this
-    harness, so while the sandbox is on the prompt gains a short `<sandbox>`
-    section: what is writable/readable, the never-grantable credential stores,
-    the `request_sandbox_exception` signature with the one-exact-target rule, that
-    `surface: "command"` runs the exact line on the host and must be re-run
-    unchanged, that a denial is final, and that circumvention is not a workaround.
-    It uses structured `sections` on Pi 1.x and falls back to the append slot on
-    older hosts. `test/guidance.test.ts` covers the content.
+For an upstream update:
 
-15. **Codex-shaped inline escalation** (`src/inline-escalation.ts`, wired in
-    `src/index.ts`, prompt updated in `src/guidance.ts`). Codex trains models on
-    `exec_command({ sandbox_permissions, justification, prefix_rule,
-    additional_permissions })`, i.e. the escalation travels with the command that
-    needs it instead of a request call followed by a re-run. The bash tool now
-    accepts the same names and semantics:
-    `with_additional_permissions` + `additional_permissions.file_system.{read,write}`
-    widens the sandbox for that one command (grants applied, command run inside,
-    widening revoked in a `finally`), `require_escalated` + `justification` runs
-    that exact line on the host and may carry a `prefix_rule` proposal
-    (`["git","push"]` → `git push:*`, rejected for shells, interpreters, `rm`,
-    wildcards and metacharacters) that the human's "Always allow …" choice
-    persists as a project `excludedCommands` entry. Network is per destination,
-    so `network.enabled` is refused with a pointer at the `network` surface
-    instead of pretending to grant "the network". `Pi`'s own
-    `dangerouslyDisableSandbox` keeps working. `test/inline-escalation.test.ts`
-    covers the planner (defaults, stray fields, banned prefixes, relative paths).
-
-16. **Standing-rule persistence** (`src/broker.ts` client, `src/index.ts`).
-    A `prefix_rule` the model proposes on a host escalation is offered to the
-    human once ("Save a standing permission?"); on yes it is handed to guardian's
-    project-policy service (`Symbol.for("pi-guardian:project-policy")`), which
-    appends it to `<workspace>/.pi/guardian.json` and records trust for the new
-    content. The sandbox never writes the policy that governs it; without guardian
-    the fallback is this project's own `excludedCommands`. The same service backs
-    the "Always allow …" answer in the deferred-escalation prompt, so both paths
-    produce a project rule rather than an unsandboxed command.
-
-The stack swap and initial architecture/README rewrite are complete. Current
-as-built behavior and integration gaps are recorded in
-[`docs/product.md`](../../docs/product.md) and the
-[product review](../../docs/review/recommendations.md).
-
-## Verified on macOS (2026-10-27)
-
-- `touch ./in-project && echo OK` → inside the sandbox, one command unit.
-- `touch ~/.gradle/x` → sandbox denial reported to the model, with an explicit
-  escalation offer.
-- `printf hi > "$PI_SANDBOX_SCRATCH/probe.txt" && cat … && echo SCRATCH-OK` →
-  `hiSCRATCH-OK`; no exception needed.
-- Guardian-driven exception: the model called `request_sandbox_exception` for
-  `write /Users/adriaan/.gradle` (session). Guardian allowed it, the session
-  layer reloaded, and `touch ~/.gradle/.sbx-broker-probe` ran **inside** the
-  sandbox and printed `BROKER-GRANT-OK`.
-
-## Deploy
-
-`install.sh` installs `pi-sbx@0.1.3` from npm, then rsyncs
-`forks/pi-sbx/src/` over the managed package's `src/`. Peer dependencies
-(`@earendil-works/pi-coding-agent`, `@anthropic-ai/sandbox-runtime`,
-`minimatch`) come from the npm install and the Pi host.
-
-## Update upstream
-
-1. Copy the new upstream `src/`, `test/`, `package.json`, `tsconfig.json` over
-   the fork.
-2. Reapply or reconcile **all** numbered deltas above, not just the original
-   scratch module, tests and devDependencies. Use the repository history and
-   product-review acceptance criteria to avoid dropping later safety fixes.
-3. `pnpm install --ignore-scripts && pnpm typecheck && pnpm test`.
-4. Update the pinned version in `packages.txt` and this file.
+1. Reconcile all deltas above, not just scratch or the first broker patch.
+2. Keep registered-tool negative tests and cross-extension service tests.
+3. Run `npx vitest run`, `npx tsc --noEmit`, and repository `just check`.
+4. Update pins/provenance deliberately, deploy separately, and exercise loaded
+   schema, sandbox/host/scoped behavior and negative cases in a fresh Pi process.

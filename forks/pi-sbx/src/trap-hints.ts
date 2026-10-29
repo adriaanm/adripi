@@ -7,8 +7,9 @@
  * unrelated probes (`sysctl-read`). Inferring the *surface* from the message is
  * guesswork, and guessing wrong would either widen the sandbox in the wrong
  * dimension or spend a guardian review on a mislabelled request. So the sandbox
- * names the exact path and tells the model which tool to call; the request then
- * goes through the normal guardian/human decision with a reviewed target.
+ * names the exact path and tells the model to re-run the same bash call with a
+ * scoped permission; the request then goes through the normal guardian/human
+ * decision with a reviewed target.
  */
 const DENIAL = /(Operation not permitted|Permission denied|Read-only file system)/i;
 
@@ -45,8 +46,6 @@ export function findDeniedPaths(output: string, limit = 3): string[] {
 export interface HintContext {
 	cwd: string;
 	scratchDir?: string;
-	/** Absolute paths that already have a grant; no point suggesting them. */
-	granted?: readonly string[];
 }
 
 /**
@@ -59,19 +58,17 @@ export function buildCredentialHint(output: string): string | undefined {
 	return [
 		"This command needs the host's credential helper, which is not available inside the sandbox.",
 		"Only network git (clone, fetch, pull, push, ls-remote, submodule --remote) and gh need this; every other git command works sandboxed.",
-		'Call request_sandbox_exception with `surface` "command", the exact command line as `target`',
-		'(for example `git pull --ff-only origin main`), and a reason: an approved command runs on the host with your real credentials.',
+		'Re-run this same bash call with `sandbox_permissions: "require_escalated"` and a `justification`',
+		'(for example for `git pull --ff-only origin main`): an approved command runs on the host with your real credentials.',
 		"Do not retry it in the sandbox, and do not request read access to ~/.config/gh, ~/.ssh or other credential files —",
 		"those are permanently denied and are not needed when the command runs on the host.",
 	].join(" ");
 }
 
 export function buildTrapHint(output: string, context: HintContext): string | undefined {
-	const paths = findDeniedPaths(output).filter((path) => {
-		if (context.scratchDir && path.startsWith(context.scratchDir)) return false;
-		if (context.granted?.some((granted) => path === granted || path.startsWith(`${granted}/`))) return false;
-		return true;
-	});
+	const paths = findDeniedPaths(output).filter((path) =>
+		!(context.scratchDir && path.startsWith(context.scratchDir)),
+	);
 	if (paths.length === 0) return undefined;
 	const permanent = paths.filter((path) => PERMANENT_DENY.test(path));
 	const grantable = paths.filter((path) => !PERMANENT_DENY.test(path));
@@ -81,9 +78,9 @@ export function buildTrapHint(output: string, context: HintContext): string | un
 		parts.push(
 			[
 				`The sandbox denied access to ${listed}.`,
-				"If the task genuinely needs it, call request_sandbox_exception with one of those exact paths as `target`,",
-				"`surface` \"write\" for a write denial (or \"read\" for a read denial), and a `reason` explaining why the task needs it.",
-				"Guardian reviews the request; the user is asked when guardian defers.",
+				"If the task genuinely needs it, re-run the same bash call with `sandbox_permissions: \"with_additional_permissions\"`",
+				"and put the exact path under `additional_permissions.file_system.write` (or `.read` for a read denial), plus a `justification`.",
+				"The widening lasts for that one command; Guardian reviews it and the user is asked when guardian defers.",
 			].join(" "),
 		);
 	}
@@ -91,9 +88,9 @@ export function buildTrapHint(output: string, context: HintContext): string | un
 		const listed = permanent.map((path) => `"${path}"`).join(", ");
 		parts.push(
 			[
-				`The sandbox denied ${listed}, which is a permanently denied credential store — a request for it is refused by rule.`,
-				"If the tool needs those credentials (git or gh authenticating against a remote), request a `command` exception",
-				"for the exact command line instead; it runs on the host, where the credentials already live.",
+				`The sandbox denied ${listed}, which is a permanently denied credential store — no path exception can grant it.`,
+				"If the tool needs those credentials (git or gh authenticating against a remote), re-run the bash call with",
+				'`sandbox_permissions: "require_escalated"` and a `justification`; it runs on the host, where the credentials already live.',
 			].join(" "),
 		);
 	}

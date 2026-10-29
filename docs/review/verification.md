@@ -17,7 +17,9 @@ restart Pi, change policy, make network Git calls, or repair the findings.
 - Compared repository and installed fork entry-point hashes. Did not inspect
   credentials or run live sandbox escape probes.
 
-The [product guide](../product.md) is the as-built contract. The
+The [archived product guide](../product-baseline.md) describes this baseline;
+[round 1](../round-1.md) holds later evidence and the
+[current product guide](../product.md) describes the changed source. The
 [recommendations](recommendations.md) deliberately distinguish reproduced
 behavior, source-confirmed problems and integrations still needing verification.
 

@@ -1,8 +1,10 @@
 # Implementation round 1: one action-bound escalation path
 
-Status: in progress from `03d05a6`; initial external-worktree attempt paused
-because of a live sandbox/supervisor integration failure. Same-protocol retry
-uses pre-provisioned isolated worktrees inside the already writable workspace.
+Status: implementation integrated and source checks recorded; **full verification
+remains blocked by the pre-existing Node 26 headless crash**. No live deployment
+or push. Initial external-worktree attempt failed at the sandbox/supervisor seam;
+the same-protocol retry completed in pre-provisioned isolated worktrees inside
+the existing writable workspace. Stop here for the recap/operator interview.
 
 ## Operator direction
 
@@ -89,3 +91,97 @@ remaining findings (including lifecycle, audit, child containment, deployment
 freshness and full Node headless verification) without claiming they are fixed.
 Update the product guide to distinguish historical review baseline from the
 accepted round. Pause after this round; do not start another improvement wave.
+
+## Parent review and integration
+
+All three retry workers used `neuralwatt/nw-flash` in workflow
+`fd5f5cb7-7486-4c51-a14a-2f81d7c8a4e0`; their owned changes were inspected and
+copied into the parent checkout, excluding dependency symlinks and probe files.
+Reports are in that workflow's `round-1-retry/{sandbox,persistence,targets}.md`
+artifacts. Worker completion was not treated as acceptance. Parent read the
+source, adapted Guardian's actual service/consumer contract and added negative
+registered-tool/service tests.
+
+Parent integration found and repaired gaps beyond the handoff claims:
+
+- The bash schema still exposed a `network.enabled` field: removed it, reject
+  unknown nested override fields, and validate exact scoped target syntax locally.
+- Unavailable-SRT fallback still skipped host admission: route it through the
+  same planner, policy and broker as explicit host escalation.
+- Persistence needed a pre-prompt snapshot, not one captured when the user
+  finished answering: the Guardian service now prepares a bound commit closure,
+  rejects disposed sessions, and applies only returned bytes/rules.
+- Cancellation while review/UI was open could arrive after admission: check it
+  before execution/persistence and pass signals into all human questions.
+- Settings could refresh the singleton during scoped execution: serialize runtime
+  mutations with bash; closure rejects queued work and waits for active rollback.
+- A partially failed runtime update needs rollback too; failed rollback must
+  poison dispatch/reset instead of leaving a widened singleton usable.
+- Missing Guardian must not bypass its hard restrictions via a synthetic human
+  defer: exceptions now fail closed until the broker is published.
+- Host executable heads also reject assignment/keyword/expansion spellings;
+  network standing proposals preserve the actual shown port and bracket IPv6.
+
+Templates, installer messages, current docs, agent guidance and vendoring records
+now describe the one API/store. The original as-built guide is preserved as
+[product-baseline.md](product-baseline.md), not overwritten as if its probes had
+verified the changed runtime. `excludedCommands` migration is documented; live
+files were not migrated or edited.
+
+### Source acceptance by finding
+
+| Finding | This round's outcome | Limit |
+|---|---|---|
+| F1 host admission | All agent host paths use host-enabled policy, shape/prefix admission and exact-command decision | Human sandbox-off is deliberately unsafe; executable capabilities are not exhaustively classified |
+| F2 scoped isolation | Queue, copied runtime-only layer, baseline file gate, pre-execution target decisions and fail-closed rollback | Background descendants and long-lived connections are not contained/certified by this |
+| F3 network-once expiry | Old token/store and granting-tool expiry route removed; callback decides each connection | Actual installed proxy/OS smoke tests still needed |
+| F4 network ports | Numeric ports stay exact; bare/`:*` rules cover all ports | Runtime transport semantics still depend on SRT |
+| F5 policy trust | Prepared trusted snapshot, stale/unapproved/symlink rejection, atomic writes, returned-byte application | No cross-process file lock or hostile same-user filesystem-race defence |
+| F7 inconsistent human path | One adapter; headless defer explicitly stops without impossible nested tools | Usable human-only child approval transport is still absent |
+| F11 target admission | Exact shape checks before broker rules/reviewer; roots and canonical aliases protected | Not proof of every external tool's target interpretation |
+
+F6's full toggle/publication lifecycle, F8's correlated consume/revoke audit,
+F9's active-runtime doctor and F10's child/MCP/extension containment remain open.
+Disposing prepared-save services is not a claim that F6 is fully solved.
+
+### Verification evidence
+
+Commands were run in the parent checkout against integrated source, with no
+host execution probes or nested `sandbox-exec`/SRT profiles:
+
+| Check | Result |
+|---|---|
+| `just check` | Passed: shell syntax and updated config-template checks |
+| `cd forks/pi-sbx && npx vitest run` | 18 files, **104 tests passed** |
+| `cd forks/pi-sbx && npx tsc --noEmit` | Passed |
+| Guardian `node --test` excluding only `test/headless.test.ts` | **96 tests passed** |
+| `cd forks/pi-guardian && npm run check` | Passed |
+| `cd forks/pi-guardian && npm test` | **Not green:** 96 passed, `headless.test.ts` aborted in Node `26.6.0`, assertion `(env_->execution_async_id()) == (0)` in `node::InternalCallbackScope::Close` |
+| `git diff --check` | Passed before implementation commits |
+
+The same native headless failure was already reproduced on clean baseline HEAD
+before this round. It was reproduced again after integration; it is not a newly
+explained or repaired failure. No compatible alternate Node was installed/tested.
+The full-suite/headless verification task stays open. Registered-tool tests mock
+execution and the runtime; the cross-fork service test uses the real Guardian
+publisher and sandbox consumer but launches no reviewer/host command.
+
+### Delivery and pause
+
+Target-admission/port repair is commit `fabb57c`; the coupled dispatch/persistence
+repair and matching documentation are committed together separately. There was
+no `install.sh`, live-policy edit, restart, network Git operation or push.
+Existing ignored worktrees/artifacts preserve the worker evidence.
+
+Before another round, ask the operator:
+
+1. Keep outside-policy filesystem escalation bash-only, or use the same vocabulary
+   on native file tools too (with one implementation, not a second grant store)?
+2. Must child defers always reach the human, or may an explicitly delegated parent
+   approve bounded capabilities? How should that authority be recorded?
+3. How should bounded worktree and maintainer authority propagate to children?
+4. Prefer explicit per-session maintainer mode or standing trusted install roots?
+5. Which two daily workflows should become the first end-to-end ergonomics gates,
+   and how many interruptions/what latency are tolerable?
+
+No second implementation wave is authorized by these open questions.

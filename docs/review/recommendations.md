@@ -1,9 +1,14 @@
 # Review: towards a convenient, safe Pi sandbox and Guardian
 
 Reviewed repository baseline: `2e86f45`. Deliverables:
-[as-built product guide](../product.md), this assessment, and a
+[archived product guide](../product-baseline.md), this assessment, and a
 [verification record](verification.md) with archived, non-executing probes.
-No runtime fixes or live-policy changes are part of this review.
+No runtime fixes or live-policy changes were part of that review.
+
+**Later source work:** [round 1](../round-1.md) records accepted repairs and
+remaining limits; [product.md](../product.md) is the current contract. Findings
+below remain the baseline assessment, not a statement that every bug is still
+present after the round.
 
 ## Verdict
 

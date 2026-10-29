@@ -24,7 +24,14 @@ if (guardian.policyPath !== "~/.pi/agent/guardian-policy.md") {
   throw new Error("config/guardian.json: policyPath must point at the portable guardian policy");
 }
 
+if (guardian.exemptTools?.includes("request_sandbox_exception")) {
+  throw new Error("config/guardian.json: the separate exception tool is retired");
+}
+
 const sandbox = read("sandbox.json");
+if ("excludedCommands" in sandbox) {
+  throw new Error("config/sandbox.json: use Guardian standing rules, not retired command exclusions");
+}
 if (sandbox.enabled !== true || sandbox.failIfUnavailable !== true) {
   throw new Error("config/sandbox.json: expected enabled and failIfUnavailable");
 }
