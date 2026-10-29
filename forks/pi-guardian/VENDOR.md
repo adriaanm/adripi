@@ -68,7 +68,13 @@ deltas are listed below; nothing else is modified.
     (with a space boundary) as "this command with any arguments". Guardian also
     denies agent writes to `<workspace>/.pi/**` as a backstop to pi-sbx's
     mandatory deny-write.
-13. `src/permissions.ts` — `write`/`edit` calls are matched on their target
+13. `src/project-policy.ts` + `src/index.ts` — `persistProjectRule()` appends a
+    human-approved rule to the project policy (creating the file, validating the
+    rule, deduping) and the extension publishes
+    `Symbol.for("pi-guardian:project-policy")` so the sandbox layer can hand it a
+    rule instead of writing policy itself. Trust is recorded for the new content,
+    so the rule applies immediately and in later sessions.
+14. `src/permissions.ts` — `write`/`edit` calls are matched on their target
     `path` only. Scanning the payload made a document that merely *mentions* a
     protected path (a README explaining the sandbox, say) un-editable, which
     blocked legitimate maintenance twice. Shells, codemode, MCP and extension

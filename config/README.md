@@ -129,6 +129,13 @@ inside the sandbox and need neither a rule nor an exception; `clone`, `fetch`,
 authenticate with the remote (an anonymous fetch of a public repo may still work
 sandboxed).
 
+Rules can also arrive from the agent: when the model proposes a `prefix_rule`
+on an escalation (`prefix_rule: ["git", "push"]` → `command:git push:*`) you are
+asked once, "Save a standing permission?", and guardian appends it to this file
+and records trust for the new content. Nothing is written without that yes, and
+the command still has to request the exception each time — the rule only removes
+the decision, not the review.
+
 These rules pre-authorize the *exception*, not the sandbox: the agent still has
 to call `request_sandbox_exception` with `surface: "command"` and the exact
 command line, which then runs on the host with your credentials. A command run

@@ -34,6 +34,7 @@ import { SandboxController, RuntimeSandboxManager } from "./manager.ts";
 import { createScratchpad, SCRATCH_ENV, type Scratchpad, sweepScratchpads, withScratchpad } from "./scratch.ts";
 import {
   decideSandboxException,
+  getProjectPolicyService,
   type SandboxScope,
   type SandboxSurface,
   hasSessionException,
@@ -188,6 +189,45 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     );
     notifyUntrustedPersist(ctx);
     await reloadConfig(ctx, false);
+  };
+
+  /**
+   * Persist a proposed `prefix_rule` once the human says yes. Guardian's project
+   * policy is the right home: the command still has to ask for the exception, the
+   * rule just pre-authorizes the decision. Without guardian, fall back to this
+   * project's own `excludedCommands` (no sandbox at all), which is what the
+   * "always allow" answer has always meant here.
+   */
+  const offerStandingRule = async (ctx: ExtensionContext, rule: string) => {
+    if (!ctx.hasUI) return;
+    const policy = getProjectPolicyService();
+    try {
+      const approved = await ctx.ui.confirm(
+        "Save a standing permission?",
+        `Allow ${rule} for this project? It will be written to ${policy?.path ?? `${CONFIG_DIR_NAME}/sandbox.json`} and apply in future sessions; the command still has to request the exception.`,
+      );
+      if (!approved) return;
+      const saved = policy?.persistRule(rule);
+      if (saved && !saved.ok) {
+        ctx.ui.notify(`Could not save the standing permission: ${saved.reason}`, "warning");
+        return;
+      }
+      if (!policy) await persistExclusion(rule);
+      ctx.ui.notify(`Standing permission saved for this project: ${rule}`, "info");
+    } catch (error) {
+      ctx.ui.notify(`Could not save the standing permission: ${error instanceof Error ? error.message : String(error)}`, "warning");
+    }
+  };
+
+  /** Persist a rule the human just approved (guardian policy if present). */
+  const persistStandingRule = async (rule: string) => {
+    const policy = getProjectPolicyService();
+    if (!policy) {
+      await persistExclusion(rule);
+      return;
+    }
+    const saved = policy.persistRule(rule);
+    if (!saved.ok) throw new Error(saved.reason);
   };
 
   const persistExclusion = async (pattern: string) => {
@@ -546,12 +586,16 @@ export default function sandboxExtension(pi: ExtensionAPI) {
           throw new Error(`Sandbox exception denied: ${brokerDecision.reason}`);
         }
         if (brokerDecision.kind === "defer") {
-          const human = await prompts.requestUnsandboxed(params.command, persistExclusion, prefixRule);
+          const human = await prompts.requestUnsandboxed(params.command, persistStandingRule, prefixRule);
           if (human === "deny") throw new Error("User denied running this command outside the sandbox");
           if (human === "always") await applySessionGrant(ctx, "command", params.command);
           return local.execute(id, input, signal, onUpdate, ctx);
         }
         if (brokerDecision.scope === "session") await applySessionGrant(ctx, "command", params.command);
+        // The reviewer already allowed it, but a proposed prefix rule still needs
+        // the human: standing permissions are the user's decision, and guardian
+        // owns the project policy file.
+        if (prefixRule) await offerStandingRule(ctx, prefixRule);
         return local.execute(id, input, signal, onUpdate, ctx);
       };
 

@@ -131,6 +131,16 @@ whose escalation path is decided by `pi-guardian` instead of a human-only prompt
     `dangerouslyDisableSandbox` keeps working. `test/inline-escalation.test.ts`
     covers the planner (defaults, stray fields, banned prefixes, relative paths).
 
+16. **Standing-rule persistence** (`src/broker.ts` client, `src/index.ts`).
+    A `prefix_rule` the model proposes on a host escalation is offered to the
+    human once ("Save a standing permission?"); on yes it is handed to guardian's
+    project-policy service (`Symbol.for("pi-guardian:project-policy")`), which
+    appends it to `<workspace>/.pi/guardian.json` and records trust for the new
+    content. The sandbox never writes the policy that governs it; without guardian
+    the fallback is this project's own `excludedCommands`. The same service backs
+    the "Always allow …" answer in the deferred-escalation prompt, so both paths
+    produce a project rule rather than an unsandboxed command.
+
 Remaining (W5-W6 in `docs/plan-sandbox-broker.md`): the stack swap and the
 architecture/README rewrite.
 

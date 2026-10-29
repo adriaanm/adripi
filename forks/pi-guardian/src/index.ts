@@ -15,6 +15,8 @@ import { requestGuardianAssessment } from "./sidecar.ts";
 import { createSandboxBroker, publishSandboxBroker } from "./sandbox/broker.ts";
 import {
 	isProjectPolicyTrusted,
+	persistProjectRule,
+	projectPolicyPath,
 	readProjectPolicy,
 	recordProjectTrust,
 } from "./project-policy.ts";
@@ -282,6 +284,36 @@ export default function guardianExtension(pi: ExtensionAPI) {
 	let projectRules: SandboxExceptionRules | undefined;
 
 	/** Standing rules from `<cwd>/.pi/guardian.json`, pinned to an approved hash. */
+	/**
+	 * Project-policy service for the sandbox layer: it persists a rule the user
+	 * just approved (the "always allow" answer to an escalation) and records trust
+	 * for the new content, so it applies immediately and in later sessions.
+	 */
+	const PROJECT_POLICY_KEY = Symbol.for("pi-guardian:project-policy");
+	const publishProjectPolicy = (ctx: ExtensionContext): void => {
+		const agentDir = config?.agentDir;
+		if (!agentDir) return;
+		const target = globalThis as Record<symbol, unknown>;
+		const service = {
+			path: projectPolicyPath(ctx.cwd),
+			persistRule(rule: string) {
+				const result = persistProjectRule(ctx.cwd, rule);
+				if (!result.ok) return result;
+				if (result.added) {
+					recordProjectTrust(agentDir, result.path, result.hash);
+					const reread = readProjectPolicy(ctx.cwd);
+					projectRules = reread.kind === "ok" ? reread.policy.sandboxExceptions : projectRules;
+				}
+				return result;
+			},
+		};
+		target[PROJECT_POLICY_KEY] = service;
+		disposeProjectPolicy = () => {
+			if (target[PROJECT_POLICY_KEY] === service) delete target[PROJECT_POLICY_KEY];
+		};
+	};
+	let disposeProjectPolicy: (() => void) | undefined;
+
 	const resolveProjectPolicy = (ctx: ExtensionContext): void => {
 		projectRules = undefined;
 		const read = readProjectPolicy(ctx.cwd);
@@ -320,6 +352,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		activeCalls.clear();
 		resolveProjectPolicy(ctx);
+		publishProjectPolicy(ctx);
 		appendStatus();
 		// Pi 1.0 print mode subscribes after session_start. Replay once at input.
 		replayStatus = ctx.mode === "json";

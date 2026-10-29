@@ -85,6 +85,26 @@ export function buildRequest(options: DecideOptions): SandboxExceptionRequest {
 }
 
 /**
+ * Optional project-policy service published by guardian. When the user answers
+ * "always allow" to an escalation, the rule belongs in the project's standing
+ * permissions (`<workspace>/.pi/guardian.json`), which guardian owns — the sandbox
+ * must not write the policy it is governed by. Absent guardian, the caller falls
+ * back to its own project sandbox config.
+ *
+ * Contract mirrored from `pi-guardian/src/project-policy.ts`, same as the broker.
+ */
+export const PROJECT_POLICY_KEY = Symbol.for("pi-guardian:project-policy");
+
+export interface ProjectPolicyService {
+	readonly path: string;
+	persistRule(rule: string): { ok: true; path: string; hash: string; added: boolean } | { ok: false; reason: string };
+}
+
+export function getProjectPolicyService(): ProjectPolicyService | undefined {
+	return (globalThis as Record<symbol, unknown>)[PROJECT_POLICY_KEY] as ProjectPolicyService | undefined;
+}
+
+/**
  * Ask the broker. No broker means `defer` (the caller's human prompt decides);
  * a broker that throws is a denial, never an allow.
  */

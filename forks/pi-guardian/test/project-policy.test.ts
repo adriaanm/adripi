@@ -69,3 +69,40 @@ test("trust is pinned to the exact content hash", async () => {
 		[read.policy.path]: read.policy.hash,
 	});
 });
+
+test("persisting an approved rule creates, appends and dedupes", async () => {
+	const { persistProjectRule } = await import("../src/project-policy.ts");
+	const root = await mkdtemp(join(tmpdir(), "guardian-persist-"));
+
+	// Creates the file when the project has no policy yet.
+	const created = persistProjectRule(root, "command:git push:*");
+	assert.equal(created.ok, true);
+	if (!created.ok) return;
+	assert.equal(created.added, true);
+	let read = readProjectPolicy(root);
+	assert.equal(read.kind, "ok");
+	if (read.kind !== "ok") return;
+	assert.deepEqual(read.policy.sandboxExceptions.allow, ["command:git push:*"]);
+
+	// Appends without disturbing existing rules or keys.
+	const appended = persistProjectRule(root, "command:gh pr create:*");
+	assert.equal(appended.ok, true);
+	read = readProjectPolicy(root);
+	if (read.kind !== "ok") return;
+	assert.deepEqual(read.policy.sandboxExceptions.allow, ["command:git push:*", "command:gh pr create:*"]);
+
+	// Idempotent, and reports that nothing was added.
+	const again = persistProjectRule(root, "command:git push:*");
+	assert.equal(again.ok, true);
+	if (!again.ok) return;
+	assert.equal(again.added, false);
+
+	// Unusable rules are refused rather than written.
+	const bad = persistProjectRule(root, "git push");
+	assert.equal(bad.ok, false);
+	const typo = persistProjectRule(root, "command:git push:");
+	assert.equal(typo.ok, false);
+	read = readProjectPolicy(root);
+	if (read.kind !== "ok") return;
+	assert.equal(read.policy.sandboxExceptions.allow.length, 2);
+});

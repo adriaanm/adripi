@@ -120,6 +120,11 @@ Two rules follow from that shape and must stay true:
   widens for that one call, runs the command inside the sandbox, then revokes the
   grants; `require_escalated` runs the exact line on the host. Never reintroduce a
   mandatory "request, wait, re-run" two-step for something a single call can do.
+- **A proposed rule is the human's call.** `prefix_rule` becomes a project rule
+  only after a "Save a standing permission?" confirmation; the sandbox hands it to
+  guardian's `pi-guardian:project-policy` service (guardian owns and trust-hashes
+  `<workspace>/.pi/guardian.json`) and never writes policy itself. Without
+  guardian the fallback is the project's `excludedCommands`.
 - **Failure is the trigger.** The guidance tells the model to re-run a
   sandbox-failing command with escalation attached, without messaging the user
   first. Scope it: prefer the path-scoped tier over host execution, and keep

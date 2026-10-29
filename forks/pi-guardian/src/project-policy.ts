@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { hashText } from "./state.ts";
-import { validateSandboxRules } from "./sandbox/rules.ts";
+import { parseSandboxRule, validateSandboxRules } from "./sandbox/rules.ts";
 import type { SandboxExceptionRules } from "./sandbox/types.ts";
 
 /**
@@ -115,4 +115,47 @@ export function readProjectPolicy(cwd: string): ProjectPolicyRead {
   } catch (error) {
     return { kind: "invalid", path, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/**
+ * Append one approved standing rule to the project policy, creating the file if
+ * needed, and return the new content hash so the caller can record trust for it.
+ * The rule is validated with the same parser the broker uses, so an unusable
+ * pattern cannot be written. This is only ever called after a human approved the
+ * rule; Guardian owns the file so the agent never writes its own policy.
+ */
+export function persistProjectRule(
+  cwd: string,
+  rule: string,
+): { ok: true; path: string; hash: string; added: boolean } | { ok: false; reason: string } {
+  let parsed;
+  try {
+    parseSandboxRule(rule);
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+  const path = projectPolicyPath(cwd);
+  let file: Record<string, unknown> = {};
+  if (existsSync(path)) {
+    const read = readProjectPolicy(cwd);
+    if (read.kind === "invalid") return { ok: false, reason: `${path}: ${read.error}` };
+    if (read.kind === "ok") {
+      const existing = read.policy.sandboxExceptions;
+      if (existing.allow.includes(rule)) return { ok: true, path, hash: read.policy.hash, added: false };
+      const content = {
+        sandboxExceptions: {
+          allow: [...existing.allow, rule],
+          ...(existing.defer.length > 0 ? { defer: existing.defer } : {}),
+          ...(existing.deny.length > 0 ? { deny: existing.deny } : {}),
+        },
+      };
+      mkdirSync(join(cwd, PROJECT_POLICY_DIR), { recursive: true });
+      writeFileSync(path, `${JSON.stringify(content, null, 2)}\n`);
+      return { ok: true, path, hash: hashText(readFileSync(path, "utf8")), added: true };
+    }
+  }
+  file = { sandboxExceptions: { allow: [rule] } };
+  mkdirSync(join(cwd, PROJECT_POLICY_DIR), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
+  return { ok: true, path, hash: hashText(readFileSync(path, "utf8")), added: true };
 }
