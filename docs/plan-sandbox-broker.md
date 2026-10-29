@@ -1,5 +1,11 @@
 # Plan: guardian-mediated sandbox exceptions
 
+**Historical design/progress record.** Later host execution, inline escalation,
+maintenance grants and standing-rule persistence changed several original
+invariants. For current behavior use the [as-built guide](product.md); for
+remaining gaps use the [review](review/recommendations.md). The implementation
+status below is the original rollout record, not present-day verification.
+
 Status: **implemented and deployed** (2026-10-27). This document is the design
 record and progress tracker for replacing `pi-perm` with a sandbox layer whose
 every escalation is decided by `pi-guardian` or, when the reviewer defers, by

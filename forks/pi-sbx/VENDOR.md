@@ -141,8 +141,10 @@ whose escalation path is decided by `pi-guardian` instead of a human-only prompt
     the "Always allow …" answer in the deferred-escalation prompt, so both paths
     produce a project rule rather than an unsandboxed command.
 
-Remaining (W5-W6 in `docs/plan-sandbox-broker.md`): the stack swap and the
-architecture/README rewrite.
+The stack swap and initial architecture/README rewrite are complete. Current
+as-built behavior and integration gaps are recorded in
+[`docs/product.md`](../../docs/product.md) and the
+[product review](../../docs/review/recommendations.md).
 
 ## Verified on macOS (2026-10-27)
 
@@ -167,6 +169,8 @@ architecture/README rewrite.
 
 1. Copy the new upstream `src/`, `test/`, `package.json`, `tsconfig.json` over
    the fork.
-2. Reapply deltas 1-3 (scratch module + wiring, scratch tests, devDeps).
+2. Reapply or reconcile **all** numbered deltas above, not just the original
+   scratch module, tests and devDependencies. Use the repository history and
+   product-review acceptance criteria to avoid dropping later safety fixes.
 3. `pnpm install --ignore-scripts && pnpm typecheck && pnpm test`.
 4. Update the pinned version in `packages.txt` and this file.

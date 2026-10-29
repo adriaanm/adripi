@@ -1,7 +1,9 @@
 # config
 
 Templates installed by `install.sh` into `~/.pi/agent`. Existing files are kept,
-so you can customize them on each machine.
+so you can customize them on each machine. See the
+[as-built product guide](../docs/product.md) for the complete current contract and
+[review](../docs/review/recommendations.md) for known safety/ergonomic gaps.
 
 - `guardian.json` — semantic reviewer and sandbox-broker settings. The template
   uses `neuralwatt/nw-flash` and loads the Neuralwatt provider extension in the
@@ -92,9 +94,9 @@ deployed fork sources instead of asking you to switch the sandbox off.
 
 - Read from the **global** profile only: a project or session layer cannot widen
   it, and a session outside the listed roots still sees the full lock.
-- `<agentDir>/auth.json` and `<agentDir>/guardian-sessions` stay read- and
-  write-denied either way, and `<workspace>/.pi` (the project's own policy file)
-  stays mandatory deny-write.
+- `<agentDir>/auth.json` stays read- and write-denied; Guardian's
+  `<agentDir>/guardian-sessions` stays write-denied but is readable. The
+  `<workspace>/.pi` directory stays mandatory deny-write.
 - This is a real privilege: a session in a listed workspace can change what Pi
   and Guardian load next, including the sandbox profile and the reviewer.
   Delete the entry from both live configs to revoke it.
@@ -133,8 +135,11 @@ Rules can also arrive from the agent: when the model proposes a `prefix_rule`
 on an escalation (`prefix_rule: ["git", "push"]` → `command:git push:*`) you are
 asked once, "Save a standing permission?", and guardian appends it to this file
 and records trust for the new content. Nothing is written without that yes, and
-the command still has to request the exception each time — the rule only removes
-the decision, not the review.
+the command still has to request the exception each time — the rule skips the
+broker's decision, not the ordinary tool gate. **Known gap:** saving a rule can
+also trust pre-existing unapproved entries in that file; review its entire content
+before accepting persistence until [F5](../docs/review/recommendations.md#f5--p1-saving-a-narrow-standing-rule-can-approve-unrelated-policy)
+is repaired.
 
 These rules pre-authorize the *exception*, not the sandbox: the agent still has
 to call `request_sandbox_exception` with `surface: "command"` and the exact

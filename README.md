@@ -1,9 +1,24 @@
 # adripi
 
-Portable Pi setup: an OS sandbox, a semantic reviewer for tool calls, and a
-diff-review sidekick. Workspaces are read+write; credentials and security
-configuration are denied; the agent cannot widen its own permissions, and every
-sandbox exception is reviewed by the semantic gate (or by you, when it defers).
+Portable Pi setup: an OS sandbox for bash, a semantic reviewer for tool calls,
+and a diff-review sidekick. Workspaces are read+write; named credential stores
+and safety configuration are protected. Approved exceptions and trusted
+maintenance workspaces have deliberately greater authority.
+
+## Product documentation and review
+
+- **[As-built product guide](docs/product.md)** — execution coverage, trust
+  boundaries, policy layering, tool workflows, human controls and deployment.
+- **[Review and recommendations](docs/review/recommendations.md)** — prioritized
+  gaps towards convenient, safe Claude/Codex-like operation, acceptance criteria
+  and requirements to clarify.
+- **[Verification record](docs/review/verification.md)** — checks, reproducible
+  mocked counterexamples, deployment observations and unverified integrations.
+
+The review found inconsistencies in host escalation, command-scoped grants and
+standing-rule trust. Treat the product guide as the current detailed contract;
+this README is the installation overview, not a claim of complete containment or
+feature parity.
 
 ## Stack
 
@@ -217,7 +232,9 @@ To make a path permanently writable, add it to `filesystem.allowWrite` in
 Unix socket directory, add it to `network.allowUnixSockets` (that grants bind
 *and* connect); for a command that must run on the host, add a `prefix:*` entry
 to `excludedCommands`. Project-level policy goes in `<workspace>/.pi/sandbox.json`
-and only ever adds grants. Prefer narrow entries. See
+and requires trust: selected allow lists are additive, but other settings and
+deny arrays can be replaced, so a trusted project profile can relax policy.
+Prefer narrow entries. See
 [`config/README.md`](config/README.md) and
 [`docs/plan-sandbox-broker.md`](docs/plan-sandbox-broker.md).
 
@@ -257,10 +274,14 @@ the upstream-update procedure; the sandbox fork is documented in
 - The vendored `pi-sbx` fork is the OS boundary; `pi-guardian` is the semantic
   gate and the sandbox broker. Guardian decides exceptions and cannot widen the
   sandbox itself; a human decides `forever` cases.
-- Guardian failures are fail-closed denials.
+- Guardian review failures are fail-closed denials. An absent broker is a
+  different state: the sandbox uses its human fallback (headless behavior depends
+  on the request route). See the product guide for current lifecycle gaps.
 - The agent must not edit permission, guardian, reviewer, or sandbox config to
-  bypass a denial. Human recovery paths are `/guardian` and explicit config
-  edits.
+  bypass a denial. Human recovery paths are `/guardian status` and explicit config
+  edits; bare `/guardian` toggles. The installer grants this repository maintainer
+  access to live configuration, so it is a privileged workspace, not an ordinary
+  project's security boundary.
 - `pi-review` is advisory code review; it does not replace the guardian or the
   sandbox.
 - The guardian sidecar sends the retained transcript and exact action to the

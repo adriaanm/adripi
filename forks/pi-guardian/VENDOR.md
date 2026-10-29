@@ -98,7 +98,10 @@ supplies the behaviour. When upstream publishes 0.2.0, re-pin `packages.txt`.
 ## Update upstream
 
 1. Check out the new upstream version.
-2. Reapply changes 1-5 above.
+2. Reapply or reconcile **all** local changes above, including the broker,
+   maintenance rules and project-policy persistence. Consult the
+   [product review](../../docs/review/recommendations.md) for integration gaps and
+   acceptance criteria; the original changes 1-5 are no longer the whole fork.
 3. Keep `test/fork-reviewer-extensions.test.ts` (adapt fixtures if upstream
    changed `GuardianConfig`).
 4. `pnpm install --ignore-scripts --frozen-lockfile && pnpm check && node --test`.
