@@ -9,6 +9,8 @@ maintenance workspaces have deliberately greater authority.
 
 - **[As-built product guide](docs/product.md)** — execution coverage, trust
   boundaries, policy layering, tool workflows, human controls and deployment.
+- **[Product requirements and dogfooding](docs/product-requirements.md)** —
+  operator direction, observed friction and end-to-end acceptance criteria.
 - **[Review and recommendations](docs/review/recommendations.md)** — prioritized
   gaps towards convenient, safe Claude/Codex-like operation, acceptance criteria
   and requirements to clarify.
