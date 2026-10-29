@@ -179,18 +179,19 @@ The operator answered:
 
 1. Unify with "a Bash tool among the other tools." The working interpretation is
    one tool-permission mechanism with Bash as a peer of native file tools, not a
-   requirement to route file actions through bash. Confirm that interpretation;
-   the round-1 bash-only implementation remains the current source behavior.
+   requirement to route file actions through bash. The operator subsequently
+   confirmed this interpretation; the round-1 bash-only implementation remains
+   the current source behavior.
 2. Delegation goes through the parent first; the parent may pass on its own
    authorizations. This calls for provenance-backed, bounded child grants and a
    real parent request path, not free-form `ALLOW` text or automatic human asks
    for capabilities the parent already holds.
 3. Standing workspace roots are enough. This repository's special authorization
    to modify agent configuration can be modeled as an additional maintenance
-   workspace root. The operator wrote `~/.pi/agents`; current `agentDir` is
-   `~/.pi/agent`. Clarify that spelling before policy migration. This does not
-   make the directory writable to ordinary projects or remove credential/audit
-   exclusions.
+   workspace root. The operator confirmed this means configured `agentDir`
+   (`~/.pi/agent` here), to make this session's own config maintenance less
+   obstructed. It does not make the directory writable to ordinary projects or
+   remove credential/audit exclusions.
 4. Daily Git and worktrees are the priority for subagent flows. Proposed
    acceptance gates cover authenticated Git with reused delegated authority and
    worktree provisioning/preflight/edit-test/integration/cleanup, including
@@ -198,6 +199,9 @@ The operator answered:
 
 Details and remaining clarifications are in
 [product requirements](product-requirements.md#operator-decisions-after-round-1).
-No prompt/latency budget was specified. No second implementation wave or live
-policy change is inferred from these interview answers; full headless validation
-is still separately blocked.
+No prompt/latency budget was specified. A read-only
+[Claude/Codex comparison](reference-permissions.md) supports the common-tool and
+additional-root direction while recording API/enforcement differences. Both live
+profiles already list this repository for agent-directory maintenance. No second
+implementation wave or live policy change is inferred from these interview
+answers; full headless validation is still separately blocked.

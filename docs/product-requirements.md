@@ -27,10 +27,17 @@ as-built contract or authorize another implementation wave or live deployment.
 
 | Decision | Direction | Interpretation / boundary |
 |---|---|---|
-| D1 — Unified tool authorization | The operator said, "let's unify by having a Bash tool among the other tools." | Working interpretation, **to confirm**: Bash is a peer of Read/Write/Edit in one permission mechanism, not the sole route through which other tools must escalate. Do not add a second Bash tool or a competing compatibility API. Exact schema/UX is not yet chosen. |
+| D1 — Unified tool authorization | The operator confirmed Bash as a peer of Read/Write/Edit in one permission mechanism, analogous to Claude's tool-permission model. | Bash is not the sole route through which native tools must escalate. Do not add a second Bash tool or a competing compatibility API. Exact schema/UX is not yet chosen; shared authorization does not require identical tool inputs or enforcement. |
 | D2 — Parent-first delegation | Delegation goes through the parent, which may pass on its own authorizations. | A parent can delegate authority it actually holds, bounded to the child task; an agent's free-form approval text is not a new grant. Child requests go to the parent first. Requests beyond its held/delegable authority require the appropriate human decision; global/non-delegable protections still win. |
-| D3 — Standing workspace roots | Standing roots are sufficient; this repository has special agent-configuration modification authority. The agent configuration directory could be modeled as a workspace. | Model it as an additional **authorized maintenance root**, not a globally writable directory for every project. The operator wrote `~/.pi/agents`; this installation currently uses `~/.pi/agent` (the configured `agentDir`). Confirm that path interpretation before any policy migration. Credential and audit exclusions remain, even inside an authorized workspace. No extra per-session maintainer-mode requirement. |
+| D3 — Standing workspace roots | Standing roots are sufficient; this repository has special agent-configuration modification authority. The operator confirmed the root means configured `agentDir` (`~/.pi/agent` here), as an additional workspace for this privileged session. | The root should make routine in-scope self-maintenance straightforward, not depend on repeated exceptions. It is an **authorized maintenance root**, not globally writable for every project; credential and audit exclusions remain. Both OS policy and Guardian must receive the authority, including the bounded subset assigned to children. No extra per-session maintainer-mode requirement. |
 | D4 — Daily Git and worktrees | Daily Git and worktrees are key to subagent flows. | Prioritize their complete parent/child workflow and recovery over adding unrelated escape routes. Prompt/latency budgets remain unspecified; measure them rather than inventing thresholds. |
+
+The [reference-model investigation](reference-permissions.md) checks Claude's
+documented permission/working-directory model and the local Codex source at
+`970111f6cb`. Codex shares approval/sandbox orchestration between execution and
+patching and supports additional roots; its actual tool APIs are not identical
+to Claude's. Read-only live-profile inspection also found this repository's
+existing agent-directory write grant in both layers; no live policy was changed.
 
 ### First end-to-end acceptance scenarios
 
@@ -87,7 +94,7 @@ widened to recover.
 
 **Requirement:** expose one canonical permission mechanism for actions across
 tools, with Bash as a peer rather than a privileged sole escalation route
-(working interpretation D1, awaiting confirmation). Tool schemas, prompt
+(confirmed D1). Tool schemas, prompt
 examples, errors, standing-rule storage and human UI must agree. Do not retain
 competing model-facing aliases or a second persistence fallback.
 
@@ -246,13 +253,14 @@ with the operator after a working baseline; do not invent success thresholds.
 **Evidence:** E5. Routine authorized coding should spend its effort on code,
 not on reverse-engineering its harness.
 
-## Remaining clarification before the next design
+## Remaining design work
 
-- Confirm D1: does "Bash among the other tools" mean a common authorization
-  mechanism for Bash/Read/Write/Edit, rather than forcing file actions through
-  bash? Tool naming alone is not the design; avoid registering a duplicate tool.
-- Confirm the agent-config root spelling: configured `agentDir`
-  (`~/.pi/agent` here), rather than a new `~/.pi/agents` directory.
+D1 and the configured agent-directory spelling are confirmed. The operator asked
+for the Codex comparison and explained that an additional maintenance root should
+let this privileged session iterate on its configuration more quickly.
+
+- Design the common authorization context and tool-specific enforcement adapters,
+  without introducing duplicate tools or permissions stores.
 - Decide the concrete parent/child transport and grant representation in design;
   the operator has selected parent-first delegation of held authority, not a
   particular protocol or indiscriminate inheritance of every privilege.

@@ -11,6 +11,8 @@ maintenance workspaces have deliberately greater authority.
   boundaries, policy layering, tool workflows, human controls and deployment.
 - **[Product requirements and dogfooding](docs/product-requirements.md)** —
   operator direction, observed friction and end-to-end acceptance criteria.
+- **[Claude/Codex reference models](docs/reference-permissions.md)** — common
+  tool authorization, additional workspace roots and bounded child authority.
 - **[Review and recommendations](docs/review/recommendations.md)** — prioritized
   gaps towards convenient, safe Claude/Codex-like operation, acceptance criteria
   and requirements to clarify.
