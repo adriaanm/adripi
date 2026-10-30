@@ -299,9 +299,11 @@ test("the published broker carries the trusted global maintenance roots", async 
 import { appendFileSync } from "node:fs";
 let prompt = "";
 for await (const chunk of process.stdin) prompt += chunk;
+const input = JSON.parse(prompt.slice(prompt.indexOf(" ") + 1));
+prompt = JSON.stringify(JSON.parse(input.prompt).action, null, 2);
 appendFileSync(${JSON.stringify(reviewerLog)}, JSON.stringify({ prompt }) + "\\n");
 const assessment = {risk_level:"low",user_authorization:"medium",outcome:"allow",rationale:"Bounded and authorized."};
-process.stdout.write(JSON.stringify({type:"message_end",message:{role:"assistant",content:[{type:"text",text:JSON.stringify(assessment)}]}}) + "\\n");
+process.stdout.write(JSON.stringify({type:"guardian_review_result",nonce:input.nonce,assessment}) + "\\n");
 `,
 		{ mode: 0o700 },
 	);

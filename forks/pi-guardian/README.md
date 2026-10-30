@@ -2,7 +2,7 @@
 
 Stateful automatic safety review for the [Pi coding agent](https://github.com/earendil-works/pi-mono).
 
-Pi normally executes model-requested tools without an approval boundary. Pi Guardian intercepts tool calls, applies fixed permission rules first, and asks a separate safety-focused Pi conversation to assess actions that still need review. The Guardian conversation persists across reviews, so it retains its earlier decisions and receives only new parent-session history after its first assessment.
+Pi normally executes model-requested tools without an approval boundary. Pi Guardian intercepts tool calls, applies fixed permission rules first, and asks a separate safety-focused Pi conversation to assess actions that still need review. The Guardian conversation persists across reviews, with pruning-first context management: full ordered user directives, retained denials and a small task-evidence checkpoint instead of an indefinitely growing history of repetitive decisions.
 
 ## How it works
 
@@ -10,18 +10,18 @@ For each parent Pi session, the extension creates one Guardian sidecar session w
 
 When a reviewed tool is called:
 
-1. The extension takes an active-branch snapshot through the assistant message containing the tool call.
+1. The extension takes the current active-branch evidence and binds the exact action and parent-call chain independently. New restrictions, denials, warnings or generation changes invalidate queued/running speculative results.
 2. It renders a bounded full transcript on the first review or a delta after the saved cursor.
-3. It recursively starts Pi in JSON print mode with the existing Guardian session ID.
-4. The sidecar uses an independent reviewer model, the bundled safety policy, and no tools, extensions, skills, project context, or prompt templates.
-5. A strict four-field JSON assessment is parsed. `allow` continues tool execution; `deny` becomes an error tool result visible to the parent model.
+3. It starts a tool-free, ephemeral Pi JSON-print bootstrap with an explicit internal command. The managed SDK runner alone opens the exact existing Guardian session ID.
+4. The runner uses the configured reviewer/provider, no tools or ambient resources, and owned in-memory settings. It prunes completed routine allows and duplicated evidence before optionally invoking Pi's summary helper on residual untrusted task evidence. Exact full-branch user directives and protected denial evidence are never silently truncated or delegated to that lossy summary.
+5. A request-bound terminal record carries the strict four-field JSON assessment. `allow` continues tool execution; `deny` becomes an error tool result visible to the parent model.
 6. Timeout, process failure, missing authentication, oversized actions, and malformed responses fail closed.
 
 The top-level `codemode` script is reviewed. Each non-exempt nested call is reviewed on demand with its exact computed arguments and the full parent-call arguments (outermost first), including the script even when transcript bounds would truncate it. Missing parent evidence or an oversized action plus parent chain fails closed. Permission rules apply identically to nested calls. MCP tools such as `mcp__server__tool` are unknown tools and receive review; server annotations such as `readOnlyHint` never grant exemptions. The built-in `tool_search` only ranks tool metadata and activates matching declarations for future requests; it does not execute those tools.
 
-Top-level sibling tool calls are speculatively reviewed as a batch as soon as the assistant message finishes, with up to four sidecar requests in flight by default. Pi still invokes its tool preflight hooks sequentially, but those hooks normally consume decisions that are already running or complete. The first-ever review initializes the sidecar session before its siblings fan out; later batches launch immediately in parallel.
+Top-level sibling reviews are still prepared speculatively, but **one writer owns each durable reviewer UUID**. Tool and sandbox reviews share the same queue, including retries and compaction. Timeout/cancellation waits for actual process close before handing ownership onward. A cross-process exclusive lock refuses another owner; normal/TERM exit cleans up its own lock, while SIGKILL/crash may require human stale-lock recovery. Never remove a lock while its owner is running.
 
-The sidecar is a short-lived process per review, but its Pi conversation is durable. Reusing its session ID also gives supported providers a stable prompt-cache key. Parallel reviews may create sibling branches in that conversation; the next batch follows the most recently appended leaf rather than attempting to merge those review branches.
+The sidecar is short-lived, while its SDK conversation and usage audit remain durable. Reusing its session ID preserves supported provider prompt-cache identity. Serialization prevents the old sibling-leaf loss of denial evidence, but may reduce batch throughput; latency savings are not claimed from helper tests.
 
 An always-on indicator above the editor shows `⬭ guardian enabled` in yellow or `Ψ guardian disabled` in red, followed on the same line by the reviewer model in muted gray. Configuration errors get their own red state rather than claiming that protection is active. While reviews are pending, Pi's animated working row shows how many tools Guardian is reviewing. When each finishes, an `allowed`, `denied`, or `review failed` card is written into the TUI transcript. These cards are durable extension entries, so they reappear when the session is resumed but are never sent to the parent model. Expand a card to see its review timestamp and sidecar session ID.
 
@@ -75,7 +75,8 @@ Optional user-level configuration lives at `~/.pi/agent/guardian.json` (or the c
 Additional settings:
 
 - `guardianSessionDir`: overrides the default `~/.pi/agent/guardian-sessions` directory.
-- `maxParallelReviews`: caps simultaneous Guardian sidecar processes; additional sibling reviews remain queued.
+- `maxParallelReviews`: caps speculative tool-review scheduling; each reviewer UUID still has only one durable writer, including sandbox reviews. Queue time counts toward `timeoutMs`.
+- `reviewer.context`: `maxTokens` (32768), `targetTokens` (8192), `pruneAfter` (8 completed visible reviews) and `maxDirectiveChars` (128000). Positive safe integers, with target below maximum. Defaults apply without editing an existing config. Token counts are UTF-8/3 estimates with policy/output headroom, not provider-exact counts. Oversized exact inputs, pinned evidence, unsafe legacy migration, failed or ineffective compaction fail closed. See [context management](../../docs/guardian-context.md).
 - `policyPath`: uses a user-owned replacement for the bundled policy.
 - `piCommand`: explicit path to the Pi executable if recursive invocation cannot infer it from the current process.
 - `enabled: false`: explicitly disables review and allows tools normally.
@@ -233,7 +234,7 @@ Each completed reviewer attempt or fixed rule deny appends an assessment event:
 }
 ```
 
-Rule records reserve/reuse the Guardian session ID but do not increment the reviewer review count or transcript cursor. They have no `failure` or `failureHelp`. A fixed deny remains authoritative even if parent evidence is missing; in that case `actionHash` hashes the fallback `{tool_name, tool_call_id, input}` rather than a full action. `parentToolCallId` is omitted for top-level calls. `parentCursorEntryId` is omitted when no containing assistant entry can be located. Review failures add `failure` and `failureHelp` strings and produce a deny assessment. `risk_level` is `low|medium|high|critical`, `user_authorization` is `unknown|low|medium|high`, and `outcome` is `allow|deny`. `actionHash` hashes the JSON action including full parent evidence for nested calls. Exempt or disabled calls do not produce assessment records; initialization failures block tools using the status error rather than a reviewer assessment. Additional `pi-guardian.state` entries are internal state, not assessment records.
+Rule records reserve/reuse the Guardian session ID but do not increment the reviewer review count or transcript cursor. They have no `failure` or `failureHelp`. A fixed deny remains authoritative even if parent evidence is missing; in that case `actionHash` hashes the fallback `{tool_name, tool_call_id, input}` rather than a full action. `parentToolCallId` is omitted for top-level calls. `parentCursorEntryId` is omitted when no containing assistant entry can be located. Review failures add `failure` and `failureHelp` strings and produce a deny assessment. `risk_level` is `low|medium|high|critical`, `user_authorization` is `unknown|low|medium|high`, and `outcome` is `allow|deny`. `actionHash` hashes the JSON action including full parent evidence for nested calls. Exempt or disabled calls do not produce assessment records; initialization failures block tools using the status error rather than a reviewer assessment. Additional `pi-guardian.state` entries are internal state, not assessment records. A stale parent session or reviewer generation is blocked without appending the old state/audit into the newer branch.
 
 ## Security boundary
 
@@ -253,7 +254,7 @@ pnpm run check
 
 The credential-free headless test also checks a protected read denied by a rule with no reviewer request. It runs the real local Pi CLI and real recursive reviewer Pi processes against a loopback mock OpenAI-compatible endpoint, executes a reviewed codemode script and nested bash call, and checks stdout records for enabled, invalid, and disabled configurations.
 
-Tests cover strict assessment parsing, transcript trust labels and deltas, state restoration, denial tracking, recursive invocation flags, and a fake sidecar process including malformed-output retry.
+Tests cover strict assessments, transcript framing/deltas, state restoration, denial tracking, managed bootstrap flags, real SDK pruning/summarization/retry and real CLI transport with a credential-free local provider. The HTTP headless test still hits a pre-existing native libuv assertion on the current Node26 runtime; full compatible-runtime acceptance remains open. See [the context verification record](../../docs/guardian-context.md).
 
 ## Local change: `reviewer.extensions`
 
@@ -270,5 +271,7 @@ extension (for example `npm:@aliou/pi-neuralwatt`), list that extension in
 }
 ```
 
-Only the listed entries are loaded by the reviewer sidecar, which still runs
-with `--no-tools` and `--no-extensions`. See `VENDOR.md` for the full patch set.
+Only the listed provider entries plus the trusted internal managed-review
+bootstrap are explicitly loaded. The SDK reviewer itself loads only the listed
+providers, with no tools or ambient resources. The CLI still uses `--no-tools`
+and `--no-extensions`. See `VENDOR.md` for the full patch set.

@@ -58,6 +58,10 @@ function conciseFailure(error: unknown): string {
 
 export function guardianFailureHelp(failure: string, configPath: string): string {
 	const normalized = failure.toLowerCase();
+	if (normalized.includes("context") || normalized.includes("compact") || normalized.includes("directives")) {
+		return `Guardian kept the action blocked. Check reviewer.context in ${configPath}; an oversized legacy reviewer may require human compaction of that exact session.`;
+	}
+	if (normalized.includes("locked")) return "Wait for the reviewer owner to exit; a human must investigate a stale reviewer lock. Do not delete it while a reviewer is running.";
 	if (normalized.includes("timed out")) {
 		return `Check reviewer connectivity or increase reviewer.timeoutMs in ${configPath}.`;
 	}
@@ -118,6 +122,8 @@ interface PendingReview {
 	parentSessionId: string;
 	state: GuardianStateV1;
 	actionHash: string;
+	evidenceKey?: string;
+	configSnapshot?: GuardianConfig;
 	promise: Promise<ReviewExecution>;
 }
 
@@ -151,6 +157,7 @@ async function assessAction(
 	transcript: RenderedTranscript,
 	action: GuardianAction,
 	signal: AbortSignal | undefined,
+	validate?: () => void,
 ): Promise<ReviewExecution> {
 	try {
 		const serializedAction = JSON.stringify(action);
@@ -163,6 +170,8 @@ async function assessAction(
 				state,
 				buildReviewPrompt(parentSessionId, transcript, action, config.permissions.deny),
 				signal,
+				{ directives: [], evidence: [], ...transcript.reviewContext, action },
+				validate,
 			),
 			validReview: true,
 		};
@@ -247,6 +256,24 @@ function findAssistantCursor(branch: readonly SessionEntry[], toolCallId: string
 		}
 	}
 	return undefined;
+}
+
+/** Canonical evidence key ignores only Guardian bookkeeping and this already-bound planned assistant call. */
+export function reviewEvidenceKey(branch: readonly SessionEntry[], toolCallId?: string): string {
+	return hashText(JSON.stringify(branch.flatMap<unknown>((entry) => {
+		if (["usage", "label", "session_info", "thinking_level_change"].includes(entry.type)) return [];
+		if (entry.type === "message") {
+			if (toolCallId && assistantToolCalls(entry.message).some((call) => call.toolCallId === toolCallId)) return [];
+			return [{ type: entry.type, id: entry.message.role === "user" ? entry.id : undefined, message: entry.message }];
+		}
+		if (entry.type === "custom") {
+			const data = entry.data as { assessment?: { outcome?: string }; decision?: string } | undefined;
+			if ((entry.customType === GUARDIAN_ASSESSMENT_ENTRY && data?.assessment?.outcome === "deny") ||
+				(entry.customType === SANDBOX_EXCEPTION_ENTRY && (data?.decision === "deny" || data?.decision === "defer"))) return [entry];
+			return [];
+		}
+		return [entry];
+	})));
 }
 
 export default function guardianExtension(pi: ExtensionAPI) {
@@ -542,6 +569,15 @@ export default function guardianExtension(pi: ExtensionAPI) {
 	 * transcript cursor: a sandbox review is not a reviewed tool call, and moving
 	 * the cursor would hide context from the next tool review.
 	 */
+	const evidenceValidator = (ctx: ExtensionContext, activeConfig: GuardianConfig, state: GuardianStateV1, key: string, toolCallId?: string) => () => {
+		const latest = findGuardianState(ctx.sessionManager.getBranch());
+		if (config !== activeConfig || !config.enabled || policyHash !== state.policyHash ||
+			ctx.sessionManager.getSessionId() !== state.parentSessionId || latestCtx?.sessionManager.getSessionId() !== state.parentSessionId ||
+			(latest && latest.guardianSessionId !== state.guardianSessionId) || reviewEvidenceKey(ctx.sessionManager.getBranch(), toolCallId) !== key) {
+			throw new Error("Guardian parent evidence or reviewer generation changed while review was queued/running; stale verdict rejected");
+		}
+	};
+
 	const reviewSandboxException = async (request: SandboxExceptionRequest) => {
 		const ctx = latestCtx;
 		if (!ctx) throw new Error("no active Pi session context for sandbox review");
@@ -556,8 +592,10 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		const assessment = await requestGuardianAssessment(
 			config,
 			state,
-			buildSandboxExceptionPrompt(request, transcript.text),
+			buildSandboxExceptionPrompt(transcript),
 			ctx.signal,
+			{ directives: [], evidence: [], ...transcript.reviewContext, action: request },
+			evidenceValidator(ctx, config, state, reviewEvidenceKey(branch)),
 		);
 		return sandboxOutcomeFromAssessment(assessment, request);
 	};
@@ -601,6 +639,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		transcript: RenderedTranscript,
 		signal: AbortSignal | undefined,
 		parentActions?: GuardianParentAction[],
+		validate?: () => void,
 	): PreparedReview => {
 		try {
 			const action = createAction(toolName, toolCallId, input, cwd);
@@ -612,7 +651,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 			return {
 				actionHash: hashAction(action),
 				canBootstrap: true,
-				launch: () => assessAction(activeConfig, state, parentSessionId, transcript, action, signal),
+				launch: () => assessAction(activeConfig, state, parentSessionId, transcript, action, signal, validate),
 			};
 		} catch (error) {
 			const failure = conciseFailure(error);
@@ -661,6 +700,8 @@ export default function guardianExtension(pi: ExtensionAPI) {
 				parentSessionId,
 				transcript,
 				ctx.signal,
+				undefined,
+				evidenceValidator(ctx, activeConfig, state, reviewEvidenceKey(previewBranch, call.toolCallId), call.toolCallId),
 			),
 		}));
 
@@ -682,6 +723,8 @@ export default function guardianExtension(pi: ExtensionAPI) {
 				parentSessionId,
 				state,
 				actionHash: review.actionHash,
+				evidenceKey: reviewEvidenceKey(previewBranch, call.toolCallId),
+				configSnapshot: activeConfig,
 				promise,
 			});
 		}
@@ -764,10 +807,10 @@ export default function guardianExtension(pi: ExtensionAPI) {
 				!pending ||
 				pending.parentSessionId !== parentSessionId ||
 				pending.actionHash !== actionHash ||
-				pending.state.guardianSessionId !== state.guardianSessionId
+				pending.state.guardianSessionId !== state.guardianSessionId ||
+				pending.evidenceKey !== reviewEvidenceKey(branch, event.toolCallId)
 			) {
-				const snapshot = cursorEntryId ? branch.slice(0, branch.findIndex((entry) => entry.id === cursorEntryId) + 1) : branch;
-				const transcript = renderGuardianTranscript(snapshot, state.lastReviewedParentEntryId, config.transcript);
+				const transcript = renderGuardianTranscript(branch, state.lastReviewedParentEntryId, config.transcript);
 				const prepared = prepareReview(
 					event.toolName,
 					event.toolCallId,
@@ -779,12 +822,15 @@ export default function guardianExtension(pi: ExtensionAPI) {
 					transcript,
 					ctx.signal,
 					action.parent_actions,
+					evidenceValidator(ctx, config, state, reviewEvidenceKey(branch, event.toolCallId), event.toolCallId),
 				);
 				actionHash = prepared.actionHash;
 				pending = {
 					parentSessionId,
 					state,
 					actionHash,
+					evidenceKey: reviewEvidenceKey(branch, event.toolCallId),
+					configSnapshot: config,
 					promise: trackReview(withReviewSlot(prepared.launch), ctx),
 				};
 			}
@@ -798,9 +844,16 @@ export default function guardianExtension(pi: ExtensionAPI) {
 			};
 		}
 
-		const { assessment, failure, validReview } = await pending.promise;
+		let { assessment, failure, validReview } = await pending.promise;
+		if (!ruleExecution && validReview) {
+			try { evidenceValidator(ctx, pending.configSnapshot ?? config, state, pending.evidenceKey ?? "", event.toolCallId)(); }
+			catch (error) { failure = conciseFailure(error); assessment = failedClosedAssessment(failure); validReview = false; }
+		}
 		const latestState = findGuardianState(ctx.sessionManager.getBranch());
-		if (latestState && latestState.guardianSessionId === state.guardianSessionId) state = latestState;
+		if (ctx.sessionManager.getSessionId() !== parentSessionId || (latestState && latestState.guardianSessionId !== state.guardianSessionId)) {
+			return { block: true, reason: denialReason(failedClosedAssessment("Parent session/reviewer generation changed; stale review cannot advance or overwrite its state"), false, true) };
+		}
+		if (latestState) state = latestState;
 		state = updateDenialState(state, turnKey, assessment.outcome === "deny");
 		if (validReview) {
 			state = {

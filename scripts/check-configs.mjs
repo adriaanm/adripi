@@ -20,6 +20,10 @@ if (typeof guardian.reviewer?.model !== "string" || !guardian.reviewer.model.inc
 if (!Array.isArray(guardian.reviewer?.extensions)) {
   throw new Error("config/guardian.json: reviewer.extensions must be an array");
 }
+const context = guardian.reviewer.context;
+if (!context || !["maxTokens", "targetTokens", "pruneAfter", "maxDirectiveChars"].every((key) => Number.isSafeInteger(context[key]) && context[key] > 0) || context.targetTokens >= context.maxTokens) {
+  throw new Error("config/guardian.json: expected valid reviewer context budgets");
+}
 if (guardian.policyPath !== "~/.pi/agent/guardian-policy.md") {
   throw new Error("config/guardian.json: policyPath must point at the portable guardian policy");
 }

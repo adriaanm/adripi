@@ -7,6 +7,7 @@ interface TranscriptItem {
 	index: number;
 	kind: EntryKind;
 	text: string;
+	truncated?: boolean;
 }
 
 function stringify(value: unknown): string {
@@ -143,7 +144,7 @@ function selectWithinBounds(items: TranscriptItem[], bounds: TranscriptBounds): 
 			messageChars += text.length;
 		}
 		if (item.kind !== "user") recentNonUser++;
-		selected.push({ ...item, text });
+		selected.push({ ...item, text, truncated: text !== item.text });
 	}
 
 	selected.sort((left, right) => left.index - right.index);
@@ -176,7 +177,18 @@ export function renderGuardianTranscript(
 	const selected = selectWithinBounds(rendered, bounds);
 	const body = selected.items.length > 0 ? selected.items.map((item) => item.text).join("\n\n") : "<no new retained transcript entries>";
 	const omission = selected.omitted > 0 ? `\n\n<guardian_transcript_entries_omitted count="${selected.omitted}" />` : "";
+	// Directives come from the full actual branch, never the bounded/delta rendering.
+	// JSON framing preserves provenance even when untrusted text spoofs trust labels.
+	const directives = branch.flatMap((entry) => entry.type === "message" && entry.message.role === "user"
+		? [{ id: entry.id, text: renderContent(entry.message.content) }] : []);
+	const denials = branch.flatMap((entry) => {
+		if (entry.type !== "custom" || !["pi-guardian.assessment", "guardian-sandbox-exception"].includes(entry.customType)) return [];
+		const data = entry.data as { assessment?: { outcome?: string }; decision?: string } | undefined;
+		return data?.assessment?.outcome === "deny" || data?.decision === "deny" || data?.decision === "defer" ? [{ id: entry.id, text: stringify(entry.data) }] : [];
+	});
 	return {
+		truncatedEntries: selected.items.filter((item) => item.truncated).length,
+		reviewContext: { directives, denials, evidence: selected.items.filter((item) => item.kind !== "user").map((item) => ({ id: branch[item.index].id, text: item.text })) },
 		mode,
 		text: `${body}${omission}`,
 		cursorEntryId: branch.at(-1)?.id,

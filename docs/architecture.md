@@ -43,7 +43,7 @@ actual launch path, not an assumption about the approved parent call.
 | Fork | Main additions |
 |---|---|
 | `pi-sbx` | Scratch space, one inline escalation API/dispatcher, serialized execution-local path policy and rollback, shared native/Bash path authorizer, per-connection network decisions, one human adapter, additive policy layers, maintenance privilege, guidance and snapshot-bound standing-rule handoff |
-| `pi-guardian` | Explicit reviewer provider extensions, child-runner invocation fix, review-failure reporting, sandbox exception broker/rules/audit, canonical trusted maintenance resolver, session-bound broker, provenance-preserving restrictions, trusted project policy and persistence service, target-only matching for file write/edit payloads |
+| `pi-guardian` | Managed SDK reviewer with pruning-first checkpoints, pinned directives/denials, one queued/locked UUID writer and nonce-bound terminal results; explicit reviewer provider extensions, child-runner invocation fix, review-failure reporting, sandbox exception broker/rules/audit, canonical trusted maintenance resolver, session-bound broker, provenance-preserving restrictions, trusted project policy and persistence service, target-only matching for file write/edit payloads |
 | `pi-subagents` | Host-only child-authority API, actual-process IPC primitives and code-only shared registry. Launch admission and permission consumers are not wired yet. |
 
 Detailed provenance and update records:

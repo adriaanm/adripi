@@ -7,7 +7,13 @@
     ],
     "thinking": "low",
     "timeoutMs": 90000,
-    "maxAttempts": 3
+    "maxAttempts": 3,
+    "context": {
+      "maxTokens": 32768,
+      "targetTokens": 8192,
+      "pruneAfter": 8,
+      "maxDirectiveChars": 128000
+    }
   },
   "exemptTools": [
     "read",

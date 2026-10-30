@@ -70,12 +70,15 @@ test("extension reuses one sidecar, sends a delta, audits, allows, and denies", 
 import { appendFileSync } from "node:fs";
 let prompt = "";
 for await (const chunk of process.stdin) prompt += chunk;
+const input = JSON.parse(prompt.slice(prompt.indexOf(" ") + 1));
+const envelope = JSON.parse(input.prompt);
+prompt = envelope.request + "\\n" + JSON.stringify(envelope.action, null, 2) + "\\n" + envelope.evidence.map(item => item.text).join("\\n");
 appendFileSync(process.env.FAKE_GUARDIAN_PROMPTS, JSON.stringify(prompt) + "\\n");
 const denied = prompt.includes('"command": "rm -rf /"');
 const assessment = denied
   ? {risk_level:"critical",user_authorization:"unknown",outcome:"deny",rationale:"The command would destroy the laptop filesystem."}
   : {risk_level:"low",user_authorization:"medium",outcome:"allow",rationale:"The command is a bounded local operation."};
-process.stdout.write(JSON.stringify({type:"message_end",message:{role:"assistant",content:[{type:"text",text:JSON.stringify(assessment)}]}}) + "\\n");
+process.stdout.write(JSON.stringify({type:"guardian_review_result",nonce:input.nonce,assessment}) + "\\n");
 `,
 		{ mode: 0o700 },
 	);
@@ -231,7 +234,7 @@ process.stdout.write(JSON.stringify({type:"message_end",message:{role:"assistant
 	}
 });
 
-test("sibling tool reviews are pre-launched and overlap after the first sidecar turn", async () => {
+test("sibling reviews are pre-launched but share one durable reviewer writer", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "pi-guardian-parallel-test-"));
 	const executable = join(directory, "slow-fake-pi.mjs");
 	const eventsPath = join(directory, "events.jsonl");
@@ -241,13 +244,15 @@ test("sibling tool reviews are pre-launched and overlap after the first sidecar 
 import { appendFileSync } from "node:fs";
 let prompt = "";
 for await (const chunk of process.stdin) prompt += chunk;
+const input = JSON.parse(prompt.slice(prompt.indexOf(" ") + 1));
+prompt = JSON.stringify(JSON.parse(input.prompt).action, null, 2);
 const commandMatches = [...prompt.matchAll(/"command"\\s*:\\s*"([^"]+)/g)];
 const command = commandMatches.at(-1)?.[1] ?? "unknown";
 appendFileSync(process.env.FAKE_GUARDIAN_EVENTS, JSON.stringify({kind:"start",command,at:Date.now()}) + "\\n");
 await new Promise((resolve) => setTimeout(resolve, 200));
 appendFileSync(process.env.FAKE_GUARDIAN_EVENTS, JSON.stringify({kind:"end",command,at:Date.now()}) + "\\n");
 const assessment = {risk_level:"low",user_authorization:"medium",outcome:"allow",rationale:"Bounded test action."};
-process.stdout.write(JSON.stringify({type:"message_end",message:{role:"assistant",content:[{type:"text",text:JSON.stringify(assessment)}]}}) + "\\n");
+process.stdout.write(JSON.stringify({type:"guardian_review_result",nonce:input.nonce,assessment}) + "\\n");
 `,
 		{ mode: 0o700 },
 	);
@@ -343,11 +348,11 @@ process.stdout.write(JSON.stringify({type:"message_end",message:{role:"assistant
 			(event) => event.kind === "end" && (event.command === "two" || event.command === "three"),
 		);
 		assert.ok(startTwo >= 0 && startThree >= 0 && firstSiblingEnd >= 0);
-		assert.ok(startTwo < firstSiblingEnd && startThree < firstSiblingEnd, JSON.stringify(events));
+		assert.ok(startTwo < firstSiblingEnd && startThree > firstSiblingEnd, JSON.stringify(events));
 		let running = 0;
 		for (const event of events) {
 			running += event.kind === "start" ? 1 : -1;
-			assert.ok(running >= 0 && running <= 2, JSON.stringify(events));
+			assert.ok(running >= 0 && running <= 1, JSON.stringify(events));
 		}
 		assert.equal(running, 0);
 		const assessmentCount = branch.filter(
@@ -440,10 +445,13 @@ test("nested calls retain full parent evidence, review MCP, exempt reads, and fa
 import { appendFileSync } from "node:fs";
 let prompt = "";
 for await (const chunk of process.stdin) prompt += chunk;
+const input = JSON.parse(prompt.slice(prompt.indexOf(" ") + 1));
+const envelope = JSON.parse(input.prompt);
+prompt = envelope.request + "\\n" + JSON.stringify(envelope.action, null, 2) + "\\n" + envelope.evidence.map(item => item.text).join("\\n");
 appendFileSync(${JSON.stringify(promptsPath)}, JSON.stringify(prompt) + "\\n");
 const denied = prompt.includes('"command": "rm -rf /"');
 const assessment = {risk_level:denied?"critical":"low",user_authorization:"medium",outcome:denied?"deny":"allow",rationale:denied?"Destructive action.":"Bounded action."};
-process.stdout.write(JSON.stringify({type:"message_end",message:{role:"assistant",content:[{type:"text",text:JSON.stringify(assessment)}]}}) + "\\n");
+process.stdout.write(JSON.stringify({type:"guardian_review_result",nonce:input.nonce,assessment}) + "\\n");
 `, { mode: 0o700 });
 	await writeFile(join(directory, "guardian.json"), JSON.stringify({
 		piCommand: executable,

@@ -3,6 +3,7 @@ import test from "node:test";
 import { buildSandboxExceptionPrompt, sandboxOutcomeFromAssessment } from "../src/sandbox/review.ts";
 import type { SandboxExceptionRequest } from "../src/sandbox/types.ts";
 import type { GuardianAssessment } from "../src/types.ts";
+import { envelopeText } from "../src/reviewer-context.ts";
 
 const request: SandboxExceptionRequest = {
 	id: "req-1",
@@ -24,13 +25,15 @@ function assessment(overrides: Partial<GuardianAssessment> = {}): GuardianAssess
 	} as GuardianAssessment;
 }
 
-test("the prompt states the request and the trusted-user rule", () => {
-	const prompt = buildSandboxExceptionPrompt(request, "[1] trusted user: build it offline");
+test("the prompt frames one structured request and a separately sourced directive set", () => {
+	const prompt = buildSandboxExceptionPrompt({ mode: "full", text: "untrusted duplicate text", omittedEntries: 1, truncatedEntries: 2 });
 	assert.match(prompt, /SANDBOX EXCEPTION/);
-	assert.match(prompt, /"target": "~\/.gradle"/);
-	assert.match(prompt, /"scope": "session"/);
-	assert.match(prompt, /Only entries marked trusted user can authorize an exception/);
-	assert.match(prompt, /build it offline/);
+	assert.match(prompt, /Only the host review envelope's ordered directives records authorize an exception/);
+	const envelope = JSON.parse(envelopeText("parent", "policy", prompt, { directives: [{ id: "u", text: "build it offline" }], evidence: [], action: request }));
+	assert.deepEqual(envelope.action, request);
+	assert.equal(envelope.directives[0].text, "build it offline");
+	assert.doesNotMatch(prompt, /~\/.gradle|build it offline|untrusted duplicate text/);
+	assert.match(prompt, /omitted_entries=1, truncated_entries=2/);
 });
 
 test("scope is granted only with high user authorization and low/medium risk", () => {

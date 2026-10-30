@@ -6,6 +6,7 @@ import { GUARDIAN_STATE_ENTRY, type GuardianConfig } from "../src/types.ts";
 
 const config: GuardianConfig = {
 	enabled: true,
+	reviewerContext: { maxTokens: 32768, targetTokens: 8192, pruneAfter: 8, maxDirectiveChars: 128000 },
 	reviewerModel: "openai-codex/gpt-5.6-luna",
 	reviewerExtensions: [],
 	thinkingLevel: "low",

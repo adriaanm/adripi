@@ -62,7 +62,8 @@ test("loads only explicitly configured reviewer extensions", () => {
 	const extensions = ["npm:@aliou/pi-neuralwatt@0.18.0", "/opt/provider.ts"];
 	const args = buildSidecarArgs({ ...config, reviewerExtensions: extensions }, state);
 	const configured = args.flatMap((arg, index) => (arg === "--extension" ? [args[index + 1]] : []));
-	assert.deepEqual(configured, extensions);
+	assert.ok(configured[0].endsWith("/managed-reviewer.ts"));
+	assert.deepEqual(configured.slice(1), extensions);
 	assert.ok(args.includes("--no-extensions"));
 	assert.ok(args.includes("--no-tools"));
 });

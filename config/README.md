@@ -238,12 +238,28 @@ rules.
 (`SandboxRuntimeConfig`); both the loader and the runtime accept it directly, so
 there is no second syntax to keep in sync.
 
+## Guardian context budgets
+
+`reviewer.context` defaults to `maxTokens: 32768`, `targetTokens: 8192`,
+`pruneAfter: 8`, `maxDirectiveChars: 128000`. Defaults apply in code to existing
+configs: no template merge/live edit is required. Guardian prunes repeated allows
+and duplicate evidence first, summarizing residual task evidence only if needed.
+Full ordered user directives and denials stay protected. Token estimates include
+policy/output headroom and are not exact provider counts. Excessive protected
+history or unsafe legacy recovery fails closed, never silently truncates it.
+
+All reviews of one UUID serialize, including sandbox reviews and compaction.
+Timeout waits for process exit. A stale `.guardian-<UUID>.lock` requires human
+investigation; do not remove one while its owner is running. Stable UUID, audit,
+denial streak and parent cursor survive pruning. This changes no standing
+permission or live Guardian toggle. See [the implementation record](../docs/guardian-context.md).
+
 ## Guardian reviewer extensions
 
 The vendored guardian fork adds `reviewer.extensions`. Only the entries in that
-array are loaded by the reviewer sidecar. The sidecar still uses `--no-tools`
-and `--no-extensions`; it cannot call tools and no other user/project extension
-is loaded.
+array and the trusted internal managed-review bootstrap are loaded explicitly.
+The actual SDK reviewer loads only those providers and no tools or ambient
+resources. The CLI still uses `--no-tools` and `--no-extensions`.
 
 Use this when the reviewer provider is supplied by a Pi extension, for example:
 

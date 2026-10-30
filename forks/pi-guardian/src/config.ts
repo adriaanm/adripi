@@ -6,6 +6,8 @@ import { validateSandboxRules } from "./sandbox/rules.ts";
 import type { GuardianConfig, GuardianPermissions, TranscriptBounds } from "./types.ts";
 import type { SandboxExceptionRules } from "./sandbox/types.ts";
 
+import { resolveContextOptions, type ContextOptions } from "./reviewer-context.ts";
+
 const BARE_TOOL = /^[\w-]+$/;
 
 const DEFAULT_TRANSCRIPT: TranscriptBounds = {
@@ -24,6 +26,7 @@ interface GuardianConfigFile {
 		timeoutMs?: number;
 		maxAttempts?: number;
 		extensions?: string[];
+		context?: Partial<ContextOptions>;
 	};
 	maxConsecutiveDenials?: number;
 	maxParallelReviews?: number;
@@ -45,7 +48,7 @@ function expandHome(path: string): string {
 
 function positiveInteger(value: unknown, fallback: number, name: string): number {
 	if (value === undefined) return fallback;
-	if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
 		throw new Error(`${name} must be a positive integer`);
 	}
 	return value;
@@ -153,8 +156,11 @@ export function loadGuardianConfig(agentDir: string, bundledPolicyPath: string):
 		throw new Error("reviewer.extensions must be an array of non-empty paths or npm: sources");
 	}
 
+	const reviewerContext = resolveContextOptions(file.reviewer?.context);
+
 	return {
 		enabled: file.enabled ?? true,
+		reviewerContext,
 		reviewerModel: nonEmptyString(file.reviewer?.model, "openai-codex/gpt-5.6-luna", "reviewer.model"),
 		reviewerExtensions: reviewerExtensions.map((extension) => resolveReviewerExtension(extension.trim(), agentDir)),
 		thinkingLevel: nonEmptyString(file.reviewer?.thinking, "low", "reviewer.thinking"),

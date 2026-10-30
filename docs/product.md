@@ -242,6 +242,20 @@ Guardian protects a configured relocated audit directory in both of its gates;
 pi-sbx's static OS hardening still names the default agent-dir audit path. Do not
 infer complete OS protection for a relocated audit root from these rule tests.
 
+### Guardian reviewer context
+
+Guardian now uses one managed SDK reviewer per request behind a tool-free,
+nonpersistent CLI bootstrap. Its durable UUID/audit remain stable. Full user
+instructions are host-framed independently of transcript bounds; routine old
+allows and duplicate evidence are pruned before Pi summarizes residual task
+context. Denials and unresolved records stay protected. One queue and exclusive
+lock cover tool and sandbox reviews, retries and compaction, with process-close
+ownership release. No allow becomes standing permission or new authority.
+Existing configs receive code-default context budgets without a live edit. See
+[the context implementation and limitations](guardian-context.md), including
+legacy/oversized-history fail-closed recovery and the still-open Node26 HTTP
+headless gate. This is source-only, not evidence of a restarted installation.
+
 ## 5. Verification, deployment and remaining work
 
 Round 1 and round-2 first-wave tests exercise registered tool dispatch, native

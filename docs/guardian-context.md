@@ -1,211 +1,193 @@
 # Guardian context: prune before summarizing
 
-## Status and operator direction
+## Status and scope
 
-This is a **source investigation and proposed implementation contract**, not a
-shipped compaction feature. Todo #25 takes priority over the paused, uncommitted
-child-authority wiring. The operator wants aggressive context reduction for fast
-Guardian responses and specifically requested our own pre-compaction pruning,
-preserving user directives while filtering repetitive decisions. Separate cost
-reporting remains todo #24.
+Source implementation of todo #25, following the operator's request for
+aggressive context reduction focused on user directives rather than repetitive
+review decisions. No deployment, live configuration/session edit, restart,
+provider/model change or guard toggle was performed. The human had disabled
+Guardian after its reviewer overflowed approximately 1,054,733 prompt tokens
+against a 1,048,576-token limit. The paused, dirty child-authority wiring is a
+separate, unaccepted change; no workers own either tree now.
 
-The operator manually compacted a linked reviewer successfully in another
-session. This session also reached approximately 1,054,733 prompt tokens against
-a 1,048,576-token context limit, blocking even a todo update, and the operator
-then explicitly disabled Guardian here. No agent action changed the live toggle,
-configuration, reviewer JSONL, deployment or runtime. Manual recovery is evidence
-of usability, not an end-to-end test of automatic recovery.
+The initial research/design is preserved at `61d3e9b`. Its five synthetic SDK
+probes pass with existing SDK 1.0.0 and installed SDK 1.4.0; they are not production
+acceptance tests. The implementation uses a supported **owned SDK session**,
+not an extension-context cast, raw JSONL rewrite, new permission store or alternate
+model fallback.
 
-## What the current code actually does
+## One implementation, one durable writer
 
-- `forks/pi-guardian/src/sidecar.ts` starts **one short-lived JSON-print process
-  per review/format retry**, with the same persisted reviewer session UUID. There
-  is no Guardian-specific context budget, pruning or compaction protocol. Generic
-  Pi settings/behavior can affect the subprocess; we have not established which
-  setting or runtime behavior caused this particular overflow.
-- `src/index.ts` pre-launches up to `maxParallelReviews` speculative tool reviews.
-  The first review bootstraps before fanout, but later processes can open the
-  same reviewer session concurrently. The README explicitly describes following
-  the latest leaf instead of merging siblings. The sandbox broker uses this same
-  reviewer conversation but does not go through the tool-review slot queue.
-- Tool prompts repeat fixed denies, trust instructions, transcript and the exact
-  action. Format retries add more turns. Sandbox-exception reviews deliberately
-  send a **full bounded transcript**, not a delta, and do not advance the parent
-  tool-review cursor. Simply shortening assistant verdicts misses much of the
-  repeated input.
-- `src/transcript.ts` separates user/assistant/tool provenance but selects entries
-  newest-first against shared character limits. User entries can be omitted or
-  truncated. A pruner cannot use that already-bounded text as its only source of
-  user directives. `src/prompt.ts` uses textual trust labels; parsing those labels
-  back out of untrusted message bodies would not establish provenance.
-- `src/state.ts` owns the stable reviewer link, generation, denial streak and
-  parent transcript cursor. Pruning/compaction must not reset any of them or
-  advance the cursor merely because history was shortened. Existing fixed rules
-  remain authoritative outside the reviewer; this work adds no permission store.
+`src/sidecar.ts` retains the existing Pi executable selection and explicit provider
+extension allowlist. It starts a **tool-free JSON-print CLI bootstrap with
+`--no-session`**, explicitly loading `src/managed-reviewer.ts`. Its internal
+command creates the SDK reviewer. The CLI never sends an ordinary review prompt
+to its own model or becomes a second writer of the reviewer UUID.
 
-## Supported Pi mechanisms and probes
+The managed runner:
 
-The installed Pi 1.4.0 compaction/extensions/session-format docs and the Guardian
-1.0.0 development SDK expose the necessary building blocks:
+1. exclusively locks `.guardian-<UUID>.lock` in the configured audit directory;
+2. opens the exact existing reviewer UUID, or creates it if absent, refusing
+   ambiguous identities;
+3. loads only configured provider extensions, with no tools, skills, prompt
+   templates, themes or ambient project context;
+4. selects the configured reviewer model **after** provider binding and refuses
+   fallback to another model;
+5. owns an in-memory settings manager: generic automatic compaction and retries
+   are disabled **only in that owned SDK instance**, because this controller
+   explicitly manages budgets and structured-output retries. No live settings
+   file or Guardian switch is changed;
+6. performs pruning, optional summarization and review, then disposes the SDK
+   before emitting a nonce-bound terminal result through Pi's native entry event.
 
-1. `SessionManager.buildSessionProjection()` supplies canonical, branch-relative
-   model context with source-entry provenance.
-2. Append-only `context_edit` entries can omit or replace earlier message
-   contributions. Original entries, usage and audit history remain stored.
-3. `turn_end` / `agent_before_settle` support proposed context-edit/custom-message
-   entries at a validated lifecycle boundary. An extension context's session
-   manager is **read-only**: do not cast around it to call mutators directly.
-4. Pi compaction prepares its input from that canonical projection. A transient
-   `context` hook filter alone would shrink one review but still leave repeated
-   material for subsequent compaction. Use canonical edits for persistent pruning.
-5. Use supported `AgentSession.compact()` / lifecycle integration for actual
-   summarization, not a new summarizer or handwritten JSONL/checkpoint rewriting.
-   The `ctx.compact()` callback example is useful reference, but is **not proof**
-   that an asynchronous compaction completes before a JSON-print sidecar exits.
-   Check and test the real process/lifecycle before choosing that binding.
+A per-UUID parent queue covers **all** `requestGuardianAssessment` callers,
+including sandbox reviews and format retries. `maxParallelReviews` still caps
+speculative tool-review scheduling, but one UUID has only one durable writer.
+Queue time counts toward its deadline. Parent evidence (including new user
+restrictions, denials and tool warnings), session identity, config and reviewer
+generation are revalidated at queue admission, after the process closes and at
+consumption. A changed snapshot blocks rather than accepting an obsolete allow;
+a stale action cannot roll back a newer generation or advance its cursor. On timeout/abort, the queue retains
+ownership until process close, including TERM/KILL cleanup. A second independent
+process is refused by the exclusive lock. Normal/TERM process exit releases its
+own lock; SIGKILL or a crash can leave a stale lock requiring human investigation.
+Never remove a lock while its owner is running, and never automatically steal it.
 
-Research probes: `docs/review/guardian-pruning-probes.test.mjs`.
+Serialization fixes the earlier sibling-leaf loss of denial evidence. It can also
+reduce batch throughput; smaller-context latency benefits are not established by
+text-size or helper tests.
 
-```sh
-node --experimental-strip-types --test docs/review/guardian-pruning-probes.test.mjs
-# Optionally set GUARDIAN_PROBE_SDK_ROOT to an existing Pi package root.
-```
+## Provenance and retention
 
-**Five probes pass with both existing SDK 1.0.0 and installed SDK 1.4.0**, Node
-26.6.0. They use synthetic in-memory sessions and no AgentSession, provider,
-credentials or real reviewer audit. They show:
+`src/transcript.ts` extracts **all ordered user text on the actual parent active
+branch before character limits or transcript-cursor slicing**. Directive text
+and source entry IDs travel separately from the bounded assistant/tool evidence.
+A delta cannot omit an old restriction from this directive set. Tools/assistant
+messages cannot mint directives by writing a textual “trusted user” label. The
+trust boundary is canonical SDK user-message roles and trusted installed
+extensions, not hardware attestation: SDK 1.0 does not persist interactive/RPC/
+extension input-source metadata on each message. A trusted extension that
+synthesizes user-role entries is inside that boundary.
 
-- omitting fixture-associated old allow exchanges shrinks projected content by
-  more than 80%, leaving the fixture's directives, denial and two recent pairs;
-- the original serialized entries stay identical and a second pruning pass adds
-  no redundant edits;
-- actual compaction preparation excludes the omitted input;
-- selecting a sibling/pre-edit branch can bypass the edits or omit a denial;
-- today's bounded parent renderer can omit an old explicit user restriction.
+`src/reviewer-context.ts` frames the current review as `guardian-review-v1` JSON:
 
-These are **mechanism/counterexample probes**, not a production classifier,
-security acceptance, latency benchmark or evidence of model judgment quality.
-The probe imports internal `prepareCompaction` only to inspect preparation; that
-is not a proposed production dependency on an internal SDK export.
+- `directives`: ordered, source-ID-bearing user text;
+- `evidence`: bounded, explicitly untrusted parent context with source IDs;
+- `denials`: parent audit denials/failures;
+- `action`: the exact action, including nested-call evidence;
+- `request`: small review instructions and evidence omission/truncation counts,
+  **not another copy of the transcript or action**;
+- parent session and policy identity.
 
-## Proposed retention contract
+The runtime appends protocol/framing instructions to the configured policy, so
+existing custom policy files need no live edit to understand this framing.
+Policies/templates also document it. Only the current envelope's directives
+establish user authorization. Historical verdicts, summaries, labels and action
+text do not. These are model evidence semantics, **not a formal prompt-injection
+proof or a deterministic authorization cache**.
 
-### 1. Parent-owned, provenance-bearing evidence
+Completed valid exchanges receive code-owned metadata binding request/response
+entry IDs and a digest of the exact envelope. Pruning operates on canonical
+active-branch contributions, not all sibling branches. It:
 
-Prepare one structured review envelope for both tool and sandbox reviews. Supply
-user directives independently of the bounded assistant/tool transcript, from the
-same actual parent active-branch snapshot used to prepare the review:
+- deduplicates copied evidence by source ID **and content**, keeping conflicting
+  content rather than silently trusting an ID collision;
+- removes routine allow verdicts and duplicated request boilerplate only after
+  their novel actions/reviewer notes are retained as untrusted task evidence,
+  retaining a short recent-decision tail (review is not execution proof);
+- preserves denied exact actions/rationales, distinct-action negatives, parent
+  denies and unresolved malformed/error records outside any lossy summary;
+- pins **complete** unknown legacy, malformed, partial, edited or unassociated
+  canonical material outside lossy summarization. It cannot prove that material's
+  directive/safety evidence was accounted for; an old apparent allow is not enough;
+- never treats a prior allow as standing permission or a later allow as erasing
+  a prior denial. Current user directives may change authorization; fixed rules
+  remain authoritative.
 
-- ordered source session/entry IDs and exact user text, including restrictions,
-  reversals and current task intent;
-- source IDs, action identity and rationale for relevant prior denials, plus
-  unresolved failures/safety evidence and pending review identities;
-- bounded, explicitly untrusted recent task evidence;
-- the exact current action, including nested parent-call evidence, unchanged;
-- generation, parent cursor and schema/version association.
+Directives are re-supplied verbatim for each review and are also retained in
+checkpoint details. They are never passed to the lossy task-evidence summarizer.
+The exact current action and directive set are re-supplied on every format retry;
+there is no “same action” reference that might point into pruned history.
 
-Do not infer a user's authorization from assistant prose, a prior `allow`, a
-model-produced summary or strings saying “trusted user”. Do not regex-scrape the
-current free-form prompt to create a supposedly trusted ledger. Preserve text
-quoting and order; identical directives in different task/turn contexts are not
-necessarily interchangeable. An oversized protected directive set must be
-explicitly handled (or fail closed), never silently truncated to meet a budget.
-This envelope is evidence for existing review, **not new held/standing authority**.
+## Deterministic checkpoint first, Pi summarization second
 
-### 2. Deterministic pruning first
+The owned public `SessionManager` permits a supported append-only
+`appendCompaction(..., firstKeptEntryId: null, ...)` checkpoint. This is the
+pruning operation: older raw entries remain intact in the same audit tree, but
+their repeated model contributions are replaced by the reduced, typed checkpoint.
+It avoids an important lifecycle trap: an extension's session manager is
+read-only, and asynchronous `ctx.compact()` callbacks do not by themselves prove
+completion before a short-lived JSON-print process exits.
 
-Prune only **completed, code-associated** exchanges whose retained evidence has
-been accounted for. Start with the clearly redundant parts:
+If reduced task evidence still exceeds the target, the runner calls Pi's existing
+`generateSummaryWithUsage`, through the **same configured model's ModelRuntime**
+with explicit output bounds, cancellation and the stable session ID. Only
+untrusted task evidence/previous task summary enters this call. Exact protected
+denial records and user directives stay outside it. Empty, aborted,
+length-limited, failed or ineffective summaries block the review. Summary usage
+is stored once on the checkpoint, not added again to a parent tool result.
+Separate Guardian cost presentation remains todo #24.
 
-- repeated policy/trust boilerplate already supplied for the current review;
-- duplicate copies of parent evidence identified by source entry IDs/content;
-- routine old allow verdicts, without turning an aggregate count into permission;
-- old request/response wrappers after their directive, denial and novel evidence
-  contributions have been retained elsewhere in the projection.
+No cursor, denial streak, reviewer generation, standing rule or baseline
+permission changes merely because pruning occurs. Only the normal successful
+parent review advances its existing cursor. Sandbox reviews retain their existing
+no-cursor-advance behavior.
 
-A completed `allow` by itself does **not** prove its whole request is redundant:
-that request may contain a newly revoked authorization, an error or a security
-warning. Account for those separately before pruning the pair. Keep a small
-recent tail, but do not use “last N messages” as the sole retention rule. Unknown
-legacy prompts, malformed/failed reviews, incomplete pairs and speculative
-unconsumed reviews are ineligible until safely migrated or accounted for.
+## Budgets and recovery
 
-Keep earlier denials and their target/scope/reason even after later allows. Only
-actual user evidence may change authorization, and it does not automatically
-withdraw fixed restrictions. Do not coalesce different actions by command
-prefix, tool name, path similarity or a model's “equivalent” label. Allows never
-become an authorization cache. Retain unresolved safety evidence; exact duplicate
-records may reference one copy only when provenance/ordering remain explicit.
+`reviewer.context` has code defaults, also shown in the new-install template:
 
-### 3. Aggressive budget; summarization only for residual context
+| Setting | Default | Meaning |
+|---|---:|---|
+| `maxTokens` | 32768 | Maximum estimated context admission, additionally capped by model headroom |
+| `targetTokens` | 8192 | Target retained history after reduction |
+| `pruneAfter` | 8 | Completed visible exchanges before another pruning pass |
+| `maxDirectiveChars` | 128000 | Protected directive serialization ceiling; excess denies, never truncates |
 
-Aim for a small working history, not a fraction of a million-token model limit.
-An initial **tuning proposal**, not a measured SLA: roughly 16k estimated tokens
-of retained history, with pruning/compaction triggered around 32k and a short
-recent tail. Include policy, directives, the incoming envelope, output and summary
-headroom in admission; a single incoming review may itself exceed those history
-targets under today's character limits. Characters/4 is an estimate, not an exact
-or universally conservative tokenizer. Small models require tighter headroom.
+All values are positive safe integers; target must be below maximum. Initial
+reduction, periodic pruning and soft pressure around twice the target provide
+hysteresis. Protected evidence may exceed the **soft** target, never the hard
+admission limit; this floor does not force another checkpoint after every call. UTF-8 bytes/3
+is a heuristic, not an exact provider tokenizer. Admission includes current input,
+policy, advertised output allowance and extra margin. A small model or a large
+incoming action may require tighter/adjusted budgets; character admission does
+not guarantee token fit.
 
-Re-estimate after deterministic pruning. Skip the LLM compaction when pruning is
-sufficient. Otherwise compact the residual task evidence with safety-focused
-instructions, preserving/re-supplying the exact directive and denial evidence
-outside any lossy summary. Check the projected result before allowing another
-review. Failure, abortion, unavailable budget or ineffective compaction remains
-fail closed. No reset/fork/model switch, silent omission of the active action or
-unbounded retry to evade overflow. Use hysteresis/idempotence to avoid compacting
-after every tiny review.
+Protected evidence too large for the available budget fails closed. Likewise, a
+large legacy history that cannot safely fit summarization headroom requires human
+recovery of **that exact linked reviewer session**. No reset, new session, silent
+history discard, alternate model, automatic stale-lock removal or repeated
+unsafe overflow attempts. Defaults apply to existing config files without merging
+or writing them. Live policy/setting changes and installation are separate human
+actions.
 
-### 4. One writer per reviewer session
+## Verification and remaining gates
 
-Pruning is branch-relative, so adding a pruner to the existing concurrent
-same-UUID writers is unsafe. One coordinator must cover **all** users of
-`requestGuardianAssessment`, including sandbox reviews and format retries, and
-own admission, pruning, compaction and session write/exit. A timed-out process
-must be confirmed terminal before releasing that ownership; today's sidecar
-rejects promptly on timeout while termination may still be pending.
+- Guardian typecheck: pass.
+- **150 non-headless tests pass**, including actual SDK projection and summary
+  calls using a credential-free native faux provider, persistent-UUID factory
+  restore, and a **real CLI → internal command → SDK → terminal-result** test.
+- Negative tests cover lost/truncated directive regression, forged trust labels,
+  distinct denials, mismatched metadata, format retry, prior-success/provider
+  errors, cancellation, length/incomplete/ineffective summary, protected/input/
+  legacy/small-model headroom, invalid config, nonce mismatch/duplicate results,
+  locks, confirmed process-close serialization, queued/running parent restriction/
+  denial/tool-warning changes and generation rollback. A large-resume fixture
+  reduces the **actual provider request** by over 80% before its first request,
+  with no summary call and no raw-audit deletion. That is a size fixture, not a
+  live-provider latency/cost benchmark.
+- The 20 managed-review tests also pass against the already-installed SDK 1.4.0
+  using an isolated source copy and its own native faux provider, on the same
+  Node26 runtime. No package installation, dependency switch or HTTP-headless
+  bypass. Evidence: `.local/guardian-context/sdk14.log`.
+- Full `npm test` was run: **150 pass, one existing HTTP headless test fails by
+  Node26's native libuv assertion** `env_->execution_async_id() == 0`. Evidence:
+  `.local/guardian-context/full-test.log`. No alternate runtime was installed or
+  silently selected. Todo #4 remains the compatible-runtime gate; full runtime
+  acceptance is not claimed.
 
-Prefer a single serialized durable reviewer writer for the initial integration.
-Do not silently claim to preserve existing parallelism, or add independent
-reviewer sessions without a separately reviewed merge/provenance contract.
-Speculative preparation may still happen in parallel, but stale prepared
-snapshots must not skip directives/denials committed before their admission.
-Measure per-action and batch latency: smaller context may help, serialization
-may hurt batch throughput, and neither effect is established by these probes.
-
-### 5. Audit, compatibility and acceptance
-
-Pruning changes future model projection, not raw audit, parent transcript cursor,
-denial streak, generation or action binding. Require observable completion of the
-trusted context manager before accepting a verdict: extension hook failures may
-otherwise be logged while Pi continues. Preserve failure/help attribution and do
-not accept earlier assistant text after a later failed turn/compaction.
-
-Existing reviewer history has no typed pruning association. Migration must not
-pretend arbitrary legacy prompt text has verified directive provenance. Rebuild
-from actual parent branch/audit evidence where possible; retain unknown evidence
-or refuse automatic migration when that cannot be done safely. Do not edit live
-JSONL to retrofit metadata or discard a history simply because it is too large.
-
-Required acceptance before claiming delivery:
-
-- real registered reviewer lifecycle before the first provider request, including
-  an already-large resumed history; actual pruning followed by actual compaction;
-- provenance/injection/changed-authorization tests, old denies followed by allows,
-  distinct-action negatives, malformed/failed/partial review retention;
-- duplicate full sandbox transcript and format-retry coverage;
-- simultaneous tool and broker reviews, cancellation/timeout/process termination,
-  branch/restart/generation isolation, and no stale-leaf/cursor regression;
-- explicit small-model/large-input/output headroom and failed/no-op compaction;
-- separate input/output/cache/compaction usage, count/frequency and elapsed times,
-  with no price or latency claim from text-size reduction alone;
-- full non-headless suite/typecheck plus the existing compatible-runtime headless
-  gate (Node 26's known native crash is still unresolved).
-
-## Scope boundary
-
-No implementation/deployment is certified by this record. The old wiring
-candidates and parent repairs remain untouched and unaccepted. This investigation
-uses no workers, new dependency, provider calls or live-session access. Source
-implementation, tests and documentation are the next step; installation, live
-configuration changes and restart remain separate human actions.
+The earlier mechanism probes remain in
+`docs/review/guardian-pruning-probes.test.mjs`. The implementation tests live in
+`forks/pi-guardian/test/{managed-reviewer,context-config,sidecar,transcript}.test.ts`
+and the registered Guardian/broker suites. They do not establish live-provider
+latency, cost savings, a restarted installation or OS/production-child containment.

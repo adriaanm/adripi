@@ -101,6 +101,7 @@ export interface GuardianConfig {
 	timeoutMs: number;
 	maxAttempts: number;
 	maxParallelReviews: number;
+	reviewerContext: import("./reviewer-context.ts").ContextOptions;
 	maxConsecutiveDenials: number;
 	maxActionChars: number;
 	guardianSessionDir: string;
@@ -114,6 +115,8 @@ export interface GuardianConfig {
 }
 
 export interface RenderedTranscript {
+	truncatedEntries?: number;
+	reviewContext?: Omit<import("./reviewer-context.ts").ReviewContext, "action">;
 	mode: "full" | "delta";
 	text: string;
 	cursorEntryId?: string;

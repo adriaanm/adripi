@@ -153,6 +153,42 @@ deltas are listed below; nothing else is modified.
       exercises the real native pi-sbx gate consuming the published Guardian
       broker and compares both forks' canonical maintenance-root decisions.
 
+16. `src/reviewer-context.ts`, `src/managed-reviewer.ts`, `src/sidecar.ts` and
+    `src/{types,config,transcript,index,prompt}.ts` — pruning-first reviewer context.
+    A single explicit tool-free CLI bootstrap delegates to an owned SDK session
+    (the outer CLI is `--no-session`, not another writer). Full ordered user text
+    is extracted before transcript/delta bounds, typed evidence is source/content
+    deduplicated, completed routine allows are reduced to a short recent tail,
+    and exact denial/unresolved records remain protected. Unknown legacy and
+    edited canonical contributions stay exact outside lossy summarization.
+    The incoming prompt carries action/evidence once, not duplicate rendered
+    transcripts. Novel allowed actions/notes are retained as untrusted task state,
+    not discarded with routine verdict boilerplate. Soft-target hysteresis avoids
+    redundant checkpointing, while protected evidence can exceed that soft target
+    but never hard admission. Parent evidence/generation is revalidated at queued
+    admission, process close and verdict consumption; stale results cannot advance
+    cursors or overwrite a newer generation. A supported SDK
+    append-only deterministic checkpoint replaces repeated history; Pi's existing
+    `generateSummaryWithUsage` handles only residual untrusted task evidence when
+    needed. Summary usage is recorded once on the checkpoint. Normal review and
+    format retries retain the exact current action and directives. No raw JSONL
+    rewrite, new permission store, context reset or alternate-model recovery.
+    `reviewer.context` has code defaults for existing configs; settings used by
+    the managed SDK are in-memory, never a live Pi settings edit. The same
+    configured model/provider is selected explicitly after provider registration,
+    without accepting SDK model fallback. The source appends framing instructions
+    to custom policies; `prompts/guardian-policy.md` also documents the envelope.
+    Parent tool/broker calls share one per-UUID queue, and an exclusive cross-
+    process lock rejects another writer. Timeout waits for process close; TERM
+    exit releases its own lock; SIGKILL may leave a human-recoverable stale lock.
+    Only a matching nonce-bound terminal result is accepted, never stale assistant
+    text. Context, directive, output and legacy-migration failures deny. Tests
+    exercise real SDK projection/summarization/retry and an actual CLI bootstrap
+    with a credential-free local provider, plus transport serialization and
+    fail-closed negatives. Full HTTP headless remains blocked by Node26's known
+    native assertion; no deployment or live-provider latency claim. See
+    [the context record](../../docs/guardian-context.md).
+
 Upstream 0.2.0 already covers the rest of what the 0.1.0 fork needed: the
 deterministic `permissions.allow` / `permissions.deny` rule family (evaluated
 before any reviewer call), `tool_search` exemption, and the durable assessment

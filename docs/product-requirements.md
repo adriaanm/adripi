@@ -290,8 +290,11 @@ is an implementation strategy.
 **Evidence/design:** manual reviewer compaction restored another operator session;
 this session subsequently exceeded its model's 1M context and blocked tools until
 the operator disabled Guardian. [The context investigation](guardian-context.md)
-records five credential-free SDK probes and the proposed pruning-first contract,
-not an implemented production feature.
+records five initial probes and the source implementation: a tool-free owned SDK
+reviewer, pruning-first checkpoints, protected directives/denials, conservative
+legacy retention, and one tool/broker writer with stale-evidence rejection. Source
+regression coverage is green; live-provider latency/cost measurement, deployment
+and compatible-runtime HTTP headless acceptance remain open.
 
 ## Remaining design work
 

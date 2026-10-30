@@ -171,6 +171,20 @@ Keep it short and behavioural —
 it is the only place a model learns this harness's conventions, so a new rule
 belongs there as well as in this file.
 
+## Guardian reviewer context
+
+`forks/pi-guardian/src/managed-reviewer.ts` owns the durable SDK reviewer;
+`sidecar.ts` launches only a tool-free ephemeral CLI bootstrap. Preserve the exact
+UUID, source-framed user directives, denials, raw audit and parent cursor.
+Deterministic pruning precedes Pi summarization of residual **untrusted** task
+evidence. Prior allows never become standing permission. Oversized pinned/legacy
+history and failed or ineffective summaries fail closed; do not reset the session
+or switch models. Tool and sandbox reviews share a per-UUID queue/lock, which is
+released only after process termination. Never remove a lock whose owner is
+running. SIGKILL stale locks require human investigation. Budget settings are
+owned/in-memory and must not mutate live Pi settings. See
+`docs/guardian-context.md`; deployment remains a separate human step.
+
 ## Verification
 
 - `just check` — shell syntax plus the config templates.

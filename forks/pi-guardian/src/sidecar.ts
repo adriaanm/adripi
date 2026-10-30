@@ -1,237 +1,138 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
+import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { parseGuardianAssessment } from "./assessment.ts";
-import { buildFormatRetryPrompt } from "./prompt.ts";
+import { CONTEXT_COMMAND, DEFAULT_CONTEXT, envelopeText, type ReviewContext } from "./reviewer-context.ts";
 import type { GuardianAssessment, GuardianConfig, GuardianStateV1 } from "./types.ts";
 
 const MAX_CAPTURE_BYTES = 4 * 1024 * 1024;
-
-interface PiInvocation {
-	command: string;
-	args: string[];
-}
-
-interface SidecarTurnResult {
-	text: string;
-	stderr: string;
-}
-
+interface PiInvocation { command: string; args: string[] }
 export function getPiInvocation(args: string[], configuredCommand?: string): PiInvocation {
 	if (configuredCommand) return { command: configuredCommand, args };
-	// pi-subagents runs child sessions through its own Node bootstrap. That
-	// script is not the Pi CLI, so relaunching process.argv[1] with Pi flags
-	// makes the bootstrap read "--mode" as a config file. Use the Pi executable
-	// instead, while still honoring an explicit piCommand above.
-	if (isNestedSubagentProcess()) {
-		return { command: process.env.PI_SUBAGENT_PI_BINARY?.trim() || "pi", args };
-	}
+	// The subagent bootstrap is not the Pi CLI; never recursively invoke it with CLI flags.
+	if (isNestedSubagentProcess()) return { command: process.env.PI_SUBAGENT_PI_BINARY?.trim() || "pi", args };
 	const currentScript = process.argv[1];
-	const isBunVirtualScript = currentScript?.startsWith("/$bunfs/root/");
-	if (currentScript && !isBunVirtualScript && existsSync(currentScript)) {
+	if (currentScript && !currentScript.startsWith("/$bunfs/root/") && existsSync(currentScript)) {
 		return { command: process.execPath, args: [currentScript, ...args] };
 	}
-
-	const execName = basename(process.execPath).toLowerCase();
-	const isGenericRuntime = /^(node|bun)(\.exe)?$/.test(execName);
-	if (!isGenericRuntime) return { command: process.execPath, args };
+	if (!/^(node|bun)(\.exe)?$/.test(basename(process.execPath).toLowerCase())) return { command: process.execPath, args };
 	return { command: "pi", args };
 }
-
 function isNestedSubagentProcess(): boolean {
-	if (process.env.PI_ASYNC_NATIVE_RUNNER === "1" || process.env.PI_SUBAGENT_RUNNER_CONFIG) return true;
-	const script = process.argv[1];
-	return Boolean(
-		script && /(?:^|[\\/])(?:subagent-runner(?:-bootstrap)?|binary-bootstrap|inspector-runner)\.(?:mjs|cjs|js|ts)$/i.test(script),
-	);
+	return process.env.PI_ASYNC_NATIVE_RUNNER === "1" || Boolean(process.env.PI_SUBAGENT_RUNNER_CONFIG) ||
+		Boolean(process.argv[1] && /(?:^|[\\/])(?:subagent-runner(?:-bootstrap)?|binary-bootstrap|inspector-runner)\.(?:mjs|cjs|js|ts)$/i.test(process.argv[1]));
 }
-
-export function buildSidecarArgs(config: GuardianConfig, state: GuardianStateV1): string[] {
-	const args = [
-		"--mode",
-		"json",
-		"--print",
-		"--session-dir",
-		state.guardianSessionDir,
-		"--session-id",
-		state.guardianSessionId,
-		"--model",
-		config.reviewerModel,
-		"--thinking",
-		config.thinkingLevel,
-		"--system-prompt",
-		config.policyPath,
-		"--no-tools",
-		"--no-extensions",
-		"--no-skills",
-		"--no-prompt-templates",
-		"--no-context-files",
-		"--no-themes",
-		"--no-approve",
-	];
-	for (const extension of config.reviewerExtensions ?? []) {
-		args.push("--extension", extension);
-	}
-	if (state.reviewCount === 0) args.push("--name", `Guardian for ${state.parentSessionId.slice(0, 12)}`);
+export function buildSidecarArgs(config: GuardianConfig, _state: GuardianStateV1): string[] {
+	// The CLI is only a portable bootstrap. The internal SDK runner alone owns the durable session.
+	const args = ["--mode", "json", "--print", "--no-session", "--model", config.reviewerModel, "--thinking", config.thinkingLevel,
+		"--system-prompt", config.policyPath, "--no-tools", "--no-extensions", "--no-skills", "--no-prompt-templates",
+		"--no-context-files", "--no-themes", "--no-approve", "--extension", fileURLToPath(new URL("./managed-reviewer.ts", import.meta.url))];
+	for (const extension of config.reviewerExtensions ?? []) args.push("--extension", extension);
 	return args;
 }
 
-function assistantTextFromEvent(event: unknown): string | undefined {
-	if (!event || typeof event !== "object") return undefined;
-	const record = event as Record<string, unknown>;
-	if (record.type !== "message_end" || !record.message || typeof record.message !== "object") return undefined;
-	const message = record.message as Record<string, unknown>;
-	if (message.role !== "assistant" || !Array.isArray(message.content)) return undefined;
-	const text = message.content
-		.filter(
-			(item): item is { type: "text"; text: string } =>
-				Boolean(item) &&
-				typeof item === "object" &&
-				(item as Record<string, unknown>).type === "text" &&
-				typeof (item as Record<string, unknown>).text === "string",
-		)
-		.map((item) => item.text)
-		.join("");
-	return text || undefined;
-}
-
-function assistantErrorFromEvent(event: unknown): string | undefined {
-	if (!event || typeof event !== "object") return undefined;
-	const record = event as Record<string, unknown>;
-	if (record.type !== "message_end" || !record.message || typeof record.message !== "object") return undefined;
-	const message = record.message as Record<string, unknown>;
-	if (message.role !== "assistant" || (message.stopReason !== "error" && message.stopReason !== "aborted")) return undefined;
-	return typeof message.errorMessage === "string" && message.errorMessage
-		? message.errorMessage
-		: `request ended with ${message.stopReason}`;
-}
-
-async function runSidecarTurn(
-	config: GuardianConfig,
-	state: GuardianStateV1,
-	prompt: string,
-	timeoutMs: number,
-	signal: AbortSignal | undefined,
-): Promise<SidecarTurnResult> {
+async function runSidecar(config: GuardianConfig, state: GuardianStateV1, prompt: string, timeoutMs: number, signal: AbortSignal | undefined, nonce: string): Promise<GuardianAssessment> {
 	const invocation = getPiInvocation(buildSidecarArgs(config, state), config.piCommand);
-	return await new Promise<SidecarTurnResult>((resolve, reject) => {
-		const child = spawn(invocation.command, invocation.args, {
-			cwd: process.cwd(),
-			shell: false,
-			stdio: ["pipe", "pipe", "pipe"],
-		});
-		let stdoutBuffer = "";
-		let stderr = "";
-		let latestAssistantText: string | undefined;
-		let latestAssistantError: string | undefined;
+	return await new Promise((resolve, reject) => {
+		const child = spawn(invocation.command, invocation.args, { cwd: process.cwd(), shell: false, stdio: ["pipe", "pipe", "pipe"] });
+		let buffer = "", stderr = "";
+		let result: GuardianAssessment | undefined;
+		let failure: Error | undefined;
 		let settled = false;
 		let killTimer: ReturnType<typeof setTimeout> | undefined;
-
-		const stopChild = () => {
-			if (child.exitCode !== null || child.signalCode !== null) return;
+		const stop = (error: Error) => {
+			failure ??= error;
+			if (child.exitCode !== null || child.signalCode !== null || killTimer) return;
 			child.kill("SIGTERM");
-			killTimer = setTimeout(() => {
-				if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-			}, 5_000);
+			killTimer = setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); }, 5_000);
 			killTimer.unref();
 		};
 		const finish = (error?: Error) => {
 			if (settled) return;
 			settled = true;
-			clearTimeout(timeout);
-			signal?.removeEventListener("abort", onAbort);
-			if (error) reject(error);
-			// A provider failure (e.g. 401) ends the reviewer turn with an error message rather than text.
-			else if (!latestAssistantText && latestAssistantError) reject(new Error(`Guardian reviewer request failed: ${latestAssistantError}`));
-			else if (!latestAssistantText) reject(new Error(`Guardian produced no assistant response${stderr ? `: ${stderr.trim()}` : ""}`));
-			else resolve({ text: latestAssistantText, stderr });
+			clearTimeout(timer);
+			if (killTimer) clearTimeout(killTimer);
+			signal?.removeEventListener("abort", abort);
+			if (error || failure) reject(failure ?? error);
+			else if (!result) reject(new Error(`Guardian produced no verified managed response${stderr ? `: ${stderr.trim()}` : ""}`));
+			else resolve(result);
 		};
-		const onAbort = () => {
-			stopChild();
-			finish(new Error("Guardian review was aborted"));
+		const consume = (line: string) => {
+			let event: Record<string, unknown>;
+			try { event = JSON.parse(line); } catch { return; } // Non-JSON diagnostics never establish success.
+			if (!event || typeof event !== "object" || Array.isArray(event)) return;
+			// Pi protects JSON stdout: extension output travels through its native entry event.
+			if (event.type === "entry_appended") {
+				const entry = event.entry as { customType?: string; data?: Record<string, unknown> } | undefined;
+				if (entry?.customType === "pi-guardian.managed-result" && entry.data) event = entry.data;
+			}
+			if (event.type === "guardian_review_result" && event.nonce === nonce) {
+				try {
+					if (result) throw new Error("Guardian returned duplicate managed results");
+					if (typeof event.error === "string") throw new Error(event.error);
+					result = parseGuardianAssessment(JSON.stringify(event.assessment));
+				} catch (error) { failure = error instanceof Error ? error : new Error(String(error)); }
+			}
+			if (event.type === "message_end") {
+				const message = event.message as Record<string, unknown> | undefined;
+				if (message?.stopReason === "error" || message?.stopReason === "aborted") failure = new Error(`Guardian reviewer request failed: ${message.errorMessage ?? message.stopReason}`);
+			}
 		};
-		const timeout = setTimeout(() => {
-			stopChild();
-			finish(new Error(`Guardian review timed out after ${timeoutMs}ms`));
-		}, timeoutMs);
-
+		const abort = () => stop(new Error("Guardian review was aborted"));
+		const timer = setTimeout(() => stop(new Error(`Guardian review timed out after ${timeoutMs}ms`)), timeoutMs);
 		child.stdout.setEncoding("utf8");
 		child.stdout.on("data", (chunk: string) => {
-			stdoutBuffer += chunk;
-			if (Buffer.byteLength(stdoutBuffer, "utf8") > MAX_CAPTURE_BYTES) {
-				stopChild();
-				finish(new Error("Guardian output exceeded the capture limit"));
-				return;
-			}
-			const lines = stdoutBuffer.split("\n");
-			stdoutBuffer = lines.pop() ?? "";
-			for (const line of lines) {
-				if (!line.trim()) continue;
-				try {
-					const event: unknown = JSON.parse(line);
-					latestAssistantText = assistantTextFromEvent(event) ?? latestAssistantText;
-					latestAssistantError = assistantErrorFromEvent(event) ?? latestAssistantError;
-				} catch {
-					// Pi startup diagnostics may be non-JSON. The process exit and assistant event remain authoritative.
-				}
-			}
+			if (settled || failure) return;
+			buffer += chunk;
+			if (Buffer.byteLength(buffer) > MAX_CAPTURE_BYTES) { buffer = ""; stop(new Error("Guardian output exceeded the capture limit")); return; }
+			const lines = buffer.split("\n"); buffer = lines.pop() ?? "";
+			for (const line of lines) if (line.trim()) consume(line);
 		});
 		child.stderr.setEncoding("utf8");
-		child.stderr.on("data", (chunk: string) => {
-			if (Buffer.byteLength(stderr, "utf8") < MAX_CAPTURE_BYTES) stderr += chunk;
+		child.stderr.on("data", (chunk: string) => { if (Buffer.byteLength(stderr) < MAX_CAPTURE_BYTES) stderr += chunk; });
+		child.on("error", (error) => {
+			const failed = new Error(`Guardian sidecar process error: ${error.message}`);
+			// Spawn failure has no writer. Runtime/kill errors do not prove that a
+			// launched writer terminated; retain ownership until its close event.
+			if (child.pid === undefined) finish(failed); else stop(failed);
 		});
-		child.on("error", (error) => finish(new Error(`Could not start Guardian sidecar: ${error.message}`)));
 		child.on("close", (code, childSignal) => {
-			if (killTimer) clearTimeout(killTimer);
-			if (stdoutBuffer.trim()) {
-				try {
-					const event: unknown = JSON.parse(stdoutBuffer);
-					latestAssistantText = assistantTextFromEvent(event) ?? latestAssistantText;
-					latestAssistantError = assistantErrorFromEvent(event) ?? latestAssistantError;
-				} catch {
-					// Ignore a trailing non-JSON diagnostic.
-				}
-			}
-			if (code !== 0) {
-				finish(
-					new Error(
-						`Guardian sidecar exited ${childSignal ? `with signal ${childSignal}` : `with code ${String(code)}`}${stderr ? `: ${stderr.trim()}` : ""}`,
-					),
-				);
-				return;
-			}
-			finish();
+			if (buffer.trim()) consume(buffer);
+			finish(code === 0 ? undefined : new Error(`Guardian sidecar exited ${childSignal ? `with signal ${childSignal}` : `with code ${String(code)}`}${stderr ? `: ${stderr.trim()}` : ""}`));
 		});
-
-		if (signal?.aborted) {
-			onAbort();
-			return;
-		}
-		signal?.addEventListener("abort", onAbort, { once: true });
-		child.stdin.on("error", (error) => finish(new Error(`Could not send Guardian prompt: ${error.message}`)));
+		// A timeout/abort does not release session ownership until close confirms termination.
+		if (signal?.aborted) { abort(); return; }
+		signal?.addEventListener("abort", abort, { once: true });
+		child.stdin.on("error", (error) => stop(new Error(`Could not send Guardian prompt: ${error.message}`)));
 		child.stdin.end(prompt);
 	});
 }
 
-export async function requestGuardianAssessment(
-	config: GuardianConfig,
-	state: GuardianStateV1,
-	prompt: string,
-	signal?: AbortSignal,
-): Promise<GuardianAssessment> {
-	let nextPrompt = prompt;
-	let lastError: Error | undefined;
+// All callers, including sandbox exception reviews, share this coordinator.
+const reviewerTails = new Map<string, Promise<void>>();
+export async function requestGuardianAssessment(config: GuardianConfig, state: GuardianStateV1, prompt: string, signal?: AbortSignal,
+	context: ReviewContext = { directives: [], evidence: [], action: prompt }, validate?: () => void): Promise<GuardianAssessment> {
 	const deadline = Date.now() + config.timeoutMs;
-	for (let attempt = 1; attempt <= config.maxAttempts; attempt++) {
+	const key = JSON.stringify([state.guardianSessionDir, state.guardianSessionId]);
+	const previous = reviewerTails.get(key) ?? Promise.resolve();
+	const work = previous.then(async () => {
+		if (signal?.aborted) throw new Error("Guardian review was aborted");
 		const remainingMs = deadline - Date.now();
-		if (remainingMs <= 0) throw new Error(`Guardian review timed out after ${config.timeoutMs}ms`);
-		const result = await runSidecarTurn(config, state, nextPrompt, remainingMs, signal);
-		try {
-			return parseGuardianAssessment(result.text);
-		} catch (error) {
-			lastError = error instanceof Error ? error : new Error(String(error));
-			nextPrompt = buildFormatRetryPrompt(lastError.message);
-		}
-	}
-	throw new Error(`Guardian returned malformed output after ${config.maxAttempts} attempts: ${lastError?.message ?? "unknown error"}`);
+		if (remainingMs <= 0) throw new Error(`Guardian review timed out after ${config.timeoutMs}ms while queued`);
+		validate?.(); // Queued/speculative evidence must still belong to the active parent state.
+		const nonce = randomUUID();
+		const input = { version: 1, nonce, sessionId: state.guardianSessionId, sessionDir: state.guardianSessionDir, parentSessionId: state.parentSessionId,
+			agentDir: config.agentDir, policyPath: config.policyPath, policyHash: state.policyHash, model: config.reviewerModel, thinking: config.thinkingLevel,
+			extensions: [...(config.reviewerExtensions ?? [])], options: config.reviewerContext ?? DEFAULT_CONTEXT, maxAttempts: config.maxAttempts,
+			prompt: envelopeText(state.parentSessionId, state.policyHash, prompt, context) };
+		const result = await runSidecar(config, state, `/${CONTEXT_COMMAND} ${JSON.stringify(input)}`, remainingMs, signal, nonce);
+		validate?.();
+		return result;
+	});
+	const tail = work.then(() => {}, () => {});
+	reviewerTails.set(key, tail);
+	try { return await work; }
+	finally { if (reviewerTails.get(key) === tail) reviewerTails.delete(key); }
 }
