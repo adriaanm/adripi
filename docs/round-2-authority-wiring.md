@@ -28,6 +28,44 @@ findings and test limitations. Model-only supervisor prose never grants permissi
 Missing tools/services and failed approvals stop the affected route; no alternate
 runner, Bash/native substitution or silent source/test bypass.
 
+## Guarded-mode activation decision
+
+The launch worker requested a binding decision after finding that “guarded” was
+undefined. Parent chose **host-registration activation, not a blanket ban in bare
+pi-subagents**, with fail-closed strengthening:
+
+- A launch is guarded when the actual host session has mandatory required-child
+  extensions registered **or the provider slot is present**, even if malformed or
+  unavailable. Mandatory inherited/retained snapshots may only tighten admission.
+  Provider-present/registration-missing is not a bare-session fallback. Obtain the
+  actual host session id; missing/malformed identity is not proof of bare mode.
+- pi-sbx registers canonical **pi-sbx + pi-guardian** entrypoints through the existing
+  `pi-subagents/required-child-extensions` API with `requireForAllRunners: true`.
+  The registration only demands enforcement; it cannot grant authority or replace
+  a live IPC lease. Other mandatory extensions also demand guarded placement.
+- Establish guard intent before asynchronous startup can fail. The session-bound
+  provider may publish an unavailable `prepare()` service until initialization
+  succeeds. Missing registration API, invalid config, disabled sandbox, SRT failure
+  or provider loss must not turn an opted-in parent into an unguarded one.
+- Keep mandatory registration for the parent session's entire active lifetime.
+  Sandbox off/tightening/failure revokes or refuses children; it does **not** dispose
+  registration. Dispose only at terminal session shutdown after launch quiescence.
+  Never replace/dispose another owner's provider or registration.
+- A bare pi-subagents host with neither mandatory registration nor a provider keeps
+  upstream launch behavior. That is outside this sandbox product's containment
+  claim, not a compatibility fallback taken after guarded admission fails.
+- In the runner, the actual host-created process IPC endpoint independently
+  requires a live lease. Writable config/env cannot drop a guard bit and skip
+  `awaitLease`/readiness. Mere endpoint detection grants nothing; authenticated
+  preparation, identity and code-only acknowledgments are still mandatory.
+
+This refines the caller/provider activation contract without changing the accepted
+IPC API. Both sole writers were notified through supervisor reply/live guidance.
+Review must include registered+missing provider, provider+missing registration,
+malformed provider, failed initialization/toggle without downgrade, and writable
+runner config unable to suppress actual-channel admission. This decision does not
+certify that either writer has implemented it yet.
+
 ## Frozen cross-component obligations
 
 - Use only `pi-subagents/child-authority` for host-code API. Provider slot remains
@@ -49,7 +87,7 @@ runner, Bash/native substitution or silent source/test bypass.
   custom factory or retry path. Failure shuts down child/session/lease, not just
   logs a warning. Parent loss/abort/revocation aborts the actual running session,
   including work that is not currently asking a permission question.
-- Before unsupported mutation or launch, explicitly refuse foreground shared
+- In guarded mode, before unsupported mutation or launch, explicitly refuse foreground shared
   process, chains/parallel/dynamic multi-child runners, nested children, external
   CLI/job/machine/binary/wrapper runners, unattended schedules and managed-worktree
   setup. Initially **all managed allocation is refused**; a human/parent-created
