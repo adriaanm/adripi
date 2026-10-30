@@ -105,6 +105,38 @@ To make a path permanently writable, add it to `filesystem.allowWrite` in
 `network.allowedDomains`. Prefer narrow entries (`~/.gradle/caches`) over
 `~/.gradle`.
 
+### Cross-workspace maintenance from adripi
+
+`adripi-project-sandbox.json` is an **opt-in project profile**, not an installer
+seed or a replacement for the global sandbox profile. To install it manually,
+from this repository run:
+
+```sh
+mkdir -p .pi
+cp config/adripi-project-sandbox.json .pi/sandbox.json
+```
+
+Start a fresh Pi session in this repo and approve the project profile when
+prompted. Its additive `filesystem.allowRead` / `allowWrite` roots cover
+`~/.pi/agent`, `~/g/bq268/wata` and `~/g/sgola`, plus this repo's existing write
+scope. Adjust those home-relative paths if the checkout layout differs. There
+is no separate `workspaceRoots` setting, and this profile does not import the
+other projects' network, socket or command permissions.
+
+Deny arrays replace rather than union. This template therefore retains all six
+secret-file write denies from `sandbox.json` and adds home-relative equivalents
+(`~/**/.env`, `~/**/*.key`, etc.). Relative globs alone protect only the current
+workspace, not the added roots. If the live global profile has extra custom
+write denies, retain them in this project profile too before installing it.
+
+This deliberately trusts adripi sessions to edit the two other workspaces,
+including their `.pi` configs. It does **not** make this repo's own `.pi`
+writable, remove inherited secret-file restrictions, expose `auth.json`, permit
+Guardian audit writes, or exempt operations from Guardian review. Agent-dir
+maintenance additionally requires this repo's absolute root in **both global**
+`agentDirWriteProjects` lists described below; the installer already provisions
+that grant. Adding it to a project profile would be ignored.
+
 ### Maintaining this profile from its own repo
 
 `agentDirWriteProjects` (top level in `sandbox.json`, and under `permissions` in

@@ -1,0 +1,31 @@
+{
+  "enabled": true,
+  "failIfUnavailable": true,
+  "filesystem": {
+    "allowRead": [
+      "~/.pi/agent",
+      "~/g/bq268/wata",
+      "~/g/sgola"
+    ],
+    "allowWrite": [
+      ".",
+      "~/.pi/agent",
+      "~/g/bq268/wata",
+      "~/g/sgola"
+    ],
+    "denyWrite": [
+      "**/.env",
+      "**/.env.*",
+      "**/*.pem",
+      "**/*.key",
+      "**/*.p12",
+      "**/*.pfx",
+      "~/**/.env",
+      "~/**/.env.*",
+      "~/**/*.pem",
+      "~/**/*.key",
+      "~/**/*.p12",
+      "~/**/*.pfx"
+    ]
+  }
+}

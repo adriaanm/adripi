@@ -82,6 +82,23 @@ if (
   throw new Error("config/guardian.json: permissions.agentDirWriteProjects must be an array of absolute project roots");
 }
 
+// This opt-in profile adds only named maintenance roots. Deny arrays replace,
+// so retain the template's denies and project them across home-relative roots.
+const project = read("adripi-project-sandbox.json");
+const roots = ["~/.pi/agent", "~/g/bq268/wata", "~/g/sgola"];
+if (
+  project.enabled !== true || project.failIfUnavailable !== true ||
+  Object.keys(project).some((key) => !["enabled", "failIfUnavailable", "filesystem"].includes(key)) ||
+  Object.keys(project.filesystem ?? {}).sort().join(",") !== "allowRead,allowWrite,denyWrite" ||
+  JSON.stringify(project.filesystem.allowRead) !== JSON.stringify(roots) ||
+  JSON.stringify(project.filesystem.allowWrite) !== JSON.stringify([".", ...roots]) ||
+  JSON.stringify(project.filesystem.denyWrite) !== JSON.stringify([
+    ...fsPolicy.denyWrite, ...fsPolicy.denyWrite.map((pattern) => `~/${pattern}`),
+  ])
+) {
+  throw new Error("config/adripi-project-sandbox.json: expected additive maintenance roots only");
+}
+
 const review = read("pi-review.json");
 if (review.schemaVersion !== 1 || !review.gate || !review.reviewers) {
   throw new Error("config/pi-review.json: expected schemaVersion 1, gate, and reviewers");
