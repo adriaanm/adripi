@@ -166,6 +166,11 @@ rather than simulate those consumers or report full parent-first delivery.
 
 ## Validation and next gate
 
+The first candidates are **not accepted**. See the [review/recovery
+record](round-2-wiring-recovery.md) for terminal run evidence, parent-arbitrated
+blockers and the bounded same-owner correction pass. That record supplements
+this contract; it does not authorize child consumers or deployment.
+
 Launch tests must hit the registered dispatch/spawn/factory boundaries and real
 IPC: no first prompt when consumers are missing, wrong identity, failed startup,
 parent loss, provider cancellation and unsupported placements **before mutation**.
