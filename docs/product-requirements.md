@@ -271,6 +271,28 @@ with the operator after a working baseline; do not invent success thresholds.
 **Evidence:** E5. Routine authorized coding should spend its effort on code,
 not on reverse-engineering its harness.
 
+### PR11 — Keep Guardian context small without losing user directives
+
+**Requirement:** the operator prioritized aggressive Guardian context reduction
+before continuing child-authority wiring, and requested deterministic
+pre-compaction pruning: preserve user directives while filtering repetitive
+review decisions. Prefer pruning duplicated evidence and routine completed allow
+exchanges before paying for LLM summarization. Prior allows never become standing
+permission; explicit restrictions, denials and changed authorization must survive.
+
+**Acceptance:** test the actual reviewer projection and compaction lifecycle,
+user/directive provenance, concurrent tool/broker reviews, legacy-history
+migration, cursor continuity, process termination and fail-closed overflow. Measure
+review and batch latency plus compaction usage/cost rather than claiming savings
+from a smaller synthetic transcript. No live session rewriting or guard disablement
+is an implementation strategy.
+
+**Evidence/design:** manual reviewer compaction restored another operator session;
+this session subsequently exceeded its model's 1M context and blocked tools until
+the operator disabled Guardian. [The context investigation](guardian-context.md)
+records five credential-free SDK probes and the proposed pruning-first contract,
+not an implemented production feature.
+
 ## Remaining design work
 
 D1 and the configured agent-directory spelling are confirmed. The operator asked
