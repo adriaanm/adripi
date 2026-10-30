@@ -108,6 +108,44 @@ cannot waive any of these.
   Retries must not silently reuse already-claimed readiness as a new session:
   explicitly refuse unsupported guarded retries or document/prove a safe path.
 
+## Correction-pass parent checks (not acceptance)
+
+Continuation workflow `9e5d1102-dfe6-4573-80f9-bc294c8a648b` resumes the original
+owners. Provider correction `d9eca61c-6311-422c-a201-ac05d2e13cfd` completed;
+launch continuation `6e886ac1-9bac-4027-954f-63b3b0a0ff8c` is the active sole
+launch writer at this checkpoint. Fresh reviews are sequenced after both
+handoffs. No candidate has been integrated.
+
+Parent independently reproduced the corrected provider's **22 files / 200
+passing tests** and passing typecheck. A separate no-write authorization probe
+still fails: a target in `ceiling.denyWrite` but not in the loosened current
+parent deny list reaches reviewer and human, then returns `allow`. The shared
+`authorizePathAction` checks the ceiling's mandatory locks but applies
+`pathGrantFeasibility` only to the current parent policy. A prepared configured
+write denial must remain final, not become an action-local missing-allow-root
+request. Reproducer and output are
+`.local/round-2-subagents/probe-corrected-ceiling.{ts,log}`; both reviewer and
+human were called once. This remains a **blocking defect** despite the green
+suite. Check ceiling feasibility before review as well as parent feasibility,
+and add the missing loosened-parent regression before acceptance.
+
+Also still requiring lifecycle inspection: same-session `session_start` sets
+`sessionStarted = false` without immediately revoking existing leases; failure
+before `reloadConfig` can leave an already-running child's lease signal live.
+`session_shutdown` currently removes guard intent before awaiting queue closure.
+Verify actual revocation/closing admission rather than accepting the handoff's
+claim that all quiescence belongs to another component. These are open parent
+findings, not claimed tested fixes.
+
+Launch owner asked for an existing broad-suite assertion update. Parent approved
+ONLY the test block at `test/integration/async-execution.part-3.test.ts` originally
+named "workflow children keep the mandatory extensions admitted with the workflow
+after the host disposes its registration". Its expected earlier missing-provider
+refusal may change, but its name/comments/assertions must reflect whether child
+discovery/disposal is actually reached. This is not permission for unrelated
+integration-suite edits. Supervisor request
+`6bb34a71-10fc-4974-aefc-edbdc8ecbb5f` received that bounded reply.
+
 ## Correction lanes and handoff gate
 
 Resume the SAME retained native nw-flash writers in their original isolated
