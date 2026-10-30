@@ -69,6 +69,56 @@ file ownership after the contract is fixed. No concurrent writers yet.
 - Authenticated cross-process transport requires verified launch provenance,
   integrity, audience and replay protection; no unauthenticated file/socket inbox.
 
+## Frozen design decisions (parent, after reviewing both design lanes)
+
+Baseline imported and committed as `7b0dc53` (typecheck, 4,140 unit tests and
+`build:pkg` green; see `forks/pi-subagents/VENDOR.md`). Decisions binding the
+implementation lanes:
+
+1. **Envelope transport is a host-written file, not env-carried authority.**
+   The parent host derives a `ChildAuthorityEnvelope` and writes
+   `<asyncDir>/authority/<envelopeId>.json` (atomic, `0600`, random id). The
+   child env carries only a reference (path + digest). `forks/pi-sbx` reads the
+   file at `session_start` **before any model call**, verifies the digest
+   against the env reference, the audience (runId/agent/childIndex/parent
+   session), canonical cwd equality and expiry. A model running later in the
+   child cannot influence that read. A scout proposal to put the whole
+   envelope in `process.env` was rejected: it leaks the scope description to
+   any child bash call and invites replay across launches.
+2. **No ack-file proof.** A child-side "applied" file is evidence at best and
+   forgery at worst; admission is enforced by requiring `pi-sbx` as a
+   mandatory required child extension (`requireForAllRunners`) whose startup
+   failure is already fatal, plus the digest/audience checks above. The launch
+   fails before the first `prompt()` when the envelope is absent, stale or
+   mismatched. Retained/resume re-derives from the parent's current held scope
+   and intersects with the retained envelope; it never revives a stale one.
+3. **Placement admission.** Supported: background async runner, single
+   (non-parallel) step, native Pi runner. Refused with a named error before
+   spawn: foreground `host: "parent"` (no env channel, shared SRT singleton),
+   parallel groups in one runner process, nested fanout children, `machine:`
+   placements, `external-cli`/`external-job` runners, and any launch whose
+   parent session lacks the authority service or has the sandbox disabled.
+   Refusal is an admission rule, never a runner switch.
+4. **Scope can only narrow.** `scope.read/write` are subsets of the parent's
+   held roots minus non-delegable exclusions (credentials, audit, agent dir,
+   `<workspace>/.pi`, git metadata), recomputed at derive time. A child cwd
+   inside a global `agentDirWriteProjects` root must not reacquire maintenance
+   authority. `network` and `commands` start empty; no destination or command
+   is delegated in this slice.
+5. **Beyond-envelope requests are real or absent, never guessed.** The child
+   request API mints a request id bound to the envelope and audience and must
+   reach a live parent through an authenticated transport with verified,
+   typed replies. Until that transport exists, the only honest answer is a
+   distinct `unavailable` denial; free-form supervisor text is not a decision
+   and cannot widen scope.
+6. **One frozen public seam:** `pi-subagents/child-authority` (exports map
+   entry `./src/api/child-authority.ts` → bundled). The launch writer owns
+   `forks/pi-subagents/src/**`; the packaging writer owns
+   `forks/pi-subagents/{package.json,package-lock.json,tsconfig*,.npmrc,scripts/}`
+   plus root `install.sh`/`forks.txt`/`justfile`/`scripts/deploy-fork*`; the
+   adapter writer owns `forks/pi-sbx/src/{child-authority,index,broker}.ts`.
+   The export-map entry is added by the packaging writer only.
+
 ## Acceptance and reporting
 
 Test actual launch dispatch and adapter consumption, not only envelope helpers.
