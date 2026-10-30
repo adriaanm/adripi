@@ -3,8 +3,8 @@ import type { HumanChannel, HumanRequest } from "./human-channel.ts";
 import { canRead, canWrite, matchesPolicyPath, type FilePolicy } from "./path-policy.ts";
 
 /**
- * The one action-bound path decision, shared by command-scoped Bash execution
- * and the native read/write/edit gate.
+ * The one action-bound path decision, shared by command-scoped Bash execution,
+ * the native read/write/edit gate and a supervised child's action request.
  *
  * A path grant is bound to the operation that requested it: it is decided
  * against the baseline profile, it never mutates that profile, and it never
@@ -12,6 +12,17 @@ import { canRead, canWrite, matchesPolicyPath, type FilePolicy } from "./path-po
  * is checked for feasibility — a mandatory policy/credential/audit exclusion or
  * a configured deny-write entry is a final refusal. Non-mandatory read denies
  * may be reopened only when an exact allowRead carve-out is more specific.
+ *
+ * Two optional restrictions express delegated authority without a second path
+ * engine, and both can only narrow (ordinary parent calls pass neither):
+ *
+ *   - `ceiling` is an immutable delegated policy (a child's prepared payload).
+ *     Authority the parent still holds but the ceiling does not is *not*
+ *     delegable: it takes the ordinary review route instead of an auto-allow,
+ *     so a maintenance/temp/scratch/sibling grant cannot silently return.
+ *   - `admission: "always"` asks the human for this one action even when the
+ *     reviewer already allowed it, because a reviewer's semantic allow cannot
+ *     admit authority the caller's own scope never held.
  */
 
 export type PathActionSurface = "read" | "write";
@@ -30,6 +41,8 @@ export interface PathAction {
   origin?: "tool" | "trap";
   command?: string;
   violation?: string;
+  /** Evidence only: the delegated agent a request came from, never a claim of authority. */
+  agentName?: string;
 }
 
 export interface PathAuthorizationContext {
@@ -42,6 +55,13 @@ export interface PathAuthorizationContext {
   signal?: AbortSignal;
   /** Injected in tests; production asks the published Guardian broker. */
   decide?: typeof decideSandboxException;
+  /**
+   * An immutable delegated ceiling. When present, an action must be admitted by
+   * both `policy` and `ceiling` to skip review; the ceiling can only narrow.
+   */
+  ceiling?: FilePolicy;
+  /** `defer-only` (default) asks the human only for a reviewer defer. */
+  admission?: "defer-only" | "always";
 }
 
 export type PathAuthorization =
@@ -120,17 +140,20 @@ export async function authorizePathAction(
   context: PathAuthorizationContext,
 ): Promise<PathAuthorization> {
   if (context.signal?.aborted) return cancelled();
-  // Mandatory locks precede baseline allows, including lexical aliases.
-  if (action.surface === "read") {
-    const locked = mandatoryReadBlock(action.target, action.aliases, context.cwd, context.policy);
-    if (locked) return { kind: "deny", reason: `reading ${locked} is a credential or auth.json exclusion and is never grantable` };
-  } else {
-    const locked = mandatoryWriteBlock(action.target, action.aliases, context.cwd, context.policy);
-    if (locked) {
-      return { kind: "deny", reason: `writing ${locked} is a mandatory deny-write path and cannot be granted for a single call` };
-    }
+  // Mandatory locks precede every allow, including lexical aliases, and the
+  // ceiling's own exclusions are equally final.
+  const lock = mandatoryLock(action, context);
+  if (lock) return { kind: "deny", reason: lock };
+  // A later parent relaxation cannot turn a prepared configured denial into a
+  // missing-root request. Check feasibility in the immutable ceiling as well:
+  // write denies stay final, while exact read carve-outs retain parent semantics.
+  if (context.ceiling) {
+    const feasibility = pathGrantFeasibility(action, context.cwd, context.ceiling);
+    if (!feasibility.ok) return { kind: "deny", reason: `${feasibility.reason} in the delegated child policy` };
   }
-  if (pathActionAllowed(action, context.cwd, context.policy)) return { kind: "allow", granted: false };
+  if (pathActionAllowed(action, context.cwd, context.policy) && admittedByCeiling(action, context)) {
+    return { kind: "allow", granted: false };
+  }
   const feasibility = pathGrantFeasibility(action, context.cwd, context.policy);
   if (!feasibility.ok) return { kind: "deny", reason: feasibility.reason };
 
@@ -144,10 +167,11 @@ export async function authorizePathAction(
     command: action.command,
     violation: action.violation,
     cwd: context.cwd,
+    agentName: action.agentName,
   });
   if (context.signal?.aborted) return cancelled();
   if (decision.kind === "deny") return { kind: "deny", reason: decision.reason };
-  if (decision.kind === "allow") return { kind: "allow", granted: true };
+  if (decision.kind === "allow" && context.admission !== "always") return { kind: "allow", granted: true };
 
   const request: HumanRequest = {
     surface: action.surface,
@@ -161,6 +185,32 @@ export async function authorizePathAction(
   if (human.kind === "unavailable") return { kind: "deferred", reason: human.reason };
   if (human.kind === "deny") return { kind: "deny", reason: human.reason };
   return { kind: "allow", granted: true };
+}
+
+function mandatoryLock(action: PathAction, context: PathAuthorizationContext): string | undefined {
+  // The ceiling's exclusions are as final as the parent's; keep the original
+  // wording for the parent profile so existing refusals read the same.
+  const policies: Array<[FilePolicy, string]> = context.ceiling
+    ? [[context.policy, ""], [context.ceiling, " in the delegated child policy"]]
+    : [[context.policy, ""]];
+  for (const [policy, suffix] of policies) {
+    if (action.surface === "read") {
+      const locked = mandatoryReadBlock(action.target, action.aliases, context.cwd, policy);
+      if (locked) return `reading ${locked} is a credential or auth.json exclusion${suffix} and is never grantable`;
+      continue;
+    }
+    const locked = mandatoryWriteBlock(action.target, action.aliases, context.cwd, policy);
+    if (locked) {
+      return `writing ${locked} is a mandatory deny-write path${suffix} and cannot be granted for a single call`;
+    }
+  }
+  return undefined;
+}
+
+/** No ceiling means the parent's own authority; a ceiling can only narrow it. */
+function admittedByCeiling(action: PathAction, context: PathAuthorizationContext): boolean {
+  if (!context.ceiling) return true;
+  return pathActionAllowed(action, context.cwd, context.ceiling);
 }
 
 function cancelled(): PathAuthorization {

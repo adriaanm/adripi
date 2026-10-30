@@ -1,9 +1,14 @@
 # Guarded wiring: first candidate review and bounded recovery
 
 The binding contract remains [the wiring lane board](round-2-authority-wiring.md),
-including the guarded-mode amendment at `807712a`. Neither candidate is accepted
-or integrated. Child consumers remain blocked. This is a correction pass, not a
-new full-product commission or a rerun of completed provider implementation.
+including the guarded-mode amendment at `807712a`. **Historical checkpoint:**
+the first candidates were not accepted or integrated when this recovery was
+commissioned. The terminal correction runs and parent repairs are now accepted
+at the source-only launcher/provider gate; see the
+[current verification and downstream payload handoff](round-2-wiring-acceptance.md).
+The findings below remain the failure-mode history, not current active writers
+or unresolved claims about the repaired source. Production child consumers
+remain separate required work.
 
 ## Evidence and ownership
 

@@ -8,7 +8,13 @@ import {
   hasTrustRequiringProjectResources,
 } from "@earendil-works/pi-coding-agent";
 import type { NetworkHostPattern } from "@anthropic-ai/sandbox-runtime";
+import { decideWithParentRoute } from "./action-authorizer.ts";
 import { createSandboxedBashOperations } from "./bash-operations.ts";
+import {
+  ChildAuthorityLauncherMissingError,
+  publishChildAuthority,
+  type ChildAuthorityPublication,
+} from "./child-authority.ts";
 import {
   getInheritedConfigArray,
   getInheritedConfigBoolean,
@@ -24,7 +30,6 @@ import {
   type JsonObject,
 } from "./config.ts";
 import {
-  decideSandboxException,
   getProjectPolicyService,
   projectPolicyRule,
   withScopedPaths,
@@ -149,6 +154,8 @@ export default function sandboxExtension(pi: ExtensionAPI) {
   let projectApproved = false;
   let sessionConfig: JsonObject = {};
   let settingsScope: ConfigScope = "session";
+  // The published child-authority provider, bound to this session's baseline.
+  let childAuthority: ChildAuthorityPublication | undefined;
 
   const policyPath = () => getProjectPolicyService()?.path
     ?? join(currentContext?.cwd ?? process.cwd(), CONFIG_DIR_NAME, "guardian.json");
@@ -200,35 +207,30 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     if (signal?.aborted) return false;
     const hostname = host.host.includes(":") && !host.host.startsWith("[") ? `[${host.host}]` : host.host;
     const target = `${hostname}:${host.port ?? "*"}`;
-    const decision = await decideSandboxException({
-      surface: "network",
-      target,
-      scope: "once",
-      origin: "trap",
-      violation: "network destination is not in the static allowlist",
-      cwd: currentContext?.cwd ?? process.cwd(),
-    });
-    if (signal?.aborted) return false;
-    if (decision.kind === "allow") return true;
-    if (decision.kind === "deny") {
-      currentContext?.ui.notify(`Sandbox network denied: ${decision.reason}`, "warning");
-      return false;
-    }
     const rule = projectPolicyRule("network", target);
-    const prepared = prepareStandingRule(rule);
-    const human = await humanChannel.ask({
+    // Snapshot the standing rule only if this connection actually reaches the
+    // human, and still before the prompt.
+    let prepared: PreparedProjectRule | undefined;
+    const route = await decideWithParentRoute({
       surface: "network",
       target,
+      origin: "trap",
       reason: "the sandbox network allowlist does not include this destination",
-      standingRule: prepared.ok ? rule : undefined,
-    }, signal);
-    if (human.kind !== "allow") {
-      currentContext?.ui.notify(`Sandbox network denied: ${human.reason}`, "warning");
-      return false;
+      violation: "network destination is not in the static allowlist",
+      offerStandingRule: () => {
+        prepared = prepareStandingRule(rule);
+        return prepared.ok ? rule : undefined;
+      },
+    }, { cwd: currentContext?.cwd ?? process.cwd(), human: humanChannel, signal });
+    if (route.kind === "allow") {
+      if (route.standing && prepared) saveStandingRule(prepared);
+      return true;
     }
-    if (signal?.aborted) return false;
-    if (human.standing) saveStandingRule(prepared);
-    return true;
+    const status = route.kind === "cancelled" ? "cancelled"
+      : route.kind === "unavailable" ? "unavailable (no human approval channel)"
+      : `denied by ${route.via === "human" ? "the user" : "Guardian"}`;
+    currentContext?.ui.notify(`Sandbox network ${status}: ${route.reason}`, "warning");
+    return false;
   };
 
   async function resolveProjectApproval(ctx: ExtensionContext): Promise<boolean> {
@@ -259,6 +261,9 @@ export default function sandboxExtension(pi: ExtensionAPI) {
 
   async function reloadConfig(ctx: ExtensionContext, resetRuntime: boolean): Promise<void> {
     configError = undefined;
+    // A child policy is a snapshot of this baseline, so any policy edit or
+    // reload invalidates every live lease instead of leaving a stale payload.
+    childAuthority?.revoke("the parent sandbox policy changed, so the prepared child policy is no longer authoritative");
     try {
       config = buildConfig(ctx, sessionConfig);
       for (const warning of config.warnings) ctx.ui.notify(warning, "warning");
@@ -299,6 +304,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       sessionEnabledOverride = false;
       sessionEnabled = false;
       controller.setSessionEnabled(false);
+      childAuthority?.revoke("the sandbox was disabled for this session, so no child authority remains");
       return;
     }
     if (Boolean(pi.getFlag("no-sandbox"))) {
@@ -444,30 +450,27 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     if (!activeConfig.allowUnsandboxedCommands) {
       return refusal("unsandboxed commands are disabled by sandbox policy (allowUnsandboxedCommands is false)");
     }
-    const decision = await decideSandboxException({
+    const standingRule = plan.prefixRule ? projectPolicyRule("command", plan.prefixRule) : undefined;
+    const prepared = standingRule ? prepareStandingRule(standingRule) : undefined;
+    const route = await decideWithParentRoute({
       surface: "command",
       target: plan.command.command,
-      scope: "once",
       origin: "tool",
       reason: plan.justification,
       command: plan.command.command,
-      cwd: ctx.cwd,
-    });
-    if (decision.kind === "deny") return refusal(`guardian denied host execution: ${decision.reason}`);
+      offerStandingRule: () => (prepared?.ok ? standingRule : undefined),
+    }, { cwd: ctx.cwd, human: humanChannel, signal });
+    // A human refusal stays attributed to the human; only a rule/reviewer refusal
+    // is Guardian's.
+    if (route.kind === "deny") {
+      return refusal(route.via === "human" ? route.reason : `guardian denied host execution: ${route.reason}`);
+    }
+    if (route.kind === "unavailable") return deferred(route.reason);
+    if (route.kind === "cancelled") return refusal(route.reason);
 
-    const standingRule = plan.prefixRule ? projectPolicyRule("command", plan.prefixRule) : undefined;
-    const prepared = standingRule ? prepareStandingRule(standingRule) : undefined;
     let standingApproved = false;
-    if (decision.kind === "defer") {
-      const human = await humanChannel.ask({
-        surface: "command",
-        target: plan.command.command,
-        reason: plan.justification,
-        standingRule: prepared?.ok ? standingRule : undefined,
-      }, signal);
-      if (human.kind === "unavailable") return deferred(human.reason);
-      if (human.kind === "deny") return refusal(human.reason);
-      standingApproved = human.standing;
+    if (route.via === "human") {
+      standingApproved = route.standing;
     } else if (standingRule) {
       // Guardian allowed this call; saving a rule is still the human's decision.
       if (prepared?.ok) standingApproved = await humanChannel.confirmStanding(standingRule, signal);
@@ -749,15 +752,95 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     getHuman: () => humanChannel,
   });
 
+  /** A session without a stable host id cannot bind authority; publish nothing. */
+  const parentSessionId = (ctx: ExtensionContext): string | undefined => {
+    try {
+      const id = ctx.sessionManager.getSessionId();
+      return typeof id === "string" && id.trim() ? id : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  /**
+   * Publish the one child-authority provider for this session and demand the
+   * pi-sbx/pi-guardian child extensions from the launcher. The provider reads the
+   * live baseline through `getBaseline`, so a request is always decided against
+   * current policy; the payload derived at prepare time is revoked when that
+   * baseline changes or the session ends, while the registration stays for the
+   * whole session so a revocation can never reopen a bare launch.
+   */
+  const publishSessionChildAuthority = (ctx: ExtensionContext): void => {
+    const sessionId = parentSessionId(ctx);
+    if (!sessionId) return;
+    const existing = childAuthority;
+    if (existing) {
+      // Re-initializing the same live session keeps the one guard it already has:
+      // disposing and re-registering would transiently reopen a bare launch and
+      // drop the mandatory demand.
+      if (existing.provider.sessionId === sessionId) return;
+      // A previous session in this process is over; release its guard.
+      existing.dispose();
+      childAuthority = undefined;
+    }
+    try {
+      const publication = publishChildAuthority({
+        sessionId,
+        agentDir: getAgentDir(),
+        configDirName: CONFIG_DIR_NAME,
+        getSessionScratchDir: () => scratchpad?.dir,
+        // Read live, and only when everything below is authoritative: before the
+        // first successful initialization this is an unavailable guard, not a bare
+        // session.
+        getBaseline: () => {
+          const active = currentContext;
+          if (!active || !sessionStarted || !config || !sessionEnabled || configError || !controller.canRunSandboxed()) {
+            return undefined;
+          }
+          return {
+            cwd: active.cwd,
+            policy: filePolicyFor(config),
+            allowUnsandboxedCommands: config.allowUnsandboxedCommands,
+          };
+        },
+        getHuman: () => humanChannel,
+      });
+      childAuthority = publication;
+      void publication.ready.catch((error: unknown) => {
+        // The provider slot deliberately stays published: a launch must fail
+        // closed instead of falling back to an unguarded bare launch. A host with
+        // no launcher installed has no child launch at all, so it stays quiet.
+        if (error instanceof ChildAuthorityLauncherMissingError) return;
+        ctx.ui.notify(
+          `Child delegation authority unavailable: ${error instanceof Error ? error.message : String(error)}`,
+          "warning",
+        );
+      });
+    } catch (error) {
+      ctx.ui.notify(
+        `Child delegation authority unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        "warning",
+      );
+    }
+  };
+
   pi.on("session_start", async (_event, ctx) => {
     sessionStarted = false;
+    // Already-running children must stop even if reinitialization fails before
+    // reloadConfig (which would otherwise perform the eventual revocation).
+    childAuthority?.revoke("the parent session is initializing; previous child authority is revoked");
     humanChannel.shutdown();
-    await executions.close();
-    executions = new ExecutionQueue();
     sessionEnabledOverride = undefined;
     currentContext = ctx;
     ctx.ui.setStatus("sandbox", undefined);
     humanChannel = new HumanChannel(() => currentContext, policyPath);
+    // Guard intent is established synchronously, before the first await and before
+    // any fallible initialization: queue draining, scratch creation, project
+    // approval, config/SRT setup and consumer-path resolution can all fail, and
+    // none of them may leave the session looking unguarded.
+    publishSessionChildAuthority(ctx);
+    await executions.close();
+    executions = new ExecutionQueue();
     // Scratch: sweep leftovers from crashed sessions, then create this one's.
     try {
       await sweepScratchpads();
@@ -771,6 +854,10 @@ export default function sandboxExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async () => {
+    // Keep unavailable guard intent throughout asynchronous teardown. Removing
+    // the slot/registration here would reopen bare launch while the queue drains.
+    sessionStarted = false;
+    childAuthority?.revoke("the parent session is shutting down");
     currentContext?.ui.setStatus("sandbox", undefined);
     humanChannel.shutdown();
     await executions.close();
@@ -783,6 +870,8 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     await controller.reset();
     await scratchpad?.dispose();
     scratchpad = undefined;
+    childAuthority?.dispose();
+    childAuthority = undefined;
   });
 
   pi.registerCommand("sandbox", {

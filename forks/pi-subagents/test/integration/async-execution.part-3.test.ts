@@ -2114,14 +2114,16 @@ syncBuiltinESMExports();
 		}
 	});
 
-	it("workflow children keep the mandatory extensions admitted with the workflow after the host disposes its registration", { skip: !isAsyncAvailable() || !createSubagentExecutor ? "jiti or executor not available" : undefined }, async () => {
+	it("a guarded host session refuses a workflow before child discovery instead of launching its children", { skip: !isAsyncAvailable() || !createSubagentExecutor ? "jiti or executor not available" : undefined }, async () => {
 		const childCwd = path.join(tempDir, "required-child");
 		fs.mkdirSync(childCwd, { recursive: true });
 		const registration = registerRequiredChildExtensions({ sessionId: "session-123", extensions: [{ id: "host-policy", path: fileURLToPath(import.meta.url) }], requireForAllRunners: true });
 		const agents = [makeAgent("external", { runner: { type: "external-cli", command: process.execPath, args: ["-e", ""] } })];
-		// The child's own agent discovery runs after workflow admission and before its launch: dispose there.
-		const executor = makeAsyncExecutor(agents, {}, (cwd) => {
-			if (cwd === childCwd) registration.dispose();
+		// Guarded admission now precedes workflow execution, so this discovery hook must never run: the
+		// registration is still live and the refusal happens before any workflow child or host step.
+		let discoveryRan = false;
+		const executor = makeAsyncExecutor(agents, {}, () => {
+			discoveryRan = true;
 			return { agents };
 		});
 		try {
@@ -2129,7 +2131,12 @@ syncBuiltinESMExports();
 				async: false,
 				workflowScript: `return runs.run("ext", { agent: "external", task: "Review", cwd: ${JSON.stringify(childCwd)} });`,
 			}, new AbortController().signal, undefined, makeMinimalCtx(tempDir)) as AsyncExecutionResult;
-			assert.match(JSON.stringify(result), /requires child extensions \(host-policy\) for every runner/);
+			assert.equal(result.isError, true);
+			assert.equal((result as { details?: { mode?: string } }).details?.mode, "workflow");
+			// Guarded admission refuses the workflow request itself: it never reached script or host steps,
+			// child discovery, or a child launch.
+			assert.match(JSON.stringify(result), /Child authority refused this launch: No child authority service is published/);
+			assert.equal(discoveryRan, false, "a guarded workflow must be refused before child discovery");
 		} finally {
 			registration.dispose();
 		}

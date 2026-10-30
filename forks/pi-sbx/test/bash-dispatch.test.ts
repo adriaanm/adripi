@@ -786,3 +786,48 @@ describe("registered bash tool as one execution seam", () => {
     expect(broker.review).not.toHaveBeenCalled();
   });
 });
+
+describe("decision attribution and lazy standing snapshots", () => {
+  it("attributes a human host-command refusal to the human, not to guardian", async () => {
+    publishBroker(async () => ({ kind: "defer", review: { rationale: "unsure", source: "reviewer" } }));
+    const select = vi.fn(async () => "Deny");
+    const { tool, ctx } = await start({}, { select });
+    const result = await invoke(tool, ctx, "human-deny", escalateHost("git push"));
+    expect(select).toHaveBeenCalledOnce();
+    expect(contentText(result)).toContain("the user denied the sandbox exception");
+    expect(contentText(result)).not.toContain("guardian denied");
+    expect(state.localCalls).toHaveLength(0);
+  });
+
+  it("snapshots a network standing rule only when the connection reaches the human", async () => {
+    const prepareRule = publishPolicy(() => ({ ok: true as const, path: "p", hash: "h", added: true }));
+    publishBroker();
+    const select = vi.fn(async () => "Allow this connection");
+    await start({}, { select });
+    expect(await state.askCallback!({ host: "registry.npmjs.org", port: 443 })).toBe(true);
+    // A rule/reviewer-allowed connection never spends a trusted policy snapshot.
+    expect(prepareRule).not.toHaveBeenCalled();
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it("does not misattribute a missing human network channel to Guardian", async () => {
+    publishBroker(async () => ({ kind: "defer", review: { rationale: "ask human", source: "reviewer" } }));
+    const { ctx } = await start({}, { hasUI: false });
+    expect(await state.askCallback!({ host: "example.test", port: 443 })).toBe(false);
+    const notices = (ctx.ui.notify as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((call) => String(call[0]));
+    expect(notices.some((text) => text.includes("unavailable (no human approval channel)"))).toBe(true);
+    expect(notices.some((text) => text.includes("denied by Guardian"))).toBe(false);
+  });
+
+  it("prepares the network standing snapshot before the deferred prompt", async () => {
+    publishBroker(async () => ({ kind: "defer", review: { rationale: "unknown host", source: "reviewer" } }));
+    const prepareRule = publishPolicy(() => ({ ok: true as const, path: "p", hash: "h", added: true }));
+    const select = vi.fn(async () => {
+      expect(prepareRule).toHaveBeenCalledWith("network:example.test:443");
+      return "Allow this connection";
+    });
+    await start({}, { select });
+    expect(await state.askCallback!({ host: "example.test", port: 443 })).toBe(true);
+    expect(prepareRule).toHaveBeenCalledOnce();
+  });
+});

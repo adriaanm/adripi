@@ -156,16 +156,18 @@ describe("Claude Code override dispatch", () => {
 	});
 
 	it("rejects the same limits on the single path before anything launches", () => {
-		const single = (params: Record<string, unknown>) =>
-			executeAsyncSingle(`cc-single-${Date.now().toString(36)}`, {
+		const single = (params: Record<string, unknown>) => {
+			const { ctx: ctxOverride, ...overrides } = params;
+			return executeAsyncSingle(`cc-single-${Date.now().toString(36)}`, {
 				agent: "claude-code",
 				task: "Review",
 				agentConfig: agent("claude-code"),
-				ctx: { pi: { events: { emit() {} } }, cwd: process.cwd(), currentSessionId: "session-1", ...(params.ctx as object | undefined) },
+				ctx: { pi: { events: { emit() {} } }, cwd: process.cwd(), currentSessionId: "session-1", ...(ctxOverride as object | undefined) },
 				artifactConfig: artifactsOff,
 				shareEnabled: false,
-				...params,
+				...overrides,
 			});
+		};
 
 		const overCeiling = single({ modelOverride: "sonnet:max", agentConfig: agent("claude-code", { maxThinking: "low" }) });
 		assert.equal(overCeiling.isError, true);

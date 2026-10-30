@@ -107,6 +107,7 @@ import {
 } from "../../watchdog/child-status.ts";
 import { buildInProcessChildLaunch, createReportedChildSessionInput } from "../shared/child-launch.ts";
 import { childSessionFactory, childSessionHasQueuedMessages, projectChildSessionEventForJson, type ChildSession, type ChildSessionEvent } from "../shared/child-session.ts";
+import { nestedChildAuthorityRefusal } from "../shared/child-authority-launch.ts";
 import { reconcileAttemptUsage } from "../shared/usage-reconciliation.ts";
 import { clearProviderRetry, observeProviderDiagnostics, snapshotProviderDiagnostics } from "../../shared/provider-diagnostics.ts";
 
@@ -1695,6 +1696,20 @@ async function runSyncCompletionInner(
 	task: string,
 	options: RunSyncOptions,
 ): Promise<SingleResult> {
+	// A guarded child authority runner must never create an in-parent child: the refusal is identity-free and
+	// independent of the extension-load scope, so it holds after revocation and before any launch work.
+	const nestedAuthorityRefusal = nestedChildAuthorityRefusal("parent");
+	if (nestedAuthorityRefusal) {
+		return redactResultPrompt(withRunContext({
+			index: options.index ?? 0,
+			agent: agentName,
+			task,
+			exitCode: 1,
+			messages: [],
+			usage: emptyUsage(),
+			error: nestedAuthorityRefusal,
+		}, options.context));
+	}
 	const effectiveCwd = options.cwd ?? runtimeCwd;
 	const cwdError = preflightLaunchCwd(options.requestedCwd ?? effectiveCwd, effectiveCwd);
 	if (cwdError) {

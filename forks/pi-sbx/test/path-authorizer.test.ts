@@ -270,6 +270,114 @@ describe("authorizePathAction", () => {
     }
   });
 
+  it("keeps ordinary parent calls unaffected by the optional ceiling and admission", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-auth-default-"));
+    const outside = mkdtempSync(join(tmpdir(), "pi-sbx-auth-default-out-"));
+    const broker = recorder(allowDecision());
+    const person = human({ kind: "allow", standing: false });
+    const context = { cwd: root, policy: policy(root), human: person, decide: broker.decide };
+    // No ceiling, defer-only: a reviewer allow is enough, exactly as before.
+    const result = await authorizePathAction({ surface: "write", target: join(outside, "x"), reason: "x" }, context);
+    expect(result).toEqual({ kind: "allow", granted: true });
+    expect(person.ask).not.toHaveBeenCalled();
+  });
+
+  it("narrows with a ceiling: authority the parent holds but the ceiling does not is reviewed", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-auth-ceiling-"));
+    const parentRoot = policy(root, { allowWrite: [root, join(root, "maintenance")] });
+    const ceiling = policy(join(root, "workspace"));
+    const broker = recorder(allowDecision());
+    const person = human({ kind: "deny", reason: "not for a child" });
+    const context = {
+      cwd: root,
+      policy: parentRoot,
+      ceiling,
+      admission: "always" as const,
+      human: person,
+      decide: broker.decide,
+    };
+
+    // Inside both: no review, no prompt.
+    const inside = await authorizePathAction({ surface: "write", target: join(root, "workspace", "ok"), reason: "x" }, context);
+    expect(inside).toEqual({ kind: "allow", granted: false });
+    expect(broker.decide).not.toHaveBeenCalled();
+
+    // Only the parent holds it: the reviewer allows, but the human still decides.
+    const beyond = await authorizePathAction({ surface: "write", target: join(root, "maintenance", "tool.json"), reason: "x" }, context);
+    expect(beyond.kind).toBe("deny");
+    expect(broker.decide).toHaveBeenCalledOnce();
+    expect(person.ask).toHaveBeenCalledOnce();
+    expect(person.seen[0]).toMatchObject({ surface: "write", target: join(root, "maintenance", "tool.json") });
+  });
+
+  it("asks the human for one action even after a reviewer allow when admission is forced", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-auth-forced-"));
+    const outside = mkdtempSync(join(tmpdir(), "pi-sbx-auth-forced-out-"));
+    const allowed = recorder(allowDecision());
+    const person = human({ kind: "allow", standing: false });
+    const result = await authorizePathAction({ surface: "read", target: join(outside, "x"), reason: "x" }, {
+      cwd: root,
+      // A denied subtree makes this a beyond-baseline read rather than a baseline allow.
+      policy: policy(root, { denyRead: [outside] }),
+      admission: "always",
+      human: person,
+      decide: allowed.decide,
+    });
+    expect(result).toEqual({ kind: "allow", granted: true });
+    expect(allowed.decide).toHaveBeenCalledOnce();
+    expect(person.ask).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a prepared configured write denial final after the parent loosens policy", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-ceiling-deny-"));
+    const target = join(root, "blocked.txt");
+    const reviewer = recorder(allowDecision());
+    const person = human({ kind: "allow", standing: false });
+    const result = await authorizePathAction({ surface: "write", target, reason: "parent removed its deny" }, {
+      cwd: root, policy: policy(root), ceiling: policy(root, { denyWrite: [target] }),
+      admission: "always", human: person, decide: reviewer.decide,
+    });
+    expect(result.kind).toBe("deny");
+    expect(reviewer.seen).toHaveLength(0);
+    expect(person.seen).toHaveLength(0);
+  });
+
+  it("admits an outside-ceiling write only for the human-approved action without changing either policy", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-ceiling-write-"));
+    const target = join(root, "outside.txt");
+    const parent = policy(root);
+    const ceiling = policy(join(root, "child"));
+    const reviewer = recorder(allowDecision());
+    const person = human({ kind: "allow", standing: false });
+    expect(await authorizePathAction({ surface: "write", target, reason: "one change" }, {
+      cwd: root, policy: parent, ceiling, admission: "always", human: person, decide: reviewer.decide,
+    })).toEqual({ kind: "allow", granted: true });
+    expect(reviewer.seen).toHaveLength(1);
+    expect(person.seen).toHaveLength(1);
+    expect(parent.allowWrite).toEqual([root]);
+    expect(ceiling.allowWrite).toEqual([join(root, "child")]);
+  });
+
+  it("treats the ceiling's own mandatory exclusions as final", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-auth-ceiling-lock-"));
+    const base = policy(root);
+    const locked = join(root, "child", ".pi");
+    const ceiling = policy(join(root, "child"), { mandatoryDenyWrite: [locked] });
+    const broker = recorder(allowDecision());
+    const person = human({ kind: "allow", standing: false });
+    const result = await authorizePathAction({ surface: "write", target: join(locked, "sandbox.json"), reason: "x" }, {
+      cwd: root,
+      policy: base,
+      ceiling,
+      human: person,
+      decide: broker.decide,
+    });
+    expect(result.kind).toBe("deny");
+    expect(result.kind === "deny" && result.reason).toContain("delegated child policy");
+    expect(broker.decide).not.toHaveBeenCalled();
+    expect(person.ask).not.toHaveBeenCalled();
+  });
+
   it("refuses mandatory and deny-listed writes before review or a human question", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-sbx-auth-locks-"));
     const locked = join(root, ".pi");

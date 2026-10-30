@@ -85,6 +85,7 @@ import { normalizeExtensionBindings } from "../shared/extension-bindings.ts";
 import type { ChildSessionFactory, DefaultChildSessionFactoryOptions } from "../shared/child-session.ts";
 import { runChildSession, type ChildEvent, type RunChildSessionInput, type RunChildSessionResult, type SteerDelivery, type StepSteerHandler } from "./run-child-session.ts";
 import { loadRunnerChildSessionFactory } from "./runner-child-sessions.ts";
+import { bindRunnerChildAuthority, releaseRunnerChildAuthority, type ChildAuthorityRunnerRequest, type RunnerChildAuthority } from "../shared/child-authority-launch.ts";
 import { SUBAGENT_CHILD_ENV, SUBAGENT_RUNNER_PID_ENV } from "../shared/child-runtime-config.ts";
 import { deriveChildSessionName } from "../../shared/child-session-name.ts";
 import { alignForkedSessionCwd } from "../../shared/fork-session-cwd.ts";
@@ -195,6 +196,8 @@ export interface SubagentRunConfig {
 	inheritedChildRuntime?: InheritedChildRuntime;
 	/** The launching session's project trust; undefined keeps Pi's default for hosts without trust. */
 	projectTrusted?: boolean;
+	/** Host-written marker that the parent prepared child authority for this runner, so a live lease is required. */
+	childAuthority?: ChildAuthorityRunnerRequest;
 	worktreeSetupHook?: string;
 	worktreeSetupHookTimeoutMs?: number;
 	worktreeBaseDir?: string;
@@ -676,6 +679,8 @@ interface SingleStepContext {
 	piPackageRoot?: string;
 	/** Factory the runner creates this step's child session through. */
 	childSessions: ChildSessionFactory;
+	/** The live host-prepared authority lease for this runner process; absent for an unguarded launch. */
+	childAuthority?: RunnerChildAuthority;
 	/** The launching executor's own child runtime; nested route, depth, and ceilings come from here. */
 	inheritedChildRuntime?: InheritedChildRuntime;
 	projectTrusted?: boolean;
@@ -1096,6 +1101,12 @@ export async function runSingleStepInner(
 	let stagedIndexBaseline: string | undefined;
 	singleLaunch: for (let attemptIndex = 0; attemptIndex < 2; attemptIndex++) {
 		if (ctx.timeoutSignal?.aborted || ctx.stopSignal?.aborted || ctx.skipAcceptance?.()) break singleLaunch;
+		if (attemptIndex > 0 && ctx.childAuthority) {
+			// A guarded lease is one child's readiness proof: its consumers already claimed this lease, so a
+			// retry would silently reuse claimed readiness as if it were a fresh admission. Refuse instead.
+			const message = "Child authority does not support a retried attempt: the admitted lease is bound to one child load, so this run failed instead of re-creating the child with already-claimed authority.";
+			return omitUndefinedProperties({ agent: step.agent, output: message, error: message, exitCode: 1, context: step.context });
+		}
 		const expectedModelForVerification = candidate && !step.skipPrimaryModelVerification ? candidate : undefined;
 		try {
 			assertThinkingWithinCeiling({ model: candidate, configThinking: step.thinking, ceiling: step.thinkingCeiling, agent: step.agent, runId: ctx.id });
@@ -1201,6 +1212,7 @@ export async function runSingleStepInner(
 		const run = await runChildSession(omitUndefinedProperties({
 			factory: ctx.childSessions,
 			launch,
+			authority: ctx.childAuthority,
 			prompt: `Task: ${recoveryTask}`,
 			childWatchdog,
 			childEventContext: { runId: ctx.id, stepIndex: ctx.flatIndex, agent: step.agent },
@@ -1880,6 +1892,7 @@ async function runSingleStepWithTimeout(
 export async function runSubagent(
 	config: SubagentRunConfig,
 	childSessions: ChildSessionFactory,
+	childAuthority?: RunnerChildAuthority,
 ): Promise<void> {
 	const { id, steps, resultPath, cwd, placeholder, taskIndex, totalTasks, maxOutput, artifactsDir, artifactConfig } =
 		config;
@@ -3838,6 +3851,7 @@ export async function runSubagent(
 					projectTrusted: config.projectTrusted,
 					piPackageRoot: config.piPackageRoot,
 					childSessions,
+					childAuthority,
 					inheritedChildRuntime: config.inheritedChildRuntime,
 					childIntercomTarget: config.childIntercomTargets?.[fi],
 					orchestratorIntercomTarget: config.controlIntercomTarget,
@@ -4212,6 +4226,7 @@ export async function runSubagent(
 							outputFile: path.join(asyncDir, `output-${fi}.log`),
 							piPackageRoot: config.piPackageRoot,
 							childSessions,
+							childAuthority,
 							inheritedChildRuntime: config.inheritedChildRuntime,
 							childIntercomTarget: config.childIntercomTargets?.[fi],
 							orchestratorIntercomTarget: config.controlIntercomTarget,
@@ -4563,6 +4578,7 @@ export async function runSubagent(
 				outputFile: path.join(asyncDir, `output-${flatIndex}.log`),
 				piPackageRoot: config.piPackageRoot,
 				childSessions,
+				childAuthority,
 				inheritedChildRuntime: config.inheritedChildRuntime,
 				childIntercomTarget: config.childIntercomTargets?.[flatIndex],
 				orchestratorIntercomTarget: config.controlIntercomTarget,
@@ -5131,12 +5147,18 @@ export async function runSubagent(
 /** Heavy execution entry loaded by the bootstrap only after startup commits. */
 export async function runConfiguredSubagentExecution(config: SubagentRunConfig, options?: DefaultChildSessionFactoryOptions): Promise<void> {
 	let childSessions: ChildSessionFactory;
+	let childAuthority: RunnerChildAuthority | undefined;
 	try {
 		// Detached Node runners do not receive Pi's CLI dispatcher setup. Binary
 		// hosts install the same dispatcher before entering the shared bootstrap.
 		if (!options?.loadPiCodingAgent) installRunnerHttpDispatcher({ agentDir: getAgentDir(), cwd: process.cwd() });
+		// The host-created IPC channel decides this, not the serialized config: a channel means a live
+		// lease is required before any child extension loads.
+		childAuthority = await bindRunnerChildAuthority({ request: config.childAuthority });
 		childSessions = await loadRunnerChildSessionFactory(config, options);
 	} catch (error) {
+		// A failure after the lease arrived must release it here; the process then holds no authority.
+		releaseRunnerChildAuthority(childAuthority);
 		try {
 			persistRunnerStartupFailure({
 				asyncDir: config.asyncDir,
@@ -5156,12 +5178,14 @@ export async function runConfiguredSubagentExecution(config: SubagentRunConfig, 
 		throw error;
 	}
 	try {
-		await runSubagent(config, childSessions);
+		await runSubagent(config, childSessions, childAuthority);
 	} finally {
 		try {
 			await childSessions.dispose();
 		} catch (error) {
 			console.error("Failed to dispose runner child sessions:", error);
 		}
+		// The run is over: end the lease before exiting so the parent revokes promptly.
+		releaseRunnerChildAuthority(childAuthority);
 	}
 }

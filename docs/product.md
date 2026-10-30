@@ -170,7 +170,8 @@ an interactive human. Missing or failed Guardian denies instead of skipping its
 hard restrictions. In print/JSON/headless mode, no supported human channel means
 no execution, with an actionable explanation. The broken nested call to
 model-only `contact_supervisor` is removed. A parent `ALLOW` token is not treated
-as proof of human authority. A real child approval transport remains unbuilt.
+as proof of human authority. Live child IPC and the real parent decision adapter now exist; production
+child consumers and enforcement remain unbuilt.
 
 ## 4. Policy layers and persistence
 
@@ -276,14 +277,17 @@ child/MCP/extension containment and background-process lifetime are not certifie
 by this round. Full broker-toggle/session-policy lifecycle correctness is also
 not claimed merely because prepared saves now have a disposer.
 
-The approved third fork now supplies reviewed **IPC primitives**, not production
-child containment: `pi-subagents/child-authority` binds actual-process leases and
-bounded terminal parent decisions, with code-only consumer readiness. Real-process
-fixtures cover cancellation/replay/audience/lifetime; post-build tests prove the
-public bundle and compiled consumers share live state. The actual launch,
-pi-sbx/Guardian adapters and first-prompt gate are still pending; no mock provider
-is evidence of the production parent-first human route. See
-[the child-authority record](round-2-child-authority.md).
+The approved third fork now supplies actual **guarded native background launch**,
+IPC binding and a first-prompt readiness gate. The real registered pi-sbx parent
+provider derives narrowed held policy and uses the existing parent Guardian/human
+route. Unsupported placements refuse before mutation; failure/off cannot silently
+become bare launch. Real-process and actual-graph fixtures cover carriage and
+shared state, including composed controlled-consumer parent/human decisions.
+**Production child policy/Guardian consumers remain unimplemented** and cannot
+acknowledge readiness: no first model prompt is permitted merely because the
+extension files loaded. This is not child containment or installed-runtime proof.
+See the [wiring acceptance and payload handoff](round-2-wiring-acceptance.md) and
+[component history](round-2-child-authority.md).
 
 Deploy only as a separate human step: provision the third fork's locked build
 dependencies and run `just build-subagents`, then `./install.sh`. The installer

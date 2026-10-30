@@ -2,7 +2,7 @@
 
 Fork of [`pi-sbx@0.1.3`](https://github.com/RiverAi7z/pi-sbx), an SRT-backed
 Pi bash sandbox. License: see `LICENSE`. Base is upstream except for the deltas
-below. These describe current source through round 2's first wave; old grant/exclusion/supervisor
+below. These describe current source through round 2's guarded-launch/provider milestone; old grant/exclusion/supervisor
 routes in Git history are retired, not additional supported APIs.
 
 ## Current deltas
@@ -84,13 +84,29 @@ routes in Git history are retired, not additional supported APIs.
     traversal. Native targets are resolved again after an asynchronous decision;
     changed targets fail closed (not a hostile same-user filesystem-race defence).
     This is sandbox adapter behavior, not a child approval transport.
-14. **Tests:** registered bash dispatch with mocked execution/runtime, concurrent
+14. **Guarded parent provider** (`src/{child-authority,action-authorizer}.ts`, index):
+    sticky session intent before path validation/startup, canonical required
+    pi-sbx/Guardian registration, immutable workspace/held-Git-only payload,
+    deny-based reads and current-parent/prepared-ceiling intersection. Symlinked
+    Git roots cannot manufacture canonical held scope; known Git config/hooks
+    remain excluded even for unheld metadata. AgentDir/private parent scratch
+    cannot be delegated. Baseline changes revoke synchronously; shutdown keeps
+    guard intent through teardown; direct prepared decisions also combine lease
+    revocation/caller signals. Shared broker/human adapter preserves ordinary
+    Bash/network defaults, source attribution and pre-human rule snapshots.
+    Outside-ceiling path actions require explicit human one-action admission,
+    never standing child scope. No production child consumer is implemented yet.
+15. **Tests:** registered bash dispatch with mocked execution/runtime, concurrent
     scoped versus plain/native-file actions, partial approval, queue cancellation,
     prompt cancellation, setting serialization, partial refresh/rollback failure,
     host admission/fallback, per-connection decisions, policy prepare-before-prompt,
     legacy input rejection, path-authorizer feasibility/defer/cancel cases,
     registered native-gate grant/deny/headless/cancellation/isolation coverage,
-    helper/config/lifecycle coverage. These are not live nested OS-sandbox tests.
+    helper/config/lifecycle and actual registered provider coverage, plus composed
+    native-launch/real-IPC/controlled-consumer/broker/human tests. Current source:
+    **212 tests / 22 files**, typecheck/root checks pass. These are not production
+    child consumers or live nested OS-sandbox tests. See the
+    [wiring acceptance/handoff](../../docs/round-2-wiring-acceptance.md).
 
 ## Failure modes repaired in round 1
 

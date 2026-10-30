@@ -25,6 +25,8 @@ import { formatChildModelResolutionDiagnostic, isChildModelResolutionFailure } f
 import { isMutatingTool, resolveCurrentPath } from "../shared/long-running-guard.ts";
 import { effectiveToolTimeoutMs, formatToolTimeoutMessage, toolTimeoutCallKey } from "../shared/tool-timeout.ts";
 import { createReportedChildSessionInput, type InProcessChildLaunch } from "../shared/child-launch.ts";
+import { withChildAuthority } from "../shared/child-authority.ts";
+import type { RunnerChildAuthority } from "../shared/child-authority-launch.ts";
 import { createPartialOutputTracker, formatPartialOutput, type PartialOutputCause } from "../shared/partial-output.ts";
 import { childSessionHasQueuedMessages, projectChildSessionEventForJson, type ChildSession, type ChildSessionEvent, type ChildSessionFactory } from "../shared/child-session.ts";
 import { reconcileAttemptUsage } from "../shared/usage-reconciliation.ts";
@@ -78,6 +80,12 @@ export type StepSteerHandler = (request: SteerRequest) => Promise<SteerDelivery>
 export interface RunChildSessionInput {
 	factory: ChildSessionFactory;
 	launch: InProcessChildLaunch;
+	/**
+	 * The live lease the host prepared for this runner process. When present, the child's extension load and
+	 * `session_start` run inside `withChildAuthority`, the lease must name this child, and every required
+	 * consumer must acknowledge before the first prompt. Losing it aborts the running session.
+	 */
+	authority?: RunnerChildAuthority;
 	/** Prompt text; the task with its `Task:` prefix. */
 	prompt: string;
 	childWatchdog?: ChildWatchdogConfig;
@@ -170,6 +178,8 @@ function omitUndefined<T extends object>(value: T): T {
 const FINAL_STOP_GRACE_MS = 1000;
 const HARD_FINISH_MS = 3000;
 const ABORT_SETTLE_MS = 3000;
+/** Reported when the host revoked this child's authority while the session was running. */
+const AUTHORITY_REVOKED_MESSAGE = "The parent revoked child authority; the child session was stopped.";
 
 export function runChildSession(input: RunChildSessionInput): Promise<RunChildSessionResult> {
 	return new Promise((resolve) => {
@@ -194,6 +204,8 @@ export function runChildSession(input: RunChildSessionInput): Promise<RunChildSe
 		let messageBaseline: number | undefined;
 		const acceptedSteers: Array<{ request: SteerRequest; text: string }> = [];
 		let unsubscribe: (() => void) | undefined;
+		/** Stops forwarding parent lease revocation into this attempt once it is finished. */
+		let removeAuthorityRevocation: (() => void) | undefined;
 		let settled = false;
 		let promptSettled = false;
 		let forcedTermination = false;
@@ -562,6 +574,8 @@ export function runChildSession(input: RunChildSessionInput): Promise<RunChildSe
 			input.registerSteer?.(undefined);
 			input.registerWatchdogStatus?.(undefined);
 			unsubscribe?.();
+			removeAuthorityRevocation?.();
+			removeAuthorityRevocation = undefined;
 			let commandError: string | undefined;
 			if (!interrupted && !timedOut && !stopped) {
 				try { await session?.finishCommands?.(); }
@@ -668,9 +682,32 @@ export function runChildSession(input: RunChildSessionInput): Promise<RunChildSe
 
 		void (async () => {
 			try {
+				const authority = input.authority;
+				if (authority) {
+					// Before anything loads: the lease must name the child this runner is actually about to create.
+					authority.assertBoundTo({
+						runId: input.launch.config.runId,
+						agent: input.launch.config.agent ?? "",
+						index: input.launch.config.childIndex ?? input.childEventContext?.stepIndex ?? -1,
+						cwd: input.launch.session.cwd,
+					});
+					if (authority.lease.signal.aborted) throw new Error(AUTHORITY_REVOKED_MESSAGE);
+					const onRevoked = (): void => {
+						if (settled || promptSettled) return;
+						// Losing parent authority is not a pause: the running session stops even mid-turn.
+						error ??= AUTHORITY_REVOKED_MESSAGE;
+						abortChild();
+					};
+					authority.lease.signal.addEventListener("abort", onRevoked, { once: true });
+					removeAuthorityRevocation = () => authority.lease.signal.removeEventListener("abort", onRevoked);
+				}
 				const createInput = createReportedChildSessionInput(input.launch, input.transcriptWriter);
 				createInput.signal = startup.signal;
-				const created = await input.factory.create(createInput);
+				// Extension load and `session_start` both run inside the authority scope, so a consumer claims and
+				// acknowledges the live lease while the host is loading this child.
+				const created = authority
+					? await withChildAuthority(authority.lease, () => input.factory.create(createInput))
+					: await input.factory.create(createInput);
 				if (settled) {
 					await created.dispose().catch(() => undefined);
 					return;
@@ -711,6 +748,9 @@ export function runChildSession(input: RunChildSessionInput): Promise<RunChildSe
 				});
 				if (interrupted || timedOut || stopped) abortChild();
 				messageBaseline = created.messages.length;
+				// Readiness precedes the first model call for every factory, including injected and retried ones.
+				// A rejection settles this attempt as failed and disposes the session it just created.
+				authority?.lease.assertReady();
 				await created.prompt(input.prompt);
 				// A structured child that finished normally without calling structured_output gets one more turn (#2997).
 				if (input.launch.session.runtime.structuredOutput

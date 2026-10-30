@@ -44,7 +44,7 @@ actual launch path, not an assumption about the approved parent call.
 |---|---|
 | `pi-sbx` | Scratch space, one inline escalation API/dispatcher, serialized execution-local path policy and rollback, shared native/Bash path authorizer, per-connection network decisions, one human adapter, additive policy layers, maintenance privilege, guidance and snapshot-bound standing-rule handoff |
 | `pi-guardian` | Managed SDK reviewer with pruning-first checkpoints, pinned directives/denials, one queued/locked UUID writer and nonce-bound terminal results; explicit reviewer provider extensions, child-runner invocation fix, review-failure reporting, sandbox exception broker/rules/audit, canonical trusted maintenance resolver, session-bound broker, provenance-preserving restrictions, trusted project policy and persistence service, target-only matching for file write/edit payloads |
-| `pi-subagents` | Host-only child-authority API, actual-process IPC primitives and code-only shared registry. Launch admission and permission consumers are not wired yet. |
+| `pi-subagents` | Host-only child-authority API, actual-process IPC, sticky guarded launch admission, native single-child runner binding and first-prompt readiness; unsupported placements refuse before mutation. Production permission consumers remain open. |
 
 Detailed provenance and update records:
 [`pi-sbx/VENDOR.md`](../forks/pi-sbx/VENDOR.md) and
@@ -77,6 +77,14 @@ Detailed provenance and update records:
   before the human prompt; commit rejects stale/unapproved/symlinked policy and
   trusts/applies only returned bytes. No sandbox-exclusion fallback or post-write
   policy re-read. Writes are atomic but not locked across separate processes.
+- **Delegation:** the registered pi-sbx parent provider derives a frozen
+  workspace/held-Git-only ceiling and uses the common authorizer plus existing
+  Guardian/human route at the parent's actual cwd. Provider presence or mandatory
+  registration requires guarded launch; startup failure/disablement never opens
+  bare fallback. Reinitialization/tightening revoke leases, shutdown retains
+  intent through teardown. This is source carriage/provider acceptance, **not**
+  child policy/Guardian/OS enforcement. See the
+  [payload handoff and verification](round-2-wiring-acceptance.md).
 - **Audit:** Guardian status/assessment/exception entries plus reviewer
   transcripts. Complete correlated grant-consumption/revocation auditing is not
   implemented.

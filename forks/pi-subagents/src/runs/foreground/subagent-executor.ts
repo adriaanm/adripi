@@ -49,6 +49,7 @@ import {
 } from "../../shared/settings.ts";
 import { normalizeSkillInput } from "../../agents/skills.ts";
 import { buildAsyncRunnerSteps, DEFAULT_ASYNC_TIMEOUT_MS, executeAsyncChain, executeAsyncSingle, formatAsyncStartedMessage, isAsyncAvailable, workflowAwaitedAsyncResultPath } from "../background/async-execution.ts";
+import { childAuthorityForegroundRefusal, childAuthorityLaunchRefusal, launcherDisplayName } from "../shared/child-authority-launch.ts";
 import { updateActiveRunIndex } from "../background/active-run-index.ts";
 import { steeringReceipt } from "../background/steering.ts";
 import { acquireActiveAsyncCapacity, ActiveAsyncCapacityError, getActiveAsyncCapacitySnapshot, resolveAbandonedSlotReleaseAfterMs, resolveMaxActiveAsyncRunsPerSession, transferActiveAsyncCapacity, type ActiveAsyncCapacityHandle } from "../background/active-async-capacity.ts";
@@ -4135,6 +4136,17 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 	}
 	let foregroundMachine: import("../../shared/types.ts").HerdrMachineReference | undefined;
 	const requestedMachine = params.machine ?? agentConfig.machine;
+	// A guarded host session cannot delegate into the parent process: refuse before any machine
+	// resolution, worktree setup or child session, instead of starting an unguarded child.
+	const guardedForegroundRefusal = childAuthorityForegroundRefusal({
+		hostSessionId: data.parentPiSessionId,
+		...(requestedMachine === undefined ? {} : { machine: requestedMachine }),
+		...(agentConfig.runner?.type === "external-cli" || agentConfig.runner?.type === "external-job" ? { externalRunner: agentConfig.runner.type } : {}),
+		...(params.worktree === true ? { managedWorktree: true } : {}),
+	});
+	if (guardedForegroundRefusal) {
+		return { content: [{ type: "text", text: guardedForegroundRefusal }], isError: true, details: { mode: "single", results: [] } };
+	}
 	const requiredExtensions = data.requiredExtensions ?? deps.childRuntime?.requiredExtensions ?? resolveRequiredChildExtensions(data.parentPiSessionId);
 	if (requestedMachine) {
 		try {
@@ -5471,6 +5483,39 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		}
 		const normalizedAction = typeof requestParams.action === "string" ? requestParams.action.trim() : requestParams.action;
 		if (normalizedAction === "resume" && requestParams.extensionBindings !== undefined) return buildRequestedModeError(requestParams, "extensionBindings is not supported with action='resume'; resume uses the original retained child binding.");
+		if (normalizedAction === undefined || normalizedAction === "resume" || normalizedAction === "append-step" || normalizedAction === "schedule.create" || normalizedAction === "schedule.run" || normalizedAction === "schedule.run-due") {
+			// A guarded host session delegates exactly one native background child. Refuse every other request
+			// shape here, before workflow validation or script/host steps, fan-out admission, session or
+			// workflow directories and any child launch. Agent-resolved placement facts (external runner,
+			// launcher, machine, worktree) are re-checked before the runner is spawned.
+			const guardedRequestRefusal = childAuthorityLaunchRefusal({
+				hostSessionId: (() => {
+					try {
+						return ctx.sessionManager.getSessionId() ?? undefined;
+					} catch {
+						return undefined;
+					}
+				})(),
+				// Async placement is still unresolved; reject known request-shape faults
+				// here and use the resolved process placement at the second gate.
+				host: "runner",
+				tighteningSnapshots: [deps.childRuntime?.requiredExtensions],
+				placement: {
+					children: requestParams.tasks?.length ?? requestParams.chain?.flatMap((step) => getStepAgents(step as ChainStep)).length ?? 1,
+					chain: (requestParams.chain?.length ?? 0) > 0,
+					parallel: (requestParams.tasks?.length ?? 0) > 0,
+					dynamic: requestParams.chain?.some((step) => isDynamicParallelStep(step as ChainStep)) ?? false,
+					// Omission is unresolved until agent defaults are applied; the resolved gate below
+					// still refuses a genuinely foreground placement before any launch mutation.
+					foreground: requestParams.async === false || requestParams.clarify === true || requestParams.foregroundOnly === true,
+					workflow: requestParams.workflowScript !== undefined || requestParams.workflow !== undefined,
+					retainedResume: normalizedAction === "resume" || normalizedAction === "append-step",
+					...(requestParams.scheduleOrigin === undefined && !normalizedAction?.startsWith("schedule.") ? {} : { scheduled: true }),
+					...(inheritedNestedRoute(deps) === undefined && deps.childRuntime === undefined ? {} : { nested: true }),
+				},
+			});
+			if (guardedRequestRefusal) return buildRequestedModeError(requestParams, guardedRequestRefusal);
+		}
 		let workflowResource: { permit: WorkflowResourcePermit; provenance: WorkflowResourceProvenance; authority: WorkflowResourceAuthority } | undefined;
 		if (workflowResourcePermit) {
 			if (typeof requestParams.workflowScript !== "string") return buildRequestedModeError(requestParams, "Resolved workflow resource is missing its workflow script.");
@@ -7637,6 +7682,32 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		const requestedAsync = externalAsyncRequired ? true : effectiveParams.async ?? deps.asyncByDefault;
 		const backgroundRequestedWhileClarifying = (hasChain || hasTasks) && requestedAsync && effectiveParams.clarify === true;
 		const effectiveAsync = requestedAsync && effectiveParams.clarify !== true;
+		// Guarded host sessions delegate exactly one native background child. Everything else is refused here,
+		// before fan-out admission, session/workflow directories, worktrees or a workflow's script and host
+		// steps, so a refusal never runs unsupported work first.
+		const guardedExecutionRefusal = childAuthorityLaunchRefusal({
+			hostSessionId: requestPiSessionId,
+			host: effectiveAsync ? "runner" : "parent",
+			tighteningSnapshots: [deps.childRuntime?.requiredExtensions],
+			placement: {
+				children: hasSingle ? 1 : hasTasks ? (effectiveParams.tasks?.length ?? 0) : (effectiveParams.chain?.flatMap((step) => getStepAgents(step as ChainStep)).length ?? 0),
+				chain: hasChain,
+				parallel: hasTasks || (effectiveParams.chain?.some(isParallelStep) ?? false),
+				dynamic: effectiveParams.chain?.some((step) => isDynamicParallelStep(step as ChainStep)) ?? false,
+				foreground: !effectiveAsync,
+				workflow: effectiveParams.workflowScript !== undefined || effectiveParams.workflow !== undefined,
+				retainedResume: normalizedAction === "resume",
+				...(effectiveParams.scheduleOrigin === undefined ? {} : { scheduled: true }),
+				...(inheritedNestedRouteValue === undefined && deps.childRuntime === undefined ? {} : { nested: true }),
+				...(externalAgent?.runner?.type === undefined ? {} : { externalRunner: externalAgent.runner.type }),
+				...(launcherAgent?.launcher === undefined ? {} : { launcher: launcherDisplayName(launcherAgent.launcher) }),
+				...((effectiveParams.machine ?? selectedAgents.find((agent) => agent?.machine !== undefined)?.machine) === undefined
+					? {}
+					: { machine: (effectiveParams.machine ?? selectedAgents.find((agent) => agent?.machine !== undefined)?.machine) as string }),
+				...(effectiveParams.worktree === true ? { managedWorktree: true } : {}),
+			},
+		});
+		if (guardedExecutionRefusal) return buildRequestedModeError(effectiveParams, guardedExecutionRefusal);
 		if (externalAgent && (!effectiveAsync || effectiveParams.foregroundOnly === true)) {
 			return buildRequestedModeError(effectiveParams, `Agent '${externalAgent.name}' uses runner.type='${externalAgent.runner?.type}', which currently supports async/background execution only. Omit async or pass async:true; clarify and foregroundOnly are unsupported.`);
 		}

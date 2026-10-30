@@ -159,6 +159,11 @@ external-worktree preflight/edit-test/review-integration/dirty-preserving cleanu
 coverage when the launch substrate supports it. Do not call fixture/mock tests
 OS enforcement, installed-runtime acceptance, or authenticated Git verification.
 
+**Current source milestone:** launch carriage and the real parent provider are
+now integrated; see the [wiring acceptance/payload handoff](round-2-wiring-acceptance.md).
+Production child consumers and runtime enforcement remain open. The component
+records below describe their respective historical commits.
+
 Record exact commands, failures, review dispositions and residual limits here
 as work progresses. IPC/packaging primitives are integrated below; actual launch/permission wiring
 and production runtime acceptance remain pending. No agent deployment occurred.

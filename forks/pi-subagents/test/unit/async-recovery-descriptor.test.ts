@@ -40,7 +40,8 @@ describe("async recovery descriptor", () => {
 				shareEnabled: false, sessionRoot: path.join(root, "sessions"), maxSubagentDepth: 1,
 			});
 			assert.equal(result.isError, true);
-			assert.match(result.content[0]?.text ?? "", /requires child extensions \(host-policy\) for every runner/u);
+			// A mandatory registration demands a live provider before runner-specific admission.
+			assert.match(result.content[0]?.text ?? "", /No child authority service is published/u);
 			assert.equal(spawn.mock.callCount(), 0);
 			assert.equal(fs.existsSync(asyncDir), false);
 		} finally {

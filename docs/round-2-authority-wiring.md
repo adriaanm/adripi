@@ -2,6 +2,11 @@
 
 ## Gate and topology
 
+**Current disposition:** the launcher and parent-provider source milestone is
+accepted in the [parent verification/payload handoff](round-2-wiring-acceptance.md).
+The lane board below records the original commission, not active writers.
+Production child consumers and runtime/OS/Git acceptance remain open.
+
 Primitives are accepted in `0616949`; see [the component record](round-2-child-authority.md).
 The operator's third-fork approval and instruction to continue authorize source
 implementation and delegated nw-flash writers, not deployment, live-policy edits,
@@ -63,8 +68,8 @@ This refines the caller/provider activation contract without changing the accept
 IPC API. Both sole writers were notified through supervisor reply/live guidance.
 Review must include registered+missing provider, provider+missing registration,
 malformed provider, failed initialization/toggle without downgrade, and writable
-runner config unable to suppress actual-channel admission. This decision does not
-certify that either writer has implemented it yet.
+runner config unable to suppress actual-channel admission. Its implementation is now checked in the acceptance record; the original
+notification alone was not used as implementation evidence.
 
 ## Frozen cross-component obligations
 
@@ -166,10 +171,12 @@ rather than simulate those consumers or report full parent-first delivery.
 
 ## Validation and next gate
 
-The first candidates are **not accepted**. See the [review/recovery
+The first candidates were **rejected**. See the [review/recovery
 record](round-2-wiring-recovery.md) for terminal run evidence, parent-arbitrated
-blockers and the bounded same-owner correction pass. That record supplements
-this contract; it does not authorize child consumers or deployment.
+blockers and the bounded same-owner correction pass. The parent subsequently
+integrated and repaired the corrected source; the [acceptance record](round-2-wiring-acceptance.md)
+supersedes that historical candidate status without certifying child consumers
+or deployment.
 
 Launch tests must hit the registered dispatch/spawn/factory boundaries and real
 IPC: no first prompt when consumers are missing, wrong identity, failed startup,

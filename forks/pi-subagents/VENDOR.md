@@ -68,10 +68,38 @@ explicitly reviewed host rerun. The sandboxed full run hit process inspection,
 local socket/TCP restrictions and watcher pressure; no suite-green OS claim.
 Ignored evidence: `.local/round-2-subagents/parent-{ipc-tests,check,unit-host}.log`.
 
-**Not wired or deployed:** there is no production launch admission, first-prompt
-readiness gate, real pi-sbx publisher/consumer, held-policy intersection or parent
-Guardian/human adapter yet. These primitives do not certify child containment,
-full headless integration, external worktrees or authenticated Git. No live
-installation/policy/restart/push was performed by the agent. See
-[`docs/round-2-child-authority.md`](../../docs/round-2-child-authority.md) for the
-review dispositions and remaining lanes.
+### Guarded launch/provider wiring
+
+- Actual foreground/async tool entry points and defensive spawn admission use
+  registration **or any provider-slot presence** (including malformed/unavailable)
+  plus inherited mandatory demand; unknown identity cannot prove bare mode.
+  Bare pi-subagents behavior is retained only when genuinely outside the guard.
+- One native background child carries a host-created IPC lease before extension
+  loading; actual resolved identity and code-only readiness precede the first
+  prompt, including injected factories. Guarded retries refuse reused readiness.
+  A process-lifetime shared latch refuses nesting after revocation/ALS disposal.
+- Unsupported foreground/chain/parallel/dynamic/workflow/schedule, external
+  CLI/job/machine/binary/wrapper, managed allocation and retained/append paths
+  refuse before mutation, rather than silently switching runner. Startup/factory
+  failure disposes authority and terminates failed runners; parent loss stops the
+  real active session. Expected IPC closure no longer produces a trailing EPIPE
+  diagnostic; errors still fail authority/startup rather than being suppressed.
+- Recovery/binary/Claude fixtures now use actual host session identity; the
+  captured-mandatory workflow test expects the earlier admission refusal instead
+  of unreachable child discovery. These are guard-contract changes, not broader
+  capability-ceiling or external-runner permission changes.
+
+Current parent verification: **76** focused authority tests; full unit suite
+**4,216 pass / 17 skip / 0 fail**; affected async integration **234 pass**;
+subagents typecheck/build/verifier and **3** actual-graph tests pass. Full unit
+and affected integration commands needed reviewed host reruns after sandbox
+ps/socket/watcher failures; no OS-containment claim. Graph: **383 inputs / 17
+exports / 329 compiled modules / 18 module-URL targets / 765 artifacts**.
+
+pi-sbx now has the actual registered parent publisher, narrowing policy and shared
+Guardian/human adapter. **Production child consumers are not implemented**: real
+required extensions cannot acknowledge and therefore must not reach a first
+model prompt. These seams do not certify child containment, full headless,
+external worktrees or authenticated Git. No live installation/policy/restart/push
+was performed. See the [current wiring acceptance and payload handoff](../../docs/round-2-wiring-acceptance.md)
+and [component history](../../docs/round-2-child-authority.md).

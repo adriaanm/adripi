@@ -21,11 +21,26 @@ import { assertClaudeCodeModelScope, isClaudeCodeAdapterId, resolveClaudeCodeOve
 import { injectSingleOutputInstruction, normalizeSingleOutputOverride, resolveSingleOutputPath, validateFileOnlyOutputMode } from "../shared/single-output.ts";
 import { applyWatchdogLaunchRules, sendRuleViolationWarning } from "../../watchdog/rules.ts";
 import { buildChainInstructions, getStepAgents, isDynamicParallelStep, isParallelStep, resolveExistingReadInstructionPaths, resolveExistingReadPaths, writeInitialProgressFile, type ChainStep, type SequentialStep, type StepOverrides } from "../../shared/settings.ts";
-import { isDynamicRunnerGroup, isParallelGroup, type RunnerStep } from "../shared/parallel-utils.ts";
+import { flattenSteps as flattenRunnerSteps, isDynamicRunnerGroup, isParallelGroup, type RunnerStep } from "../shared/parallel-utils.ts";
+import {
+	CHILD_AUTHORITY_RUNNER_CONFIG_KEY,
+	admitChildAuthorityLaunch,
+	childAuthorityLaunchRefusal,
+	childAuthorityPlacementRefusal,
+	childAuthorityRunnerRequest,
+	launcherDisplayName,
+	prepareSpawnedRunnerChildAuthority,
+	type ChildAuthorityLaunchAdmission,
+	type ChildAuthorityLaunchPlacement,
+	type SpawnedRunnerChildAuthority,
+} from "../shared/child-authority-launch.ts";
 import type { ContextMode } from "../shared/context-mode.ts";
 import { PI_CODING_AGENT_PACKAGE, resolveBunPiExecutable, resolveHostPiPackageRoot } from "../shared/pi-spawn.ts";
 import { JITI_ALIAS_ENV, resolveHostPeerAliases } from "./runner-aliases.ts";
 import { preflightLaunchCwd } from "../shared/launch-cwd.ts";
+
+/** Test-only bootstrap seam the runner reads. A guarded launch must not forward an inherited override. */
+const RUNNER_EXECUTION_MODULE_ENV = "PI_SUBAGENTS_TEST_RUNNER_EXECUTION_MODULE";
 import { resolveNodeExecutable } from "../../shared/node-executable.ts";
 import { resolveRuntimeModulePath } from "../../shared/runtime-module-path.ts";
 import { backgroundProcessOptions } from "../shared/background-process-options.ts";
@@ -663,6 +678,109 @@ export function emitProcessTerminalEvent(ctx: AsyncExecutionContext, proof: unkn
 	}
 }
 
+const EXTERNAL_RUNNER_TYPES: ReadonlySet<string> = new Set(["external-cli", "external-job"]);
+
+/**
+ * Everything a guarded launch must refuse before it mutates or spawns, read from the actual
+ * runner config the parent is about to write.
+ */
+function runnerChildAuthorityPlacement(cfg: object, steps: RunnerStep[], binaryHost: boolean): ChildAuthorityLaunchPlacement {
+	const launch = cfg as {
+		launcher?: unknown;
+		revivalLease?: unknown;
+		nestedRoute?: unknown;
+		nestedSelf?: unknown;
+		inheritedChildRuntime?: { depth?: number; nestedRoute?: unknown };
+	};
+	const leafSteps = flattenRunnerSteps(steps);
+	const externalRunner = leafSteps.map((step) => step.runner?.type).find((type) => type !== undefined && EXTERNAL_RUNNER_TYPES.has(type));
+	const machine = leafSteps.map((step) => step.machine?.id).find((id) => id !== undefined);
+	// The runner config stores `launcher: {name, argv}`; reading a string here left the refusal dead.
+	const launcherName = launcherDisplayName(launch.launcher);
+	return {
+		host: "runner",
+		// A dynamic group decides its own child count at runtime, so it counts as more than one.
+		children: steps.some((step) => isDynamicRunnerGroup(step)) ? Number.POSITIVE_INFINITY : leafSteps.length,
+		chain: steps.length > 1,
+		parallel: steps.some((step) => isParallelGroup(step)),
+		dynamic: steps.some((step) => isDynamicRunnerGroup(step)),
+		// Inherited runtime at all means the launching executor was already a child: depth 1 is a
+		// child launching another child, which re-roots authority inside the runner.
+		// Root launches also carry a descendant-observability route; it is not
+		// evidence that the launching executor is itself a child.
+		nested: Boolean(launch.nestedSelf ?? launch.inheritedChildRuntime),
+		...(externalRunner === undefined ? {} : { externalRunner }),
+		...(machine === undefined ? {} : { machine }),
+		...(launcherName === undefined ? {} : { launcher: launcherName }),
+		...(binaryHost ? { binaryHost: true } : {}),
+		retainedResume: typeof launch.revivalLease === "object" && launch.revivalLease !== null,
+		managedWorktree: steps.some((step) => "worktree" in step && step.worktree === true),
+	};
+}
+
+/** Placement facts a guarded chain launch must refuse, read from the request before it mutates anything. */
+function chainChildAuthorityPlacement(
+	chain: ChainStep[],
+	agents: AgentConfig[],
+	params: { machine?: string; nestedRoute?: unknown; attachRoot?: unknown },
+	ctx: { childRuntime?: ChildRuntimeConfig },
+): Omit<ChildAuthorityLaunchPlacement, "host"> {
+	const stepMachines: string[] = [];
+	const stepWorktrees: boolean[] = [];
+	for (const step of chain) {
+		if (isParallelStep(step)) {
+			for (const task of step.parallel) if (task.machine !== undefined) stepMachines.push(task.machine);
+			stepWorktrees.push(step.worktree === true);
+			continue;
+		}
+		if (isDynamicParallelStep(step)) continue;
+		if (step.machine !== undefined) stepMachines.push(step.machine);
+		stepWorktrees.push(step.worktree === true);
+	}
+	const agentMachine = chain.flatMap(getStepAgents)
+		.map((name) => agents.find((agent) => agent.name === name)?.machine)
+		.find((machine) => machine !== undefined);
+	const machine = params.machine ?? stepMachines[0] ?? agentMachine;
+	const externalRunner = chainReferencedExternalRunner(chain, agents);
+	const launcher = chainReferencedLauncher(chain, agents);
+	return {
+		children: chain.reduce((total, step) => total + (isParallelStep(step) ? step.parallel.length : 1), 0),
+		chain: chain.length > 1,
+		parallel: chain.some((step) => isParallelStep(step)),
+		dynamic: chain.some((step) => isDynamicParallelStep(step)),
+		...(externalRunner === undefined ? {} : { externalRunner }),
+		...(machine === undefined ? {} : { machine }),
+		...(launcher === undefined ? {} : { launcher }),
+		...(stepWorktrees.some(Boolean) ? { managedWorktree: true } : {}),
+		...(params.attachRoot === undefined ? {} : { retainedResume: true }),
+		...(ctx.childRuntime === undefined ? {} : { nested: true }),
+	};
+}
+
+/** The first external runner type any chain step names, if any. */
+function chainReferencedExternalRunner(chain: ChainStep[], agents: AgentConfig[]): string | undefined {
+	const types = chain.flatMap(getStepAgents).map((name) => agents.find((agent) => agent.name === name)?.runner?.type);
+	return types.find((type) => type !== undefined && EXTERNAL_RUNNER_TYPES.has(type));
+}
+
+/** The launcher name of the first chain step whose agent configures one, if any. */
+function chainReferencedLauncher(chain: ChainStep[], agents: AgentConfig[]): string | undefined {
+	for (const name of chain.flatMap(getStepAgents)) {
+		const launcher = launcherDisplayName(agents.find((agent) => agent.name === name)?.launcher);
+		if (launcher !== undefined) return launcher;
+	}
+	return undefined;
+}
+
+/** Snapshots an earlier stage already carried; a mandatory entry can only make this launch stricter. */
+function childAuthorityTighteningSnapshots(cfg: object): Array<RequiredChildExtensionSnapshot | undefined> {
+	const launch = cfg as {
+		requiredExtensions?: RequiredChildExtensionSnapshot;
+		inheritedChildRuntime?: { requiredExtensions?: RequiredChildExtensionSnapshot };
+	};
+	return [launch.requiredExtensions, launch.inheritedChildRuntime?.requiredExtensions];
+}
+
 function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Omit<AsyncStatus, "pid" | "processTerminal">, initialStatusPath: string, launchParentSessionId: string | undefined, onProcessTerminal?: (proof: unknown) => void, onBeforeProceed?: (runnerProcessInstanceId: string) => void, requestedCwd = cwd): SpawnRunnerResult | Promise<SpawnRunnerResult> {
 	const cwdError = preflightLaunchCwd(requestedCwd, cwd);
 	if (cwdError) return { error: cwdError };
@@ -678,6 +796,18 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 
 	// The compiled host exposes its SDK only through Pi's extension loader.
 	const binaryHost = resolveBunPiExecutable();
+	// Guarded intent is established before any status file, worktree or process exists, so a later startup
+	// failure cannot downgrade this launch into an unguarded child.
+	let childAuthorityAdmission: ChildAuthorityLaunchAdmission;
+	try {
+		childAuthorityAdmission = admitChildAuthorityLaunch({ hostSessionId: launchParentSessionId, tighteningSnapshots: childAuthorityTighteningSnapshots(cfg) });
+	} catch (error) {
+		return { error: error instanceof Error ? error.message : String(error) };
+	}
+	if (childAuthorityAdmission.guarded) {
+		const refusal = childAuthorityPlacementRefusal(runnerChildAuthorityPlacement(cfg, steps as RunnerStep[], Boolean(binaryHost)));
+		if (refusal) return { error: refusal };
+	}
 	if (!binaryHost && "error" in piPackageSelection) throw piPackageSelection.error;
 	const nodeExecutable = resolveNodeExecutable();
 	const nativeRunnerSupported = supportsNativeRunner(nodeExecutable);
@@ -703,7 +833,14 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 	const runnerProcessInstanceId = randomUUID();
 	const hasRevivalLease = typeof (cfg as { revivalLease?: unknown }).revivalLease === "object";
 	const launchBarrierToken = hasRevivalLease ? undefined : runnerProcessInstanceId;
-	const launchConfig = { ...cfg, runnerProcessInstanceId, ...(launchBarrierToken ? { launchBarrierToken } : {}) };
+	const childAuthorityRequest = childAuthorityRunnerRequest(childAuthorityAdmission);
+	const launchConfig = {
+		...cfg,
+		runnerProcessInstanceId,
+		...(launchBarrierToken ? { launchBarrierToken } : {}),
+		// The runner also sees the host IPC channel itself; this marker can only add that requirement.
+		...(childAuthorityRequest ? { [CHILD_AUTHORITY_RUNNER_CONFIG_KEY]: childAuthorityRequest } : {}),
+	};
 	writePrivateAtomicJson(cfgPath, launchConfig);
 	const command = binaryHost ?? nodeExecutable;
 	const launchForStartup = launchConfig as typeof launchConfig & { asyncDir?: unknown; id?: unknown; sessionId?: unknown; completionOwnerId?: unknown; revivalLease?: unknown };
@@ -777,11 +914,15 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 		};
 		if (launchParentSessionId === undefined) delete runnerEnv[SUBAGENT_PARENT_SESSION_ENV];
 		else runnerEnv[SUBAGENT_PARENT_SESSION_ENV] = launchParentSessionId;
+		// A guarded runner must reach the binding that awaits its lease; an inherited test-only execution
+		// module would replace that path, so the launch never hands it to the child.
+		if (childAuthorityAdmission.guarded) delete runnerEnv[RUNNER_EXECUTION_MODULE_ENV];
 		const [spawnCommand, ...spawnArgs] = launcher ? [...launcher.argv, command, ...args] : [command, ...args];
 		const proc = spawn(spawnCommand!, spawnArgs, {
 			cwd,
 			...backgroundProcessOptions(),
-			stdio: ["ignore", stdoutFd ?? "ignore", stderrFd ?? "ignore"],
+			// A guarded launch attaches the host-created IPC channel here; nothing else can create a lease.
+			stdio: ["ignore", stdoutFd ?? "ignore", stderrFd ?? "ignore", ...(childAuthorityAdmission.guarded ? ["ipc" as const] : [])],
 			env: runnerEnv,
 		});
 		let observedProcessExit: { exitCode: number | null; signal: NodeJS.Signals | null } | undefined;
@@ -861,78 +1002,121 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 			if (startupPath) setImmediate(finalize);
 			else finalize();
 		});
-		if (typeof proc.pid !== "number") {
+		const spawnedPid = proc.pid;
+		if (typeof spawnedPid !== "number") {
 			return { error: `async runner did not produce a pid for cwd: ${cwd}` };
 		}
-		try {
-			writePrivateAtomicJson(initialStatusPath, {
-				...initialStatus,
-				...(launcher ? {} : { pid: proc.pid, pidNamespaceScope: currentPidNamespaceScope() }),
-				processTerminal: { version: 1, state: "pending", runId: initialStatus.runId, runnerProcessInstanceId },
-			});
-			// Aggregate waits must see the launch before the runner's first status update.
-			updateActiveRunIndex(path.dirname(initialStatusPath), initialStatus.state, initialStatus.toolCallId);
-		} catch (error) {
-			const message = `Failed to persist initial async status: ${error instanceof Error ? error.message : String(error)}`;
-			if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
-			const terminationObserved = terminateBeforeProceed(proc.pid);
-			return { pid: proc.pid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
-		}
-		try {
-			if (!launchAsyncDir) throw new Error("Async runner is missing its lifecycle directory.");
-			initializeProcessTerminal(launchAsyncDir, launchRunId, runnerProcessInstanceId);
-		} catch (error) {
-			const message = `Failed to establish async runner lifecycle sidecar: ${error instanceof Error ? error.message : String(error)}`;
-			if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
-			const terminationObserved = terminateBeforeProceed(proc.pid);
-			return { pid: proc.pid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
-		}
-		try {
-			onBeforeProceed?.(runnerProcessInstanceId);
-		} catch (error) {
-			const message = `Failed to establish async runner capacity ownership: ${error instanceof Error ? error.message : String(error)}`;
-			if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
-			const terminationObserved = terminateBeforeProceed(proc.pid);
-			return { pid: proc.pid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
-		}
-		if (identityPath && launchBarrierToken && startupProceedPath) {
-			proc.unref();
-			const fail = (message: string): SpawnRunnerResult => {
+		/**
+		 * Everything after the spawn, held so a guarded launch can reach the provider first: the runner only
+		 * proceeds once its lease exists, and it never loads a child before that.
+		 */
+		const continueAfterSpawn = (childAuthority: SpawnedRunnerChildAuthority | undefined): SpawnRunnerResult | Promise<SpawnRunnerResult> => {
+			/** Releases the prepared lease on a launch that will not run; the controller also disposes on process loss. */
+			const abandonChildAuthority = (): void => {
+					try {
+						childAuthority?.dispose();
+					} catch {
+						// A channel that is already gone independently revokes the parent's lease.
+					}
+				};
+			try {
+				writePrivateAtomicJson(initialStatusPath, {
+					...initialStatus,
+					...(launcher ? {} : { pid: spawnedPid, pidNamespaceScope: currentPidNamespaceScope() }),
+					processTerminal: { version: 1, state: "pending", runId: initialStatus.runId, runnerProcessInstanceId },
+				});
+				// Aggregate waits must see the launch before the runner's first status update.
+				updateActiveRunIndex(path.dirname(initialStatusPath), initialStatus.state, initialStatus.toolCallId);
+			} catch (error) {
+				const message = `Failed to persist initial async status: ${error instanceof Error ? error.message : String(error)}`;
 				if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
-				return { ...(runnerIdentity ? { pid: runnerIdentity.pid } : {}), runnerProcessInstanceId, error: message, terminationObserved: terminateBeforeProceed(proc.pid!), startupDidNotProceed: true };
-			};
-			return waitForRunnerStartup(identityPath, "identified", RUNNER_STARTUP_TIMEOUT_MS, launchBarrierToken, processClosed).then((identified) => {
-				if (identified.ok === false) return fail(identified.error);
-				const identityError = adoptRunnerIdentity(identified.pid, identified.pidNamespaceScope);
-				if (identityError) return fail(identityError);
+				abandonChildAuthority();
+				const terminationObserved = terminateBeforeProceed(spawnedPid);
+				return { pid: spawnedPid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
+			}
+			try {
+				if (!launchAsyncDir) throw new Error("Async runner is missing its lifecycle directory.");
+				initializeProcessTerminal(launchAsyncDir, launchRunId, runnerProcessInstanceId);
+			} catch (error) {
+				const message = `Failed to establish async runner lifecycle sidecar: ${error instanceof Error ? error.message : String(error)}`;
+				if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
+				abandonChildAuthority();
+				const terminationObserved = terminateBeforeProceed(spawnedPid);
+				return { pid: spawnedPid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
+			}
+			try {
+				onBeforeProceed?.(runnerProcessInstanceId);
+			} catch (error) {
+				const message = `Failed to establish async runner capacity ownership: ${error instanceof Error ? error.message : String(error)}`;
+				if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
+				abandonChildAuthority();
+				const terminationObserved = terminateBeforeProceed(spawnedPid);
+				return { pid: spawnedPid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
+			}
+			if (identityPath && launchBarrierToken && startupProceedPath) {
+				proc.unref();
+				const fail = (message: string): SpawnRunnerResult => {
+					if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
+					abandonChildAuthority();
+					return { ...(runnerIdentity ? { pid: runnerIdentity.pid } : {}), runnerProcessInstanceId, error: message, terminationObserved: terminateBeforeProceed(spawnedPid), startupDidNotProceed: true };
+				};
+				return waitForRunnerStartup(identityPath, "identified", RUNNER_STARTUP_TIMEOUT_MS, launchBarrierToken, processClosed).then((identified) => {
+					if (identified.ok === false) return fail(identified.error);
+					const identityError = adoptRunnerIdentity(identified.pid, identified.pidNamespaceScope);
+					if (identityError) return fail(identityError);
+					try {
+						writeRunnerStartupControl(startupProceedPath, { action: "proceed", token: launchBarrierToken });
+					} catch (error) {
+						return fail(`Failed to authorize async runner startup: ${error instanceof Error ? error.message : String(error)}`);
+					}
+					return { pid: identified.pid as number, runnerProcessInstanceId };
+				});
+			}
+			if (launchBarrierToken && startupProceedPath) {
 				try {
 					writeRunnerStartupControl(startupProceedPath, { action: "proceed", token: launchBarrierToken });
 				} catch (error) {
-					return fail(`Failed to authorize async runner startup: ${error instanceof Error ? error.message : String(error)}`);
+					const message = `Failed to authorize async runner startup: ${error instanceof Error ? error.message : String(error)}`;
+					if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
+					const terminationObserved = terminateBeforeProceed(spawnedPid);
+					return { pid: spawnedPid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
 				}
-				return { pid: identified.pid as number, runnerProcessInstanceId };
-			});
-		}
-		if (launchBarrierToken && startupProceedPath) {
-			try {
-				writeRunnerStartupControl(startupProceedPath, { action: "proceed", token: launchBarrierToken });
-			} catch (error) {
-				const message = `Failed to authorize async runner startup: ${error instanceof Error ? error.message : String(error)}`;
-				if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
-				const terminationObserved = terminateBeforeProceed(proc.pid);
-				return { pid: proc.pid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
 			}
+			proc.unref();
+			if (startupPath && startupAckPath && startupConfirmPath && startupProceedPath) {
+				const persistStartupFailure = (message: string) => {
+					if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
+				};
+				const handshake = completeRunnerStartupHandshake(startupPath, startupAckPath, startupConfirmPath, startupProceedPath, proc, processClosed, () => observedProcessExit ?? (proc.exitCode !== null || proc.signalCode !== null ? { exitCode: proc.exitCode, signal: proc.signalCode } : undefined), runnerProcessInstanceId, persistStartupFailure, launcher ? { adopt: adoptRunnerIdentity, terminate: () => terminateBeforeProceed(spawnedPid) } : undefined);
+				if (!launcher) return handshake;
+				return handshake.then(({ pid: _wrapperPid, ...result }) => ({ ...result, ...(runnerIdentity ? { pid: runnerIdentity.pid } : {}) }));
+			}
+			return { pid: spawnedPid, runnerProcessInstanceId };
+		};
+		if (!childAuthorityAdmission.guarded) return continueAfterSpawn(undefined);
+		const only = flattenRunnerSteps(steps as RunnerStep[])[0];
+		if (!only || launchParentSessionId === undefined) {
+			const message = "Child authority refused this launch because it does not name exactly one child of a host session.";
+			if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
+			const terminationObserved = terminateBeforeProceed(spawnedPid);
+			return { pid: spawnedPid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
 		}
-		proc.unref();
-		if (startupPath && startupAckPath && startupConfirmPath && startupProceedPath) {
-			const persistStartupFailure = (message: string) => {
+		return prepareSpawnedRunnerChildAuthority({
+			admission: childAuthorityAdmission,
+			child: proc,
+			hostSessionId: launchParentSessionId,
+			runId: launchRunId,
+			// The host fixes the child identity from the actual runner config, not from model input.
+			identity: { agent: only.agent, index: 0, cwd: path.resolve(only.cwd ?? cwd) },
+		}).then(
+			(childAuthority) => continueAfterSpawn(childAuthority),
+			(error: unknown) => {
+				const message = `Child authority refused this launch: ${error instanceof Error ? error.message : String(error)}`;
 				if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
-			};
-			const handshake = completeRunnerStartupHandshake(startupPath, startupAckPath, startupConfirmPath, startupProceedPath, proc, processClosed, () => observedProcessExit ?? (proc.exitCode !== null || proc.signalCode !== null ? { exitCode: proc.exitCode, signal: proc.signalCode } : undefined), runnerProcessInstanceId, persistStartupFailure, launcher ? { adopt: adoptRunnerIdentity, terminate: () => terminateBeforeProceed(proc.pid!) } : undefined);
-			if (!launcher) return handshake;
-			return handshake.then(({ pid: _wrapperPid, ...result }) => ({ ...result, ...(runnerIdentity ? { pid: runnerIdentity.pid } : {}) }));
-		}
-		return { pid: proc.pid, runnerProcessInstanceId };
+				const terminationObserved = terminateBeforeProceed(proc.pid!);
+				return { pid: proc.pid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
+			},
+		);
 	} catch (error) {
 		closeFd(stdoutFd);
 		closeFd(stderrFd);
@@ -1495,6 +1679,15 @@ export function executeAsyncChain(
 			(step, parallel) => Array.isArray(step.parallel) ? { parallel } : { acceptance: "acceptance" in step ? step.acceptance : undefined, parallel }),
 	});
 	if (acceptanceErrors.length > 0) return formatAsyncStartError(resultMode, acceptanceErrors.join(" "));
+	// Guarded admission comes before the run directory, fanout descriptor, progress writes, machine placement
+	// and worktree setup, so an unsupported placement leaves no mutation behind.
+	const guardedRefusal = childAuthorityLaunchRefusal({
+		hostSessionId: ctx.parentSessionId ?? ctx.currentSessionId,
+		host: "runner",
+		tighteningSnapshots: [params.requiredExtensions, ctx.childRuntime?.requiredExtensions],
+		placement: chainChildAuthorityPlacement(chain, agents, params, ctx),
+	});
+	if (guardedRefusal) return formatAsyncStartError(resultMode, guardedRefusal);
 	// Refuse an undefined launcher before the run directory exists and before step building can write progress files.
 	const undefinedLauncher = chain.flatMap(getStepAgents).map((name) => agents.find((agent) => agent.name === name)?.launcher)
 		.find((name) => name !== undefined && !lookupRunnerLauncher(ctx.runnerLaunchers, name));
@@ -1864,6 +2057,22 @@ export function executeAsyncSingle(
 	if (acceptanceErrors.length > 0) return formatAsyncStartError("single", acceptanceErrors.join(" "));
 	const externalRunner = agentConfig.runner?.type === "external-cli" || agentConfig.runner?.type === "external-job";
 	const externalRunnerType = agentConfig.runner?.type;
+	// Guarded admission comes before the recovery descriptor, run directory, progress writes, machine
+	// placement and worktree setup, so an unsupported placement leaves no mutation behind.
+	const guardedRefusal = childAuthorityLaunchRefusal({
+		hostSessionId: ctx.parentSessionId ?? ctx.currentSessionId,
+		host: "runner",
+		tighteningSnapshots: [params.requiredExtensions, ctx.childRuntime?.requiredExtensions],
+		placement: {
+			...(externalRunnerType === "external-cli" || externalRunnerType === "external-job" ? { externalRunner: externalRunnerType } : {}),
+			...(params.machine ?? agentConfig.machine) === undefined ? {} : { machine: (params.machine ?? agentConfig.machine) as string },
+			...(launcherDisplayName(agentConfig.launcher) === undefined ? {} : { launcher: launcherDisplayName(agentConfig.launcher) }),
+			...(params.worktree === true ? { managedWorktree: true } : {}),
+			...(params.revivalLease === undefined ? {} : { retainedResume: true }),
+			...(ctx.childRuntime === undefined ? {} : { nested: true }),
+		},
+	});
+	if (guardedRefusal) return formatAsyncStartError("single", guardedRefusal);
 	const permissionRules = resolvePermissionRules(ctx.permissions, agentConfig.permissions);
 	// See the chain path: the Claude Code adapter accepts an explicit model/thinking
 	// request even though no other external runner does.

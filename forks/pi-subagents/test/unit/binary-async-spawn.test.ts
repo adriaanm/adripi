@@ -66,9 +66,8 @@ for (const [entry, missingBootstrap] of [
 					artifactConfig: { enabled: false, includeInput: false, includeOutput: false, includeJsonl: false, includeMetadata: false, cleanupDays: 7 },
 					shareEnabled: false, sessionRoot: path.join(root, "sessions"), maxSubagentDepth: 1, acceptance: false,
 				});
-				assert.match(withoutParent.content[0]!.text, /captured binary spawn/);
-				assert.equal(spawn.mock.callCount(), 2);
-				assert.equal(spawn.mock.calls[1]!.arguments[2].env.PI_SUBAGENT_PARENT_SESSION, undefined);
+				assert.match(withoutParent.content[0]!.text, /no host Pi session id/);
+				assert.equal(spawn.mock.callCount(), 1, "unknown host identity must not fall back to bare binary launch");
 
 				const attached = executeAsyncChain("binary-attached", {
 					chain: [{ agent: "worker", task: "Continue" }],
@@ -79,8 +78,8 @@ for (const [entry, missingBootstrap] of [
 					shareEnabled: false, sessionRoot: path.join(root, "sessions"), maxSubagentDepth: 1,
 				});
 				assert.match(attached.content[0]!.text, /captured binary spawn/);
-				assert.equal(spawn.mock.callCount(), 3);
-				const attachedOptions = spawn.mock.calls[2]!.arguments[2];
+				assert.equal(spawn.mock.callCount(), 2);
+				const attachedOptions = spawn.mock.calls[1]!.arguments[2];
 				assert.equal(attachedOptions.env.PI_SUBAGENT_PARENT_SESSION, "attach-parent");
 				const attachedConfig = JSON.parse(fs.readFileSync(attachedOptions.env.PI_SUBAGENT_RUNNER_CONFIG, "utf-8"));
 				assert.deepEqual(attachedConfig.steps.map((step: { parentSessionId?: string }) => step.parentSessionId), ["attach-parent", "attach-parent"]);
@@ -92,14 +91,15 @@ for (const [entry, missingBootstrap] of [
 					agents: [makeAgent("worker")],
 					ctx: {
 						pi: { events: { emit() {} } }, cwd: root, currentSessionId: "status-session",
-						get parentSessionId() { return ++parentRead === 1 ? "launch-parent-a" : "launch-parent-b"; },
+						// Every read changes identity, regardless of additional preflight checks.
+						get parentSessionId() { return `launch-parent-${++parentRead}`; },
 					},
 					artifactConfig: { enabled: false, includeInput: false, includeOutput: false, includeJsonl: false, includeMetadata: false, cleanupDays: 7 },
 					shareEnabled: false, sessionRoot: path.join(root, "sessions"), maxSubagentDepth: 1,
 				});
 				assert.equal(inconsistent.isError, true);
 				assert.match(inconsistent.content[0]!.text, /inconsistent parent session identities/);
-				assert.equal(spawn.mock.callCount(), 3, "inconsistent real or synthetic parents must fail before spawn");
+				assert.equal(spawn.mock.callCount(), 2, "inconsistent real or synthetic parents must fail before spawn");
 			}
 		} finally {
 			t.mock.restoreAll();
