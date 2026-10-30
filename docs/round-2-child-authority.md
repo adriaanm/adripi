@@ -247,4 +247,6 @@ permission-adapter lanes against this frozen API, with exclusive file lists and
 an explicit policy-payload contract before writing. No production caller, pi-sbx
 provider/consumer, real Guardian/human decision route or first-prompt gate exists
 in this commit; those remain todo #22, followed by child/OS/Git acceptance.
+The next staged ownership board and binding caller/provider obligations are in
+[round-2-authority-wiring.md](round-2-authority-wiring.md).
 
