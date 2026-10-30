@@ -159,4 +159,35 @@ coverage when the launch substrate supports it. Do not call fixture/mock tests
 OS enforcement, installed-runtime acceptance, or authenticated Git verification.
 
 Record exact commands, failures, review dispositions and residual limits here
-as work progresses. No new runtime behavior has been implemented or deployed.
+as work progresses. No new runtime behavior is integrated or deployed yet.
+
+## Component candidate review (workflow 185d028d-d008-4fad-b2c1-a57eefa3395d)
+
+Both original writers and fresh reviewers completed. Candidates remain in their
+owned worktrees; the parent has read the actual new implementation modules and
+packaging diffs, not just handoffs. Parent independently reproduced the initial
+**26 IPC tests + typecheck** and **33 packaging fixtures + artifact verification**
+passing. Passing tests do not discharge the source-proven missing negatives.
+Reports are session artifacts under this workflow's `authority-components/`.
+
+Accepted fixes before either component is integrated:
+
+| Component | Finding / disposition |
+|---|---|
+| IPC | P1 sync `decide()` throw escapes the parent EventEmitter callback; P1 unbounded, abort-ignoring `prepare()` can hang launch. Fix both and exercise real-process negatives. |
+| IPC | Parent additionally found concurrent prepares before `prepared` is assigned; missing disposal after invalid provider payload/consumers; and channel loss while preparing. Make preparation single-attempt, bounded, cancellable and cleanup late-returned leases. |
+| IPC | FIFO replay eviction contradicts lifetime replay protection. Bound total accepted ids per lease and fail closed on exhaustion, never forget an old id while retaining authority. Bound wire ids too. |
+| IPC | Child cancellation/timeouts/client disposal currently do not tell the parent. Add authenticated cancel/release messages so the parent aborts the corresponding pending human/reviewer operation and disposes the provider. |
+| IPC | Return the live lease from the required consumer's `claimChildAuthority`; reject requests before all consumers acknowledge, and reject `awaitLease()` after revocation/failure. Cross-check grant/revoke audiences. |
+| IPC | `defer` must not cross the wire as an unfinished approval. Parent `decide()` owns reviewer+human completion; terminal outcomes are allow/deny/unavailable/cancelled. Use explicit, bounded approval-friendly defaults and short overrides in tests. |
+| IPC | Production runner factory must capture the real process IPC endpoint, not accept a model-reconstructible fake peer. Trusted provider injection is host code authority, not proof that arbitrary same-process code is safe; document this boundary honestly. |
+| Packaging | P1 early preflight blocks aligned future upgrades against an old install. Preflight validates fork/build readiness; strict installed-version/dependency/layout validation belongs after package installation, before deployment writes. |
+| Packaging | P2 build-wrapper race and symlink refusals need tests. Parent additionally found target-directory symlinks are followed by the JS mirror, and source symlinks can fail after deleting target entries. Prevalidate source/managed target trees; preserve the legitimate package-root pnpm symlink only. |
+| Packaging | In-place copies/manifests can mutate shared hardlink inodes. Use exclusive temporary siblings plus atomic rename, with failure cleanup and scratch hardlink/symlink regressions. |
+| Packaging | Stamp source and artifact contents, reject unexpected root files, scan compiled runtime URLs as well as bundle URLs, and detect output tampering/mixing. This is consistency checking, not trust against hostile same-user writers. |
+| Packaging | Plan all listed forks before any writes so a later validation refusal cannot overwrite earlier forks. IO failures are still not a multi-directory transaction; do not claim otherwise. |
+
+The same sole writers will receive bounded fix packets in the same worktrees,
+then fresh read-only targeted reviews. Public export/manifest/docs integration
+and actual launch/permission wiring remain parent-owned downstream work.
+
