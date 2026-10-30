@@ -257,6 +257,12 @@ Existing configs receive code-default context budgets without a live edit. See
 legacy/oversized-history fail-closed recovery and the still-open Node26 HTTP
 headless gate. This is source-only, not evidence of a restarted installation.
 
+Guardian-only token/cost reporting is available in its existing widget and
+`/guardian costs`, with separate review/retry/summary/legacy accounting. It leaves
+native parent/subagent totals untouched and labels unpriced/unreported usage and
+unfinished transports explicitly. These are SDK estimates, not invoices or
+measured savings; see [accounting verification](guardian-costs.md).
+
 ## 5. Verification, deployment and remaining work
 
 Round 1 and round-2 first-wave tests exercise registered tool dispatch, native

@@ -126,7 +126,10 @@ untrusted task evidence/previous task summary enters this call. Exact protected
 denial records and user directives stay outside it. Empty, aborted,
 length-limited, failed or ineffective summaries block the review. Summary usage
 is stored once on the checkpoint, not added again to a parent tool result.
-Separate Guardian cost presentation remains todo #24.
+Separate Guardian cost presentation is now implemented in source; see
+[Guardian-only accounting](guardian-costs.md). Per-attempt records include failed
+summaries; successful checkpoints link that already-counted record rather than
+adding its cost twice. This is not a live savings benchmark.
 
 No cursor, denial streak, reviewer generation, standing rule or baseline
 permission changes merely because pruning occurs. Only the normal successful

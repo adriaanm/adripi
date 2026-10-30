@@ -6,6 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildSidecarArgs, getPiInvocation, requestGuardianAssessment } from "../src/sidecar.ts";
 import type { GuardianConfig, GuardianStateV1 } from "../src/types.ts";
+import { emptyKinds, measureUsage, type GuardianUsageNotice } from "../src/usage.ts";
 
 const config = { reviewerModel: "fixture/model", reviewerExtensions: [], thinkingLevel: "low", policyPath: "/trusted/policy.md",
 	piCommand: "/usr/local/bin/pi", timeoutMs: 10000, maxAttempts: 2 } as unknown as GuardianConfig;
@@ -88,10 +89,12 @@ if (JSON.parse(input.prompt).request === "first") {
   event("closed:second");
   process.stdout.write(JSON.stringify({type:"guardian_review_result",nonce:input.nonce,assessment}) + "\\n");
 }`);
-	const first = requestGuardianAssessment({ ...config, piCommand: fake.path, timeoutMs: 5000 }, state, "first");
+	const notices: GuardianUsageNotice[] = [];
+	const first = requestGuardianAssessment({ ...config, piCommand: fake.path, timeoutMs: 5000 }, state, "first", undefined, undefined, undefined, (notice) => notices.push(notice));
 	const refused = assert.rejects(first, /timed out/);
 	const second = requestGuardianAssessment({ ...config, piCommand: fake.path, timeoutMs: 15000 }, state, "second");
 	await refused;
+	assert.deepEqual(notices.map((notice) => notice.kind), ["pending", "gap"], "timeout is not zero-cost certification");
 	assert.deepEqual(await second, assessment);
 	assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"), ["start:first", "closed:first", "start:second", "closed:second"]);
 });
@@ -104,3 +107,41 @@ test("Pi invocation follows a CLI symlink using the current Node runtime", async
 	try { process.argv[1] = executable; assert.deepEqual(getPiInvocation(["--version"]), { command: process.execPath, args: [executable, "--version"] }); }
 	finally { process.argv[1] = previous; }
 });
+
+const usageTotals = emptyKinds();
+usageTotals.review = measureUsage({ input: 10, output: 2, cacheRead: 3, cacheWrite: 1, cost: { total: 0.001 } });
+const usageEvent = `const usage = {version:1,parentSessionId:input.parentSessionId,reviewerSessionId:input.sessionId,revision:7,totals:${JSON.stringify(usageTotals)}};
+const telemetry = {type:"guardian_usage",nonce:input.nonce,usage};`;
+for (const phase of ["success", "review failure", "stale evidence"] as const) {
+	test(`usage is independently retained on ${phase}, not turned into an authorization result`, async () => {
+		const fake = await executable(`${usageEvent}
+process.stdout.write(JSON.stringify({type:"entry_appended",entry:{customType:"pi-guardian.managed-usage",data:telemetry}}) + "\\n");
+process.stdout.write(JSON.stringify({type:"guardian_review_result",nonce:input.nonce,${phase === "review failure" ? 'error:"provider failed"' : "assessment"}}) + "\\n");`);
+		const notices: GuardianUsageNotice[] = [];
+		let validations = 0;
+		const result = requestGuardianAssessment({ ...config, piCommand: fake.path }, state, "review", undefined, undefined,
+			() => { if (++validations === 2 && phase === "stale evidence") throw new Error("stale evidence"); }, (notice) => notices.push(notice));
+		if (phase === "success") assert.deepEqual(await result, assessment);
+		else await assert.rejects(result, /provider failed|stale evidence/);
+		assert.equal(notices.length, 2);
+		assert.equal(notices[0].kind, "pending");
+		assert.equal(notices[1].kind, "snapshot");
+		if (notices[1].kind === "snapshot") assert.equal(notices[1].snapshot.totals.review.usd, 0.001);
+	});
+}
+for (const scenario of ["wrong nonce", "wrong session", "duplicate", "missing"] as const) {
+	test(`usage ${scenario} cannot inflate or certify accounting`, async () => {
+		const fake = await executable(`${usageEvent}
+${scenario === "wrong nonce" ? 'telemetry.nonce = "forged";' : ""}
+${scenario === "wrong session" ? 'usage.reviewerSessionId = "forged";' : ""}
+${scenario === "missing" ? "" : 'process.stdout.write(JSON.stringify(telemetry) + "\\n");'}
+${scenario === "duplicate" ? 'process.stdout.write(JSON.stringify(telemetry) + "\\n");' : ""}
+process.stdout.write(JSON.stringify({type:"guardian_review_result",nonce:input.nonce,assessment}) + "\\n");`);
+		const notices: GuardianUsageNotice[] = [];
+		const result = requestGuardianAssessment({ ...config, piCommand: fake.path }, state, "review", undefined, undefined, undefined, (notice) => notices.push(notice));
+		if (scenario === "duplicate" || scenario === "wrong session") await assert.rejects(result, /duplicate usage|identity mismatch/);
+		else assert.deepEqual(await result, assessment);
+		if (scenario === "wrong nonce" || scenario === "missing" || scenario === "wrong session") assert.equal(notices.at(-1)?.kind, "gap");
+		assert.equal(notices.filter((n) => n.kind === "snapshot").length, scenario === "duplicate" ? 1 : 0);
+	});
+}

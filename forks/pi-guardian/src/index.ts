@@ -34,6 +34,7 @@ import {
 } from "./state.ts";
 import { latestUserTurnKey, renderGuardianTranscript } from "./transcript.ts";
 import { registerGuardianAssessmentRenderer, setGuardianStatusWidget } from "./tui.ts";
+import { GUARDIAN_USAGE_ENTRY, guardianUsageView, formatGuardianCosts, type GuardianUsageNotice } from "./usage.ts";
 import {
 	GUARDIAN_ASSESSMENT_ENTRY,
 	GUARDIAN_STATE_ENTRY,
@@ -158,6 +159,7 @@ async function assessAction(
 	action: GuardianAction,
 	signal: AbortSignal | undefined,
 	validate?: () => void,
+	reportUsage?: (notice: GuardianUsageNotice) => void,
 ): Promise<ReviewExecution> {
 	try {
 		const serializedAction = JSON.stringify(action);
@@ -172,6 +174,7 @@ async function assessAction(
 				signal,
 				{ directives: [], evidence: [], ...transcript.reviewContext, action },
 				validate,
+				reportUsage,
 			),
 			validReview: true,
 		};
@@ -392,6 +395,17 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		})();
 	};
 
+	const costsFor = (ctx: ExtensionContext) => guardianUsageView(ctx.sessionManager.getEntries(), ctx.sessionManager.getSessionId());
+	const costText = (ctx: ExtensionContext) => formatGuardianCosts(costsFor(ctx));
+	const usageReporter = (ctx: ExtensionContext) => (notice: GuardianUsageNotice): void => {
+		const parentId = notice.kind === "snapshot" ? notice.snapshot.parentSessionId : notice.parentSessionId;
+		// appendEntry targets the currently selected parent, not an old captured session.
+		// The reviewer retains its own accounting for a later restore if this parent switched.
+		if (ctx.sessionManager.getSessionId() !== parentId || latestCtx?.sessionManager.getSessionId() !== parentId) return;
+		pi.appendEntry(GUARDIAN_USAGE_ENTRY, notice);
+		if (ctx.mode === "tui") setGuardianStatusWidget(ctx.ui, initializationError ? "error" : config?.enabled ? "enabled" : "disabled", config?.reviewerModel, costText(ctx));
+	};
+
 	pi.on("session_start", (_event, ctx) => {
 		activeCalls.clear();
 		disposeProjectPolicy?.();
@@ -406,12 +420,12 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		publishSandboxBrokerIfReady(ctx);
 		if (!ctx.hasUI) return;
 		if (config && !config.enabled) {
-			if (ctx.mode === "tui") setGuardianStatusWidget(ctx.ui, "disabled", config.reviewerModel);
+			if (ctx.mode === "tui") setGuardianStatusWidget(ctx.ui, "disabled", config.reviewerModel, costText(ctx));
 			ctx.ui.setStatus("pi-guardian", "guardian: disabled");
 			return;
 		}
 		if (initializationError) {
-			if (ctx.mode === "tui") setGuardianStatusWidget(ctx.ui, "error", config?.reviewerModel);
+			if (ctx.mode === "tui") setGuardianStatusWidget(ctx.ui, "error", config?.reviewerModel, costText(ctx));
 			ctx.ui.setStatus("pi-guardian", "guardian: configuration error");
 			ctx.ui.notify(
 				`Pi Guardian will fail closed: ${initializationError}\nFix: check ${configPath}, then restart Pi.`,
@@ -420,7 +434,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 			return;
 		}
 		if (!config) return;
-		if (ctx.mode === "tui") setGuardianStatusWidget(ctx.ui, "enabled", config.reviewerModel);
+		if (ctx.mode === "tui") setGuardianStatusWidget(ctx.ui, "enabled", config.reviewerModel, costText(ctx));
 		ctx.ui.setStatus("pi-guardian", `guardian: ${config.reviewerModel}`);
 	});
 
@@ -444,14 +458,20 @@ export default function guardianExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("guardian", {
-		description: "Toggle or inspect Pi Guardian (on, off, toggle, status)",
+		description: "Toggle or inspect Pi Guardian (on, off, toggle, status, costs)",
 		getArgumentCompletions: (prefix) => {
-			const values = ["on", "off", "toggle", "status"];
+			const values = ["on", "off", "toggle", "status", "costs"];
 			const matches = values.filter((value) => value.startsWith(prefix.trim().toLowerCase()));
 			return matches.length > 0 ? matches.map((value) => ({ value, label: value })) : null;
 		},
 		handler: async (args, ctx) => {
 			const requested = args.trim().toLowerCase() || "toggle";
+			if (requested === "costs") {
+				const usage = costsFor(ctx);
+				if (ctx.hasUI) ctx.ui.notify(formatGuardianCosts(usage, true), "info");
+				else pi.appendEntry("pi-guardian.cost-report", { parentSessionId: ctx.sessionManager.getSessionId(), ...usage });
+				return;
+			}
 			if (!config) {
 				if (ctx.hasUI) ctx.ui.notify(`Guardian configuration cannot be changed: ${initializationError ?? "unknown error"}`, "error");
 				return;
@@ -468,7 +488,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 				return;
 			}
 			if (!(["on", "off", "toggle"] as const).includes(requested as "on" | "off" | "toggle")) {
-				if (ctx.hasUI) ctx.ui.notify("Usage: /guardian [on|off|toggle|status]", "warning");
+				if (ctx.hasUI) ctx.ui.notify("Usage: /guardian [on|off|toggle|status|costs]", "warning");
 				return;
 			}
 			const enabled = requested === "on" || (requested === "toggle" && !config.enabled);
@@ -492,7 +512,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 			initializationError = undefined;
 			pendingReviews.clear();
 			appendStatus();
-			if (ctx.mode === "tui") setGuardianStatusWidget(ctx.ui, enabled ? "enabled" : "disabled", config.reviewerModel);
+			if (ctx.mode === "tui") setGuardianStatusWidget(ctx.ui, enabled ? "enabled" : "disabled", config.reviewerModel, costText(ctx));
 			if (ctx.hasUI) ctx.ui.setStatus(
 				"pi-guardian",
 				enabled ? `guardian: ${config.reviewerModel}` : "guardian: disabled",
@@ -596,6 +616,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 			ctx.signal,
 			{ directives: [], evidence: [], ...transcript.reviewContext, action: request },
 			evidenceValidator(ctx, config, state, reviewEvidenceKey(branch)),
+			usageReporter(ctx),
 		);
 		return sandboxOutcomeFromAssessment(assessment, request);
 	};
@@ -640,6 +661,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		signal: AbortSignal | undefined,
 		parentActions?: GuardianParentAction[],
 		validate?: () => void,
+		reportUsage?: (notice: GuardianUsageNotice) => void,
 	): PreparedReview => {
 		try {
 			const action = createAction(toolName, toolCallId, input, cwd);
@@ -651,7 +673,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 			return {
 				actionHash: hashAction(action),
 				canBootstrap: true,
-				launch: () => assessAction(activeConfig, state, parentSessionId, transcript, action, signal, validate),
+				launch: () => assessAction(activeConfig, state, parentSessionId, transcript, action, signal, validate, reportUsage),
 			};
 		} catch (error) {
 			const failure = conciseFailure(error);
@@ -702,6 +724,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 				ctx.signal,
 				undefined,
 				evidenceValidator(ctx, activeConfig, state, reviewEvidenceKey(previewBranch, call.toolCallId), call.toolCallId),
+				usageReporter(ctx),
 			),
 		}));
 
@@ -823,6 +846,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 					ctx.signal,
 					action.parent_actions,
 					evidenceValidator(ctx, config, state, reviewEvidenceKey(branch, event.toolCallId), event.toolCallId),
+					usageReporter(ctx),
 				);
 				actionHash = prepared.actionHash;
 				pending = {

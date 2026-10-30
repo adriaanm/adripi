@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { parseGuardianAssessment } from "./assessment.ts";
 import { CONTEXT_COMMAND, DEFAULT_CONTEXT, envelopeText, type ReviewContext } from "./reviewer-context.ts";
 import type { GuardianAssessment, GuardianConfig, GuardianStateV1 } from "./types.ts";
+import { parseUsageSnapshot, type GuardianUsageNotice } from "./usage.ts";
 
 const MAX_CAPTURE_BYTES = 4 * 1024 * 1024;
 interface PiInvocation { command: string; args: string[] }
@@ -33,14 +34,16 @@ export function buildSidecarArgs(config: GuardianConfig, _state: GuardianStateV1
 	return args;
 }
 
-async function runSidecar(config: GuardianConfig, state: GuardianStateV1, prompt: string, timeoutMs: number, signal: AbortSignal | undefined, nonce: string): Promise<GuardianAssessment> {
+async function runSidecar(config: GuardianConfig, state: GuardianStateV1, prompt: string, timeoutMs: number, signal: AbortSignal | undefined, nonce: string, reportUsage?: (notice: GuardianUsageNotice) => void): Promise<GuardianAssessment> {
 	const invocation = getPiInvocation(buildSidecarArgs(config, state), config.piCommand);
+	reportUsage?.({ kind: "pending", parentSessionId: state.parentSessionId, requestId: nonce });
 	return await new Promise((resolve, reject) => {
 		const child = spawn(invocation.command, invocation.args, { cwd: process.cwd(), shell: false, stdio: ["pipe", "pipe", "pipe"] });
 		let buffer = "", stderr = "";
 		let result: GuardianAssessment | undefined;
 		let failure: Error | undefined;
 		let settled = false;
+		let usageReported = false;
 		let killTimer: ReturnType<typeof setTimeout> | undefined;
 		const stop = (error: Error) => {
 			failure ??= error;
@@ -55,6 +58,8 @@ async function runSidecar(config: GuardianConfig, state: GuardianStateV1, prompt
 			clearTimeout(timer);
 			if (killTimer) clearTimeout(killTimer);
 			signal?.removeEventListener("abort", abort);
+			try { if (!usageReported) reportUsage?.({ kind: "gap", parentSessionId: state.parentSessionId, requestId: nonce }); }
+			catch (cause) { failure ??= cause instanceof Error ? cause : new Error(String(cause)); }
 			if (error || failure) reject(failure ?? error);
 			else if (!result) reject(new Error(`Guardian produced no verified managed response${stderr ? `: ${stderr.trim()}` : ""}`));
 			else resolve(result);
@@ -66,7 +71,16 @@ async function runSidecar(config: GuardianConfig, state: GuardianStateV1, prompt
 			// Pi protects JSON stdout: extension output travels through its native entry event.
 			if (event.type === "entry_appended") {
 				const entry = event.entry as { customType?: string; data?: Record<string, unknown> } | undefined;
-				if (entry?.customType === "pi-guardian.managed-result" && entry.data) event = entry.data;
+				if ((entry?.customType === "pi-guardian.managed-result" || entry?.customType === "pi-guardian.managed-usage") && entry.data) event = entry.data;
+			}
+			if (event.type === "guardian_usage" && event.nonce === nonce) {
+				try {
+					if (usageReported) throw new Error("Guardian returned duplicate usage telemetry");
+					const snapshot = parseUsageSnapshot(event.usage);
+					if (snapshot.parentSessionId !== state.parentSessionId || snapshot.reviewerSessionId !== state.guardianSessionId) throw new Error("Guardian usage identity mismatch");
+					reportUsage?.({ kind: "snapshot", snapshot, requestId: nonce });
+					usageReported = true;
+				} catch (error) { failure = error instanceof Error ? error : new Error(String(error)); }
 			}
 			if (event.type === "guardian_review_result" && event.nonce === nonce) {
 				try {
@@ -113,7 +127,7 @@ async function runSidecar(config: GuardianConfig, state: GuardianStateV1, prompt
 // All callers, including sandbox exception reviews, share this coordinator.
 const reviewerTails = new Map<string, Promise<void>>();
 export async function requestGuardianAssessment(config: GuardianConfig, state: GuardianStateV1, prompt: string, signal?: AbortSignal,
-	context: ReviewContext = { directives: [], evidence: [], action: prompt }, validate?: () => void): Promise<GuardianAssessment> {
+	context: ReviewContext = { directives: [], evidence: [], action: prompt }, validate?: () => void, reportUsage?: (notice: GuardianUsageNotice) => void): Promise<GuardianAssessment> {
 	const deadline = Date.now() + config.timeoutMs;
 	const key = JSON.stringify([state.guardianSessionDir, state.guardianSessionId]);
 	const previous = reviewerTails.get(key) ?? Promise.resolve();
@@ -127,7 +141,7 @@ export async function requestGuardianAssessment(config: GuardianConfig, state: G
 			agentDir: config.agentDir, policyPath: config.policyPath, policyHash: state.policyHash, model: config.reviewerModel, thinking: config.thinkingLevel,
 			extensions: [...(config.reviewerExtensions ?? [])], options: config.reviewerContext ?? DEFAULT_CONTEXT, maxAttempts: config.maxAttempts,
 			prompt: envelopeText(state.parentSessionId, state.policyHash, prompt, context) };
-		const result = await runSidecar(config, state, `/${CONTEXT_COMMAND} ${JSON.stringify(input)}`, remainingMs, signal, nonce);
+		const result = await runSidecar(config, state, `/${CONTEXT_COMMAND} ${JSON.stringify(input)}`, remainingMs, signal, nonce, reportUsage);
 		validate?.();
 		return result;
 	});

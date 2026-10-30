@@ -185,6 +185,16 @@ running. SIGKILL stale locks require human investigation. Budget settings are
 owned/in-memory and must not mutate live Pi settings. See
 `docs/guardian-context.md`; deployment remains a separate human step.
 
+## Guardian costs
+
+`forks/pi-guardian/src/usage.ts` projects Guardian-only full-tree cumulative
+usage. Keep it out of native parent/subagent totals: custom entries only, never
+synthetic assistant/SDK usage messages. Failed reviews/retries/summaries can cost
+money; successful checkpoints link an already-counted summary record. Missing
+prices/usage and unfinished transports must stay explicit, not become zero.
+`/guardian costs` and widget inspection never change the toggle/config or grant
+authority. See `docs/guardian-costs.md`; estimates are not provider invoices.
+
 ## Verification
 
 - `just check` — shell syntax plus the config templates.

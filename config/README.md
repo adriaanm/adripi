@@ -254,6 +254,16 @@ investigation; do not remove one while its owner is running. Stable UUID, audit,
 denial streak and parent cursor survive pruning. This changes no standing
 permission or live Guardian toggle. See [the implementation record](../docs/guardian-context.md).
 
+## Guardian costs
+
+No pricing/reporting config migration is needed. Guardian adds a separate token
+and known-USD-estimate line to its widget; `/guardian costs` shows review,
+format-retry, summary and legacy breakdowns without changing the enabled flag.
+Parent/subagent native totals are untouched. Zero/absent tariffs are unpriced,
+missing usage unreported, and unfinished transports remain visible. See
+[the accounting record](../docs/guardian-costs.md); these are SDK estimates, not
+provider/subscription invoices or live cost-savings measurements.
+
 ## Guardian reviewer extensions
 
 The vendored guardian fork adds `reviewer.extensions`. Only the entries in that

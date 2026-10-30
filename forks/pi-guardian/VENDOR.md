@@ -170,7 +170,8 @@ deltas are listed below; nothing else is modified.
     cursors or overwrite a newer generation. A supported SDK
     append-only deterministic checkpoint replaces repeated history; Pi's existing
     `generateSummaryWithUsage` handles only residual untrusted task evidence when
-    needed. Summary usage is recorded once on the checkpoint. Normal review and
+    needed. Summary usage is stored on the checkpoint and linked to the separate
+    once-counted accounting record below. Normal review and
     format retries retain the exact current action and directives. No raw JSONL
     rewrite, new permission store, context reset or alternate-model recovery.
     `reviewer.context` has code defaults for existing configs; settings used by
@@ -188,6 +189,22 @@ deltas are listed below; nothing else is modified.
     fail-closed negatives. Full HTTP headless remains blocked by Node26's known
     native assertion; no deployment or live-provider latency claim. See
     [the context record](../../docs/guardian-context.md).
+
+17. `src/usage.ts`, managed reviewer/sidecar/index/TUI — Guardian-only accounting.
+    Full-tree cumulative per-UUID snapshots include review/format-retry/summary
+    attempts, failed partial usage and explicitly unclassified legacy history.
+    Summary attempts persist before checkpoint validation; linked checkpoint
+    usage is never charged twice. Parent custom records upsert revisions across
+    restore/branches/generations without inserting synthetic native Pi usage or
+    assistant messages. Nonce/UUID-bound telemetry cannot establish approval;
+    stale/error reviews can still cost money. Pending transport records survive
+    a parent switch; missing final telemetry remains an explicit gap, not zero.
+    Widget plus `/guardian costs` report tokens/known USD estimates separately;
+    zero/absent tariffs are unpriced and missing usage unreported. No toggle,
+    config, model or live session migration. Source verification: **164 tests
+    pass** with only the known Node26 HTTP headless native failure; typecheck and
+    **27** managed/accounting tests against installed SDK1.4 pass. See the
+    [cost record](../../docs/guardian-costs.md) for limits and commands.
 
 Upstream 0.2.0 already covers the rest of what the 0.1.0 fork needed: the
 deterministic `permissions.allow` / `permissions.deny` rule family (evaluated

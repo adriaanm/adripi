@@ -28,6 +28,7 @@ interface FakeContext {
 	signal: undefined;
 	sessionManager: {
 		getBranch(): SessionEntry[];
+		getEntries(): SessionEntry[];
 		getSessionId(): string;
 	};
 	ui: {
@@ -67,13 +68,18 @@ test("extension reuses one sidecar, sends a delta, audits, allows, and denies", 
 	await writeFile(
 		executable,
 		`#!/usr/bin/env node
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 let prompt = "";
 for await (const chunk of process.stdin) prompt += chunk;
 const input = JSON.parse(prompt.slice(prompt.indexOf(" ") + 1));
 const envelope = JSON.parse(input.prompt);
 prompt = envelope.request + "\\n" + JSON.stringify(envelope.action, null, 2) + "\\n" + envelope.evidence.map(item => item.text).join("\\n");
 appendFileSync(process.env.FAKE_GUARDIAN_PROMPTS, JSON.stringify(prompt) + "\\n");
+const calls = readFileSync(process.env.FAKE_GUARDIAN_PROMPTS, "utf8").trim().split("\\n").length;
+const blank = {calls:0,input:0,output:0,cacheRead:0,cacheWrite:0,usd:0,unpriced:0,unreported:0};
+const totals = Object.fromEntries(["review","format-retry","summary","legacy"].map(kind => [kind,{...blank}]));
+totals.review = {...blank,calls,input:calls*100,output:calls*20,usd:calls*0.01};
+process.stdout.write(JSON.stringify({type:"guardian_usage",nonce:input.nonce,usage:{version:1,parentSessionId:input.parentSessionId,reviewerSessionId:input.sessionId,revision:calls,totals}}) + "\\n");
 const denied = prompt.includes('"command": "rm -rf /"');
 const assessment = denied
   ? {risk_level:"critical",user_authorization:"unknown",outcome:"deny",rationale:"The command would destroy the laptop filesystem."}
@@ -146,6 +152,7 @@ process.stdout.write(JSON.stringify({type:"guardian_review_result",nonce:input.n
 			signal: undefined,
 			sessionManager: {
 				getBranch: () => structuredClone(branch),
+				getEntries: () => structuredClone(branch),
 				getSessionId: () => "parent-session",
 			},
 			ui: {
@@ -208,6 +215,15 @@ process.stdout.write(JSON.stringify({type:"guardian_review_result",nonce:input.n
 		assert.match(prompts[1], />>> TRANSCRIPT DELTA START/);
 		assert.doesNotMatch(prompts[1], /Run a harmless command/);
 		assert.match(prompts[1], /rm -rf/);
+
+		const beforeCosts = await readFile(join(directory, "guardian.json"), "utf8");
+		await guardianCommand.handler("costs", context);
+		assert.match(notifications.at(-1)!, /Guardian only: \$0\.0200 estimate · 2 calls/);
+		assert.match(notifications.at(-1)!, /tokens in 200 \/ out 40/);
+		assert.equal(await readFile(join(directory, "guardian.json"), "utf8"), beforeCosts, "cost inspection never changes the Guardian toggle/config");
+		sessionStartHandler({}, context);
+		const widget = (widgets.at(-1)!.content as Function)(undefined, { fg: (_tone: string, text: string) => text });
+		assert.match(widget.render(1000).join("\n"), /Guardian only: \$0\.0200 estimate/, "session restore redisplays cumulative cost");
 
 		await guardianCommand.handler("off", context);
 		const disabledConfig = JSON.parse(await readFile(join(directory, "guardian.json"), "utf8")) as {
@@ -306,6 +322,7 @@ process.stdout.write(JSON.stringify({type:"guardian_review_result",nonce:input.n
 			signal: undefined,
 			sessionManager: {
 				getBranch: () => structuredClone(branch),
+				getEntries: () => structuredClone(branch),
 				getSessionId: () => "parallel-parent",
 			},
 			ui: {
@@ -480,7 +497,7 @@ process.stdout.write(JSON.stringify({type:"guardian_review_result",nonce:input.n
 		guardianExtension(fakePi);
 		const context: FakeContext = {
 			hasUI: false, mode: "json", cwd: directory, signal: undefined,
-			sessionManager: { getBranch: () => structuredClone(branch), getSessionId: () => "nested-parent" },
+			sessionManager: { getBranch: () => structuredClone(branch), getEntries: () => structuredClone(branch), getSessionId: () => "nested-parent" },
 			ui: new Proxy({}, { get() { throw new Error("Headless UI must not be accessed"); } }) as FakeContext["ui"],
 		};
 		handlers.get("session_start")!({}, context);
@@ -546,7 +563,7 @@ test("fixed denies audit nested calls, bypass speculative review, and count the 
 		guardianExtension(fakePi);
 		const context: FakeContext = {
 			hasUI: false, mode: "json", cwd: directory, signal: undefined,
-			sessionManager: { getBranch: () => structuredClone(branch), getSessionId: () => "rule-parent" },
+			sessionManager: { getBranch: () => structuredClone(branch), getEntries: () => structuredClone(branch), getSessionId: () => "rule-parent" },
 			ui: new Proxy({}, { get() { throw new Error("Headless UI must not be accessed"); } }) as FakeContext["ui"],
 		};
 		handlers.get("session_start")!({}, context);

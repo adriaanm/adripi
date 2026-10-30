@@ -9,6 +9,7 @@ import { createGuardianState } from "../src/state.ts";
 import test from "node:test";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { reviewInSession, runManagedReview, type ManagedRequest } from "../src/managed-reviewer.ts";
+import { reviewerUsageSnapshot, type GuardianUsageNotice, type GuardianUsageSnapshot } from "../src/usage.ts";
 import { DEFAULT_CONTEXT, REVIEW_ENTRY, digest, envelopeText, messageText, planCheckpoint, type ReviewContext } from "../src/reviewer-context.ts";
 // Use the existing SDK's own AI graph; no new dependency, credentials or network.
 const ai = await import(new URL("../../pi-ai/dist/index.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href);
@@ -96,6 +97,10 @@ test("residual evidence uses Pi summarization only after dedup, recording summar
 		]);
 		const result = await reviewInSession(session, request({}, { ...DEFAULT_CONTEXT, targetTokens: 2000, pruneAfter: 1 }));
 		assert.equal(result.metrics.summarizations, 1);
+		assert.equal(result.usage.totals.summary.calls, 1);
+		assert.equal(result.usage.totals.review.calls, 1);
+		assert.equal(result.usage.totals.legacy.calls, 1, "the legacy review is not mistaken for a new call");
+		assert.equal(reviewerUsageSnapshot(manager.getEntries(), "parent", "fixture-session").totals.summary.calls, 1, "checkpoint usage is not charged again");
 		assert.equal(faux.state.callCount, 2);
 		assert.ok(summaryInput.includes("unique task evidence"));
 		assert.ok(!summaryInput.includes("Never deploy or push."), "directive text is pinned outside the lossy summarizer");
@@ -110,7 +115,10 @@ test("failed/length-limited summary cannot create a checkpoint or permit the act
 	try {
 		knownPair(manager, request({ evidence: [{ id: "large", text: "unique ".repeat(5000) }] }));
 		faux.setResponses([ai.fauxAssistantMessage("incomplete", { stopReason: "length" })]);
-		await assert.rejects(reviewInSession(session, request({}, { ...DEFAULT_CONTEXT, targetTokens: 2000, pruneAfter: 1 })), /length|truncat|limit|token cap/i);
+		let usage: GuardianUsageSnapshot | undefined;
+		await assert.rejects(reviewInSession(session, request({}, { ...DEFAULT_CONTEXT, targetTokens: 2000, pruneAfter: 1 }), undefined, (value) => { usage = value; }), /length|truncat|limit|token cap/i);
+		assert.equal(usage?.totals.summary.calls, 1, "a rejected summary still reports its model attempt");
+		assert.equal(usage?.totals.review.calls, 0);
 		assert.equal(faux.state.callCount, 1);
 		assert.ok(!manager.getEntries().some((entry) => entry.type === "compaction"));
 	} finally { session.dispose(); }
@@ -120,7 +128,10 @@ test("format retry re-supplies the exact action and directives", async () => {
 	const { session, manager, faux } = await fixture();
 	try {
 		faux.setResponses([ai.fauxAssistantMessage("not json"), ai.fauxAssistantMessage(JSON.stringify(allow))]);
-		await reviewInSession(session, request());
+		const result = await reviewInSession(session, request());
+		assert.equal(result.usage.totals.review.calls, 1);
+		assert.equal(result.usage.totals["format-retry"].calls, 1);
+		assert.equal(result.usage.totals.summary.calls, 0);
 		const prompts = manager.getBranch().filter((entry) => entry.type === "message" && entry.message.role === "user") as any[];
 		assert.equal(prompts.length, 2);
 		const retry = JSON.parse(messageText(prompts[1])!);
@@ -135,7 +146,10 @@ test("provider error after a prior success is not accepted or retried as malform
 	try {
 		knownPair(manager, request());
 		faux.setResponses([ai.fauxAssistantMessage(JSON.stringify(allow), { stopReason: "error", errorMessage: "provider outage" })]);
-		await assert.rejects(reviewInSession(session, request()), /provider outage/);
+		let usage: GuardianUsageSnapshot | undefined;
+		await assert.rejects(reviewInSession(session, request(), undefined, (value) => { usage = value; }), /provider outage/);
+		assert.equal(usage?.totals.review.calls, 1);
+		assert.equal(usage?.totals["format-retry"].calls, 0);
 		assert.equal(faux.state.callCount, 1);
 	} finally { session.dispose(); }
 });
@@ -232,7 +246,9 @@ for (const phase of ["summary", "verdict", "ineffective summary", "small model"]
 				if (phase !== "ineffective summary") controller.abort();
 				return ai.fauxAssistantMessage(phase === "verdict" ? JSON.stringify(allow) : "x".repeat(20000));
 			}]);
-			await assert.rejects(reviewInSession(session, request({}, { ...DEFAULT_CONTEXT, targetTokens: 2000, pruneAfter: 1 }), controller.signal), /abort|cancel|ineffective|headroom/i);
+			let usage: GuardianUsageSnapshot | undefined;
+			await assert.rejects(reviewInSession(session, request({}, { ...DEFAULT_CONTEXT, targetTokens: 2000, pruneAfter: 1 }), controller.signal, (value) => { usage = value; }), /abort|cancel|ineffective|headroom/i);
+			if (phase !== "small model") assert.equal(usage?.totals[phase === "verdict" ? "review" : "summary"].calls, 1, "cancelled/ineffective model attempts still report usage");
 			assert.equal(faux.state.callCount, phase === "small model" ? 0 : 1);
 			assert.ok(!manager.getEntries().some((entry) => entry.type === "compaction"));
 		} finally { session.dispose(); }
@@ -256,6 +272,8 @@ pi.registerProvider(faux.provider);
 	const first = await runManagedReview(input);
 	const second = await runManagedReview(input);
 	assert.equal(first.assessment.outcome, "allow"); assert.equal(second.assessment.outcome, "allow");
+	assert.equal(first.usage.totals.review.calls, 1);
+	assert.equal(second.usage.totals.review.calls, 2, "restored usage is cumulative, not reset or double-counted");
 	const files = await readdir(input.sessionDir);
 	assert.equal(files.filter((name) => name.endsWith(".jsonl")).length, 1);
 	assert.ok(!files.some((name) => name.endsWith(".lock")));
@@ -273,8 +291,16 @@ pi.registerProvider(faux.provider);
 	const previous = process.env.PI_CODING_AGENT_DIR;
 	process.env.PI_CODING_AGENT_DIR = dir;
 	try {
+		const notices: GuardianUsageNotice[] = [];
 		assert.equal((await requestGuardianAssessment(config, state, "exact CLI action", undefined,
-			{ directives, evidence: [], action: "source work" })).outcome, "allow");
+			{ directives, evidence: [], action: "source work" }, undefined, (notice) => notices.push(notice))).outcome, "allow");
+		assert.equal(notices.length, 2);
+		assert.equal(notices[0].kind, "pending");
+		assert.equal(notices[1].kind, "snapshot");
+		if (notices[1].kind === "snapshot") {
+			assert.equal(notices[1].snapshot.reviewerSessionId, state.guardianSessionId);
+			assert.equal(notices[1].snapshot.totals.review.calls, 1);
+		}
 	} finally { if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous; }
 	await writeFile(join(input.sessionDir, `.guardian-${input.sessionId}.lock`), "other owner");
 	await assert.rejects(runManagedReview(input), /locked/);

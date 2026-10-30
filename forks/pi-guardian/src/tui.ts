@@ -27,13 +27,14 @@ export function setGuardianStatusWidget(
 	ui: ExtensionUIContext,
 	status: GuardianRuntimeStatus,
 	model?: string,
+	costs?: string,
 ): void {
 	const display = formatGuardianStatus(status, model);
 	ui.setWidget(
 		"pi-guardian-status",
 		(_tui, theme) =>
 			new Text(
-				`${theme.fg(display.tone, display.text)}${display.model ? theme.fg("muted", ` · ${display.model}`) : ""}`,
+				`${theme.fg(display.tone, display.text)}${display.model ? theme.fg("muted", ` · ${display.model}`) : ""}${costs ? `\n${theme.fg("muted", costs)}` : ""}`,
 				0,
 				0,
 			),

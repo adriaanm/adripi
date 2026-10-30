@@ -85,6 +85,12 @@ Detailed provenance and update records:
   intent through teardown. This is source carriage/provider acceptance, **not**
   child policy/Guardian/OS enforcement. See the
   [payload handoff and verification](round-2-wiring-acceptance.md).
+- **Accounting:** nonce/UUID-bound reviewer usage snapshots and parent custom
+  records report Guardian-only tokens/known USD estimates, separately from native
+  parent/subagent totals. Full-tree deduplication spans branches/generations;
+  failed/retried/summarized calls count, linked checkpoints do not count twice.
+  Missing prices/usage/transport completion remain explicit. See
+  [Guardian costs](guardian-costs.md).
 - **Audit:** Guardian status/assessment/exception entries plus reviewer
   transcripts. Complete correlated grant-consumption/revocation auditing is not
   implemented.

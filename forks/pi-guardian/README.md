@@ -25,6 +25,18 @@ The sidecar is short-lived, while its SDK conversation and usage audit remain du
 
 An always-on indicator above the editor shows `⬭ guardian enabled` in yellow or `Ψ guardian disabled` in red, followed on the same line by the reviewer model in muted gray. Configuration errors get their own red state rather than claiming that protection is active. While reviews are pending, Pi's animated working row shows how many tools Guardian is reviewing. When each finishes, an `allowed`, `denied`, or `review failed` card is written into the TUI transcript. These cards are durable extension entries, so they reappear when the session is resumed but are never sent to the parent model. Expand a card to see its review timestamp and sidecar session ID.
 
+## Guardian-only costs
+
+The status widget also shows Guardian's separate token usage and known USD
+estimate. `/guardian costs` gives review, format-retry, summary and unclassified
+legacy breakdowns, including failed calls. Cumulative records survive resume,
+branching and reviewer generations without changing Pi's parent/subagent totals.
+Missing/zero-only prices are labeled **unpriced**, missing usage **unreported**,
+and incomplete transports remain visible rather than being reported as free.
+These are SDK estimates, not subscription/provider invoices. Cost inspection
+works while Guardian is disabled and never changes its toggle/configuration.
+See [accounting behavior and verification](../../docs/guardian-costs.md).
+
 ## Install
 
 Install this checkout as a user-level Pi package:
@@ -81,7 +93,7 @@ Additional settings:
 - `piCommand`: explicit path to the Pi executable if recursive invocation cannot infer it from the current process.
 - `enabled: false`: explicitly disables review and allows tools normally.
 
-Use `/guardian` to toggle Guardian without editing JSON. `/guardian on`, `/guardian off`, `/guardian toggle`, and `/guardian status` are also supported. Changes take effect immediately and persist the `enabled` value in `guardian.json` for future Pi sessions.
+Use `/guardian` to toggle Guardian without editing JSON. `/guardian on`, `/guardian off`, `/guardian toggle`, `/guardian status`, and `/guardian costs` are also supported. Changes take effect immediately and persist the `enabled` value in `guardian.json` for future Pi sessions.
 
 Invalid configuration or an unreadable policy causes all enabled tool calls to fail closed. Pi shows the error and the configuration path in the TUI; runtime sidecar failures also include a targeted suggestion for the reviewer model, authentication, command path, or timeout as applicable.
 
