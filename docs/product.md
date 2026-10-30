@@ -262,10 +262,20 @@ child/MCP/extension containment and background-process lifetime are not certifie
 by this round. Full broker-toggle/session-policy lifecycle correctness is also
 not claimed merely because prepared saves now have a disposer.
 
-Deploy only as a separate human step: run `./install.sh`, inspect kept live
-configs for retired exclusions, fully quit and restart Pi, then verify the
-loaded schema, sandbox execution and negative cases. An in-place reload is not
-sufficient evidence. Round 2's child transport and Git/external-worktree gates
-remain blocked on a launch-authority/approval-service integration decision; see
-[the round record](round-2.md). No required-child-extension registration has been
-added speculatively.
+The approved third fork now supplies reviewed **IPC primitives**, not production
+child containment: `pi-subagents/child-authority` binds actual-process leases and
+bounded terminal parent decisions, with code-only consumer readiness. Real-process
+fixtures cover cancellation/replay/audience/lifetime; post-build tests prove the
+public bundle and compiled consumers share live state. The actual launch,
+pi-sbx/Guardian adapters and first-prompt gate are still pending; no mock provider
+is evidence of the production parent-first human route. See
+[the child-authority record](round-2-child-authority.md).
+
+Deploy only as a separate human step: provision the third fork's locked build
+dependencies and run `just build-subagents`, then `./install.sh`. The installer
+refuses missing/stale/tampered artifacts before package installation and validates
+all deploy plans before writes. Inspect kept live configs for retired exclusions,
+fully quit and restart Pi, then verify loaded schemas, sandbox execution and
+negative cases. An in-place reload or matching disk bytes is not sufficient
+runtime evidence. Child/OS and Git/external-worktree acceptance remain separate
+open gates; see [the round record](round-2.md).

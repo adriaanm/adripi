@@ -14,12 +14,19 @@ need() {
 need pi
 need pnpm
 need node
-need rsync
 
 export PI_AGENT_DIR="${PI_AGENT_DIR:-$HOME/.pi/agent}"
 NPM_ROOT="$PI_AGENT_DIR/npm/node_modules"
 
 echo "adripi: close any running Pi before installing; this rewrites its settings"
+
+# A built fork ships a compiled artifact graph, so an absent, stale, edited or unsupported build
+# must be refused before the package step touches the machine. This preflight checks fork/build
+# readiness only and writes nothing: the installed version is validated by the deploy step below,
+# after `pi install` has had the chance to align it with packages.txt.
+echo "== fork preflight"
+node scripts/deploy-fork.mjs preflight --forks forks.txt --npm-root "$NPM_ROOT"
+
 echo "== pnpm"
 node scripts/set-npm-command.mjs "$PI_AGENT_DIR"
 
@@ -50,25 +57,11 @@ while IFS= read -r pkg; do
   pi install "$pkg"
 done < packages.txt
 
-echo "== fork source"
-while IFS='|' read -r pkg dir; do
-  case "$pkg" in
-    ""|"#"*) continue ;;
-  esac
-  target="$NPM_ROOT/$pkg"
-  src="$dir/src"
-  [ -f "$target/package.json" ] || die "$pkg is not installed under $NPM_ROOT"
-  [ -d "$src" ] || die "missing fork source at $src"
-  rsync -a --delete "$src/" "$target/src/"
-  installed_version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$target/package.json" | head -n 1)"
-  fork_version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$dir/package.json" | head -n 1)"
-  echo "   deployed $pkg <- $dir"
-  if [ -n "$installed_version" ] && [ -n "$fork_version" ] &&
-     [ "$installed_version" != "$fork_version" ]; then
-    echo "   note: npm has $pkg@$installed_version, fork is $fork_version" >&2
-    echo "         (a vendored fork may carry newer upstream source; see VENDOR.md)" >&2
-  fi
-done < forks.txt
+echo "== forks"
+# Deployment modes live in forks.txt and are enforced by scripts/deploy-fork.mjs: source forks
+# mirror <fork>/src, the built fork deploys one verified artifact graph and merges only new
+# public exports into the installed manifest. Nothing here builds or installs dependencies.
+node scripts/deploy-fork.mjs deploy --forks forks.txt --npm-root "$NPM_ROOT"
 
 echo "== config"
 # pi-perm is retired: the OS boundary is the vendored pi-sbx fork plus the

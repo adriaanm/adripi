@@ -7,13 +7,20 @@ deployed there, so read the deploy section before concluding anything works.
 
 ## Deploy loop
 
-`forks/pi-sbx` and `forks/pi-guardian` are vendored sources; Pi loads the copies
-under `~/.pi/agent/npm/node_modules/<package>/src/`.
+`forks/pi-sbx` and `forks/pi-guardian` load from installed `src/`. The third fork,
+`forks/pi-subagents`, loads a **built shared bundle + compiled src** graph; a
+source-only overlay is invalid. All installed copies live under
+`~/.pi/agent/npm/node_modules/<package>/`.
 
 1. edit the fork in this repo, keep `VENDOR.md` deltas current;
-2. `./install.sh` (or `just install`) — rsyncs both forks, seeds configs, and
-   applies the agent-dir grant;
-3. **fully quit and restart Pi**. An in-place extension reload can leave the old
+2. for pi-subagents, provision its locked dependencies (`npm ci --ignore-scripts`
+   in the fork, only when needed), then `just build-subagents`. This builds and
+   checks the actual bundle/compiled authority registry without deploying;
+3. `./install.sh` (or `just install`) — preflights build readiness, installs pinned
+   packages, validates **all** deploy plans, mirrors source forks and deploys the
+   complete verified third-fork graph, seeds configs and applies the agent-dir
+   grant. Stale/tampered artifacts refuse; existing policy is not generally merged;
+4. **fully quit and restart Pi**. An in-place extension reload can leave the old
    instance registered: the symptom is a tool that reports state the new code
    should not have (e.g. a host grant that still runs sandboxed, or "No guardian
    sandbox broker is published" while guardian is clearly reviewing calls).

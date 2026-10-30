@@ -23,8 +23,8 @@ maintenance workspaces have deliberately greater authority.
 fixes port matching and binds standing approval to trusted policy snapshots.
 [Round 2's first wave](docs/round-2.md) shares action authorization across Bash
 and native file tools and aligns trusted maintenance admission. These changes
-are source-verified, not deployed; lifecycle, child transport/containment and
-OS-level smoke tests remain open. Treat the product guide as the current contract;
+are source-verified, not a certification of the loaded installation; lifecycle,
+production child transport/containment and OS-level smoke tests remain open. Treat the product guide as the current contract;
 this README is the installation overview, not a claim of complete containment or
 feature parity.
 
@@ -35,7 +35,7 @@ feature parity.
 | OS boundary | `pi-sbx` (vendored fork) | Bash under `@anthropic-ai/sandbox-runtime`; session scratchpad; reviewed exceptions |
 | Semantic gate | `pi-guardian` (vendored fork) | Reviews every non-exempt tool call, and brokers every sandbox exception |
 | Diff review | [`@georgedong32/pi-review`](https://www.npmjs.com/package/@georgedong32/pi-review) | Bug, security, rules, history, and comment reviewers |
-| Review workers | [`pi-subagents`](https://www.npmjs.com/package/pi-subagents) | Isolated reviewer children |
+| Delegation | `pi-subagents` (vendored fork) | Reviewer children; reviewed child-authority IPC primitives (production launch/permission wiring still pending) |
 
 The sandbox and review configuration are provider-independent. See
 [Configure a provider](#configure-a-provider) for choosing the reviewer model.
@@ -45,7 +45,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the call flow.
 ## Requirements
 
 - Pi 1.4+ (`pi --version`)
-- `pnpm`, `node`, `git`, `rsync`
+- `pnpm`, `node`, `git`
 - macOS, or Linux/WSL2 (Linux also needs `bubblewrap`, `socat`, `ripgrep`)
 - Network access for package install
 - Credentials for your chosen model provider
@@ -55,22 +55,33 @@ See [`docs/architecture.md`](docs/architecture.md) for the call flow.
 ```sh
 git clone <this-repo> ~/g/adripi
 cd ~/g/adripi
+(cd forks/pi-subagents && npm ci --ignore-scripts)
+just build-subagents                 # or node scripts/build-subagents.mjs, then the build tests below
 ./install.sh
 ```
 
 Close any running Pi first: `install.sh` rewrites its settings.
 
-`install.sh`:
+`just build-subagents` builds the complete third-fork graph with the unchanged
+upstream builder and checks live authority identity across bundled and compiled
+imports. It never installs dependencies or deploys. Without `just`, run
+`node scripts/build-subagents.mjs` followed by
+`node --test forks/pi-subagents/test/build/child-authority.test.mjs`.
+
+`install.sh` first refuses missing/stale/tampered build output, before any package
+installation. It then:
 
 1. sets `npmCommand` to `pnpm` in `~/.pi/agent/settings.json`
 2. installs `@anthropic-ai/sandbox-runtime` globally if `srt` is missing
 3. installs the pinned packages in [`packages.txt`](packages.txt)
-4. deploys the vendored `pi-guardian` and `pi-sbx` forks over their npm installs
+4. validates all fork deploy plans before writes, mirrors `pi-guardian`/`pi-sbx`
+   source and deploys `pi-subagents`' complete fingerprinted artifact graph over
+   the aligned npm install (preserving dependency and extension wiring)
 5. seeds the portable configs in [`config/`](config) without overwriting
    existing user files
 
 Upgrading an older checkout that still used `pi-perm` needs no manual step: the
-script installs `pi-sbx`, deploys both forks, removes any `pi-perm` entry from
+script installs `pi-sbx`, deploys the forks, removes any `pi-perm` entry from
 `settings.json`, and moves the old extension data directory to `pi-perm.retired`.
 Restart Pi afterwards.
 
@@ -258,11 +269,12 @@ Prefer narrow entries. See
 adripi/
   install.sh
   packages.txt              # pinned npm packages
-  forks.txt                 # npm package -> vendored fork
+  forks.txt                 # npm package | vendored fork | source/built
   config/                   # portable config templates
   docs/architecture.md
   forks/pi-guardian/        # vendored fork; reviewer.extensions + sandbox broker
   forks/pi-sbx/             # vendored fork; scratchpad, inline escalation, dispatcher
+  forks/pi-subagents/       # vendored source; build complete dist-pkg graph before install
   scripts/
     check-configs.mjs
     set-npm-command.mjs
@@ -273,15 +285,22 @@ adripi/
 Packages are pinned. To update:
 
 1. bump the version in `packages.txt`
-2. run `./install.sh`
-3. test `/guardian status`, a reviewed `bash` call, and `/review --lite`
+2. reconcile the corresponding fork and its `VENDOR.md`; for pi-subagents,
+   align its exact version, dependencies and public layout, provision locked
+   build dependencies and run `just build-subagents`
+3. run `./install.sh`, fully quit/restart Pi, then test `/guardian status`, a
+   reviewed `bash` call, and `/review --lite`
 
 The guardian fork is vendored from upstream `andersonbcdefg/pi-guardian`
 commit `c8d688a` (0.2.0). npm's newest *published* release is 0.1.0, so
-`packages.txt` pins that and `install.sh` rsyncs the fork's source over it. See
+`packages.txt` pins that and `install.sh` mirrors the fork's source over it. See
 [`forks/pi-guardian/VENDOR.md`](forks/pi-guardian/VENDOR.md) for the patch and
 the upstream-update procedure; the sandbox fork is documented in
-[`forks/pi-sbx/VENDOR.md`](forks/pi-sbx/VENDOR.md).
+[`forks/pi-sbx/VENDOR.md`](forks/pi-sbx/VENDOR.md). The third fork's exact upstream
+source, build constraint and authority-primitives deltas are in
+[`forks/pi-subagents/VENDOR.md`](forks/pi-subagents/VENDOR.md). Build consistency
+checks and offline deploy fixtures are not live deployment or child-containment
+proof; installation/restart remain explicit human steps.
 
 ## Security notes
 

@@ -9,9 +9,10 @@ authorize deployment, editing live policy, restarting Pi, pushing, reading
 credentials/audit data, or a change of runner to bypass a refusal.
 
 The source delivery at `bc0fd37` / `96ad852` remains separate. Full Guardian
-headless validation is still blocked by the reproduced Node 26 assertion. The
-installed sandbox remains older than those commits; tests here cannot certify
-the running installation.
+headless validation is still blocked by the reproduced Node 26 assertion. Early
+preflight found an older installed sandbox; a later read-only check found the
+sandbox/Guardian entrypoints and relevant loaders match source, apparently after
+operator action. Matching disk bytes do not certify a restart or loaded behavior.
 
 ## Source provenance and build constraint
 
@@ -159,7 +160,8 @@ coverage when the launch substrate supports it. Do not call fixture/mock tests
 OS enforcement, installed-runtime acceptance, or authenticated Git verification.
 
 Record exact commands, failures, review dispositions and residual limits here
-as work progresses. No new runtime behavior is integrated or deployed yet.
+as work progresses. IPC/packaging primitives are integrated below; actual launch/permission wiring
+and production runtime acceptance remain pending. No agent deployment occurred.
 
 ## Component candidate review (workflow 185d028d-d008-4fad-b2c1-a57eefa3395d)
 
@@ -187,7 +189,62 @@ Accepted fixes before either component is integrated:
 | Packaging | Stamp source and artifact contents, reject unexpected root files, scan compiled runtime URLs as well as bundle URLs, and detect output tampering/mixing. This is consistency checking, not trust against hostile same-user writers. |
 | Packaging | Plan all listed forks before any writes so a later validation refusal cannot overwrite earlier forks. IO failures are still not a multi-directory transaction; do not claim otherwise. |
 
-The same sole writers will receive bounded fix packets in the same worktrees,
-then fresh read-only targeted reviews. Public export/manifest/docs integration
-and actual launch/permission wiring remain parent-owned downstream work.
+The same sole writers received bounded fix packets in the same worktrees, then
+fresh read-only targeted reviews. Both follow-up reviews returned **OK with
+notes**, not executed-test claims; parent verification and integration follow.
+
+## Accepted primitives (workflow e1c748f0-a52e-4cf3-8ebb-ac7410ed88e8)
+
+Parent read both fix handoffs, both fresh reviews and actual implementation, then
+copied only the completed lane-owned paths into main. No completed worker was
+rerun. Parent closed the residual findings directly as integration owner:
+
+- Dispose malformed provider returns when they have a usable disposer (invalid
+  decide/signal), with counter regressions; late/invalid payload disposal retained.
+- State the distinct prepare/child-await clocks: default 30s prepare + 35s child
+  lease arrival leaves 5s startup slack, not an unconditional timing guarantee.
+  Launch must reach prepare promptly or pass explicit paired bounds.
+- Hold the forged-cancel test's decision behind a gate; positively observe the
+  forged message while review is pending, so the audience negative is not vacuous.
+- Parent additionally found whole-lease disposal left provider resources until
+  child exit. An audience-bound reverse revoke now releases the provider even
+  while the process remains alive; real-process test asserts this before exit.
+- Guard installed manifest/root files (content/mode/absence) as well as managed
+  trees before overwriting; drift fixtures preserve all target bytes. Diagnostics
+  now name the actual installed path rather than a fictional build `(installed)`.
+- Add the public manifest export/fixture and actual post-build cross-graph tests.
+  The same versioned global ALS and provider slot are observed by bundled and
+  compiled imports, not just source module aliases. Only one runner client is
+  supported; consumer ids are a subset of required extension ids. Trusted code
+  injection is host authority, not arbitrary privileged-extension containment.
+
+### Parent verification
+
+On Node `v26.6.0`, main checkout:
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` in `forks/pi-subagents` | pass |
+| `node --experimental-strip-types --import ./test/support/isolated-temp-root.mjs --test --test-concurrency=4 test/unit/child-authority*.test.ts` in fork | 47 passed |
+| `just check` (shell/config + deployment fixtures) | 69 passed |
+| `node scripts/build-subagents.mjs` | pass; unchanged upstream builder, 382 inputs / 17 exports / 328 compiled modules / 762 artifact files |
+| `node --test forks/pi-subagents/test/build/child-authority.test.mjs` | 3 passed, both ALS directions + shared provider |
+| `npm --prefix forks/pi-subagents run test:unit` | sandbox failed (process inspection, sockets/TCP; watcher pressure). Exact command rerun with reviewed inline host approval: **4,187 pass / 17 skip / 0 fail**, 4,204 tests / 437 suites |
+| `find forks/pi-sbx/src forks/pi-guardian/src -type l` | empty |
+
+Ignored logs under `.local/round-2-subagents/parent-*`; the host result does **not**
+prove sandboxed fixture success. The intermediate packaging run initially failed
+one old diagnostic regex after the parent changed path labels; updated assertion,
+then all 69 fixtures passed. Source and fixture checks do not certify live deploy,
+SRT containment or authenticated Git. Guardian's Node 26 headless crash remains
+an independent open gate.
+
+### Lane gate after acceptance
+
+IPC and packaging component writers are finished. Parent owns the integrated
+manifest, docs, build test and repairs. Next, provision isolated launch and
+permission-adapter lanes against this frozen API, with exclusive file lists and
+an explicit policy-payload contract before writing. No production caller, pi-sbx
+provider/consumer, real Guardian/human decision route or first-prompt gate exists
+in this commit; those remain todo #22, followed by child/OS/Git acceptance.
 

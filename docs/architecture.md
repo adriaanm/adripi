@@ -44,10 +44,12 @@ actual launch path, not an assumption about the approved parent call.
 |---|---|
 | `pi-sbx` | Scratch space, one inline escalation API/dispatcher, serialized execution-local path policy and rollback, shared native/Bash path authorizer, per-connection network decisions, one human adapter, additive policy layers, maintenance privilege, guidance and snapshot-bound standing-rule handoff |
 | `pi-guardian` | Explicit reviewer provider extensions, child-runner invocation fix, review-failure reporting, sandbox exception broker/rules/audit, canonical trusted maintenance resolver, session-bound broker, provenance-preserving restrictions, trusted project policy and persistence service, target-only matching for file write/edit payloads |
+| `pi-subagents` | Host-only child-authority API, actual-process IPC primitives and code-only shared registry. Launch admission and permission consumers are not wired yet. |
 
 Detailed provenance and update records:
 [`pi-sbx/VENDOR.md`](../forks/pi-sbx/VENDOR.md) and
-[`pi-guardian/VENDOR.md`](../forks/pi-guardian/VENDOR.md).
+[`pi-guardian/VENDOR.md`](../forks/pi-guardian/VENDOR.md), plus
+[`pi-subagents/VENDOR.md`](../forks/pi-subagents/VENDOR.md).
 
 ## Authority and state
 
@@ -82,9 +84,16 @@ Detailed provenance and update records:
 ## Deployment
 
 Pi normally loads sources under `<agentDir>/npm/node_modules`, not the vendored
-working tree. `install.sh` installs pinned packages and rsyncs fork `src/` over
-the npm copies, seeds absent configs and merges maintenance-root grants. It does
-not generally migrate existing live policy.
+working tree. Before installation, provision the third fork's locked build
+dependencies and run `just build-subagents`: its public exports and runner code
+must come from one complete built graph, not copied TS. `install.sh` preflights
+source/build readiness, installs pinned packages, validates all deploy plans,
+then mirrors source forks and deploys the complete fingerprinted third-fork graph.
+It seeds absent configs and merges maintenance-root grants, but does not generally
+migrate existing live policy. Managed subtree/source symlinks refuse; legitimate
+pnpm package-root links survive and atomic file replacement avoids shared-hardlink
+mutation. Drift checks are consistency checks, not a hostile-writer guarantee or
+a multi-directory transaction.
 
 Fully quit and restart Pi after deploying. Source files matching the repo do not
 prove the active tool schemas or handlers match. Verification must exercise the

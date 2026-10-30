@@ -35,8 +35,43 @@ resolve Guardian's separately reproduced Node 26 headless-test crash.
 
 ## Local deltas
 
-None yet: this is an unmodified source baseline apart from this record and the
-omissions above. It has **not** been added to `forks.txt`, overlaid on the installed
-package, loaded into Pi or deployed. Public APIs resolve to the shared `bundle/`
-graph and background processes use compiled `src/*.js`; a TS-source-only overlay
-is invalid. See `docs/round-2-child-authority.md` before integration.
+- One new host-only public export, `pi-subagents/child-authority`, added to the
+  existing shared bundle graph; unchanged upstream builder and lockfile.
+- Transport/domain primitives bind one prepared provider lease to the actual
+  spawned process IPC handle. Bounded JSON/actions, full session/run/lease
+  correlation, no lifetime replay eviction (revoke after 256 accepted ids),
+  bounded preparation and terminal allow/deny/unavailable/cancelled outcomes.
+  No files, env hashes, model fields or supervisor prose create authority.
+- Process-wide versioned AsyncLocalStorage carries live code-only leases across
+  bundled and compiled imports. Required consumers must claim+acknowledge before
+  requests/readiness. Provider-required consumer ids must be a subset of the
+  provider's required extension ids. Launch must create exactly one runner client.
+- Parent/child cancellation, request bounds, client/lease release, provider abort,
+  process loss and disposal fail closed; late/malformed prepared leases release
+  usable provider disposers. Approval defaults are 600s parent / 605s child;
+  preparation is 30s and child lease arrival 35s, measured from different events.
+  Launch must reach preparation promptly or explicitly budget startup slack.
+- Real-process IPC positives/negatives and source export fixtures; a separate
+  post-build test proves actual bundle/compiled ALS and provider-slot identity.
+- `scripts/verify-build.mjs` fingerprints source (including lockfile) **and** all
+  artifact file contents/modes. Root `scripts/build-subagents.mjs` wraps the
+  unchanged builder, refuses mid-build input drift and never installs/deploys.
+  `forks.txt` now selects built mode: deploy the complete bundle/compiled src,
+  root modules and runtime assets, preserving installed dependency/extension
+  wiring and merging only validated new exports. Source-only deployment is invalid.
+
+Parent acceptance on Node `v26.6.0`: typecheck, **47 IPC tests**, **69 offline
+packaging fixtures** (`just check`), build/verifier and **3 actual graph tests**
+passed inside the sandbox. Full `npm --prefix forks/pi-subagents run test:unit`:
+**4,187 passed, 17 skipped, zero failed** (4,204 tests / 437 suites) after an
+explicitly reviewed host rerun. The sandboxed full run hit process inspection,
+local socket/TCP restrictions and watcher pressure; no suite-green OS claim.
+Ignored evidence: `.local/round-2-subagents/parent-{ipc-tests,check,unit-host}.log`.
+
+**Not wired or deployed:** there is no production launch admission, first-prompt
+readiness gate, real pi-sbx publisher/consumer, held-policy intersection or parent
+Guardian/human adapter yet. These primitives do not certify child containment,
+full headless integration, external worktrees or authenticated Git. No live
+installation/policy/restart/push was performed by the agent. See
+[`docs/round-2-child-authority.md`](../../docs/round-2-child-authority.md) for the
+review dispositions and remaining lanes.

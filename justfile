@@ -1,11 +1,17 @@
 # adripi maintenance
 
-# shell syntax and config template validation
+# shell syntax, config templates, and offline fork-deployment fixtures
 check:
     bash -n install.sh
     node scripts/check-configs.mjs
+    node --test scripts/deploy-fork.test.mjs
 
-# install packages, deploy both vendored forks, and seed configs
+# build the compiled third fork; required before a built-mode deploy
+build-subagents:
+    node scripts/build-subagents.mjs
+    node --test forks/pi-subagents/test/build/child-authority.test.mjs
+
+# install packages, deploy the vendored forks, and seed configs
 install:
     ./install.sh
 

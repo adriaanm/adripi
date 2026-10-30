@@ -110,8 +110,9 @@ this round's installed runtime.
 
 ## Deploy/update
 
-`install.sh` installs npm `pi-sbx@0.1.3` and rsyncs this `src/` over the installed
-copy. No deployment happened in round 1. Fully quit/restart Pi after human
+`install.sh` installs npm `pi-sbx@0.1.3` and mirrors this `src/` over the installed
+copy through the common `source` deploy mode. All forks are planned before writes;
+source/target symlinks refuse and atomic replacement avoids shared-hardlink writes. No deployment happened in round 1. Fully quit/restart Pi after human
 installation; inspect kept live configs for nonempty retired exclusions.
 
 For an upstream update:

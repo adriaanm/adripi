@@ -3,10 +3,12 @@
 # Versions are pinned to the set tested with this setup. Update deliberately:
 # bump the version here, run install.sh, then exercise /guardian, /review, and
 # a sandboxed bash command.
+# Built fork: provision forks/pi-subagents's locked build dependencies and run
+# just build-subagents before install.sh; TS-source-only deployment is invalid.
 npm:pi-subagents@0.81.0
 npm:pi-sbx@0.1.3
 # npm's newest published guardian is 0.1.0; forks/pi-guardian carries upstream
-# 0.2.0 source (same deps/peers) and install.sh rsyncs it over this install.
+# 0.2.0 source (same deps/peers) and install.sh mirrors it over this install.
 npm:pi-guardian@0.1.0
 npm:@georgedong32/pi-review@0.8.6
 npm:@aliou/pi-neuralwatt@0.18.0

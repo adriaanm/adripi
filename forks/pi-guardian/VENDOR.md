@@ -162,8 +162,10 @@ replace.
 ## Deploy
 
 `install.sh` installs `pi-guardian@0.1.0` from npm (the newest *published*
-version) and then rsyncs `forks/pi-guardian/src/` over the managed package's
-`src/`. Upstream 0.2.0 is only on git; this fork carries its source plus the
+version) and then mirrors `forks/pi-guardian/src/` over the managed package's
+`src/` through the common `source` deploy mode. All forks are planned before
+writes; source/target symlinks refuse and atomic replacement avoids shared-hardlink
+writes. Upstream 0.2.0 is only on git; this fork carries its source plus the
 deltas below. Both versions declare the same runtime dependencies (none) and the
 same host peers, so the npm install supplies the wiring and the vendored source
 supplies the behaviour. When upstream publishes 0.2.0, re-pin `packages.txt`.

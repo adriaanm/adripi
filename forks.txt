@@ -1,13 +1,26 @@
-# <npm package>|<vendored fork directory>
+# <npm package>|<vendored fork directory>|<deployment mode>
 #
-# install.sh installs the npm package first (dependencies and host-peer wiring),
-# then rsyncs the fork's src/ over the managed install.
+# install.sh installs the npm package first (dependencies and host-peer wiring), then hands the
+# vendored fork to scripts/deploy-fork.mjs.
+#
+# Modes:
+#   source — Pi loads the fork's TypeScript directly, so <fork>/src is mirrored onto <install>/src.
+#            A version difference is reported, not refused: a vendored fork may carry newer
+#            upstream source than the published package (see VENDOR.md).
+#   built  — the fork publishes a compiled graph (bundle + compiled src + root entries), so the
+#            deploy ships one upstream-built artifact graph and never a TypeScript overlay.
+#            Run `node scripts/build-subagents.mjs` first. install.sh preflights the build (absent,
+#            stale, edited or unsupported output) before installing packages; version, dependency
+#            and installed-layout checks run in deploy, after `pi install`, before the first write.
 #
 # Forks are vendored in this repository so a fresh clone can install on another
 # machine without a private Git remote.
 #
 # pi-guardian: reviewer.extensions, subagents runner detection, sandbox broker.
-# pi-sbx:     guardian broker client, request_sandbox_exception, scratchpad,
-#             once-grant expiry, trap hints.
-pi-guardian|forks/pi-guardian
-pi-sbx|forks/pi-sbx
+# pi-sbx:     guardian broker client, single inline sandbox escalation dispatcher, action-local
+#             path authority, scratchpad, trap hints. Separate exception/session-grant APIs retired.
+# pi-subagents: delegation layer. Its public exports resolve to the shared bundle graph and its
+#             background runners execute compiled src/*.js, so a source overlay is invalid.
+pi-guardian|forks/pi-guardian|source
+pi-sbx|forks/pi-sbx|source
+pi-subagents|forks/pi-subagents|built
