@@ -69,55 +69,85 @@ file ownership after the contract is fixed. No concurrent writers yet.
 - Authenticated cross-process transport requires verified launch provenance,
   integrity, audience and replay protection; no unauthenticated file/socket inbox.
 
-## Frozen design decisions (parent, after reviewing both design lanes)
+## Corrected design contract: host-created IPC, not writable carriers
 
-Baseline imported and committed as `7b0dc53` (typecheck, 4,140 unit tests and
-`build:pkg` green; see `forks/pi-subagents/VENDOR.md`). Decisions binding the
-implementation lanes:
+The design-only commit `2f114b1` incorrectly promoted a file plus env digest to
+trusted authority, despite the earlier parent rejection of that proposal. That
+is withdrawn **before implementation**. No writer was launched: the workflow
+call failed because its visible script block was missing. The saved, unexecuted
+writer draft is not an implementation contract and must not be run.
 
-1. **Envelope transport is a host-written file, not env-carried authority.**
-   The parent host derives a `ChildAuthorityEnvelope` and writes
-   `<asyncDir>/authority/<envelopeId>.json` (atomic, `0600`, random id). The
-   child env carries only a reference (path + digest). `forks/pi-sbx` reads the
-   file at `session_start` **before any model call**, verifies the digest
-   against the env reference, the audience (runId/agent/childIndex/parent
-   session), canonical cwd equality and expiry. A model running later in the
-   child cannot influence that read. A scout proposal to put the whole
-   envelope in `process.env` was rejected: it leaks the scope description to
-   any child bash call and invites replay across launches.
-2. **No ack-file proof.** A child-side "applied" file is evidence at best and
-   forgery at worst; admission is enforced by requiring `pi-sbx` as a
-   mandatory required child extension (`requireForAllRunners`) whose startup
-   failure is already fatal, plus the digest/audience checks above. The launch
-   fails before the first `prompt()` when the envelope is absent, stale or
-   mismatched. Retained/resume re-derives from the parent's current held scope
-   and intersects with the retained envelope; it never revives a stale one.
-3. **Placement admission.** Supported: background async runner, single
-   (non-parallel) step, native Pi runner. Refused with a named error before
-   spawn: foreground `host: "parent"` (no env channel, shared SRT singleton),
-   parallel groups in one runner process, nested fanout children, `machine:`
-   placements, `external-cli`/`external-job` runners, and any launch whose
-   parent session lacks the authority service or has the sandbox disabled.
-   Refusal is an admission rule, never a runner switch.
-4. **Scope can only narrow.** `scope.read/write` are subsets of the parent's
-   held roots minus non-delegable exclusions (credentials, audit, agent dir,
-   `<workspace>/.pi`, git metadata), recomputed at derive time. A child cwd
-   inside a global `agentDirWriteProjects` root must not reacquire maintenance
-   authority. `network` and `commands` start empty; no destination or command
-   is delegated in this slice.
-5. **Beyond-envelope requests are real or absent, never guessed.** The child
-   request API mints a request id bound to the envelope and audience and must
-   reach a live parent through an authenticated transport with verified,
-   typed replies. Until that transport exists, the only honest answer is a
-   distinct `unavailable` denial; free-form supervisor text is not a decision
-   and cannot widen scope.
-6. **One frozen public seam:** `pi-subagents/child-authority` (exports map
-   entry `./src/api/child-authority.ts` → bundled). The launch writer owns
-   `forks/pi-subagents/src/**`; the packaging writer owns
-   `forks/pi-subagents/{package.json,package-lock.json,tsconfig*,.npmrc,scripts/}`
-   plus root `install.sh`/`forks.txt`/`justfile`/`scripts/deploy-fork*`; the
-   adapter writer owns `forks/pi-sbx/src/{child-authority,index,broker}.ts`.
-   The export-map entry is added by the packaging writer only.
+Baseline `7b0dc53` has a green typecheck, build and 4,140 unit tests (17 skipped;
+full unit baseline required reviewed host execution because `ps` is sandboxed).
+The operator subsequently requested continued todo work after the project-config
+task, delivered as `3647fe2`. Binding decisions for the corrected work:
+
+1. **Trust travels on a host-created Node IPC handle.** The parent attaches an
+   IPC channel to the actual spawned native runner. Neither config-file bytes,
+   env variables, file hashes, model input nor supervisor text can create a
+   live lease. Binary wrappers, machine/external runners and detach modes that
+   cannot retain this authenticated parent relationship are refused, not
+   rerouted. Parent disappearance revokes the child lease.
+2. **One non-model public API:** `pi-subagents/child-authority`, bundled with the
+   existing exports in the upstream shared graph. The transport module mirrors
+   the trusted `pi-sbx.session-authority.v1` provider shape; only pi-sbx
+   publishes that provider. It binds its real session id, supplies required
+   extension paths, prepares a bounded policy payload and reviews action
+   requests. No independent permission store or alternative model tool.
+3. **Live identity and lifetime.** A host-fixed parent session/run identifies
+   the IPC audience. Each child preparation uses a fresh opaque lease id and
+   actual resolved child identity (agent, index, cwd). Requests have unique ids,
+   bounded payloads/concurrency/timeouts, typed decisions and single-consumer
+   correlation. Wrong audience, duplicate/replayed ids, disconnect, provider
+   cancellation/disposal and late replies fail closed. A retained artifact is
+   history, never a capability: resume requires fresh parent preparation.
+4. **Code-only child consumption.** A process-wide, versioned
+   `AsyncLocalStorage` slot exposes the live lease only while the host loads
+   and binds the required child extensions. The actual child factory checks
+   required consumer acknowledgments in memory before permitting a first
+   prompt. No ack files. Launch failure disposes the child and lease.
+5. **Separate policy from carriage.** pi-subagents transports a bounded JSON
+   payload and action decisions; pi-sbx owns deriving/intersecting held policy,
+   enforcing it in native/OS adapters, and non-delegable exclusions. Reads are
+   deny-based, not honestly expressible as a fabricated finite read-root list.
+   Writes start with the assigned workspace and necessary pre-authorized Git /
+   scratch scope, not every parent root. Canonical and lexical containment and
+   current parent restrictions still apply. Ambient maintenance matching must
+   not reacquire withdrawn child authority.
+6. **Real parent-first decisions.** A child action outside its launch scope is
+   sent to the live parent's existing authorizer, Guardian and human adapter.
+   The parent may delegate only authority actually held/delegable; beyond-held
+   requests need the existing human route. Mandatory exclusions are denied
+   before review. Cancellation is not consent. No unavailable-only stub will
+   be reported as delivery of the parent-first requirement.
+7. **Initial placement is intentionally narrow.** One native, single-child
+   background runner per process. Foreground parent-process, parallel/dynamic
+   groups, nested launches, machine/external/binary placements, unattended
+   schedules and managed-worktree setup without prior scope admission must
+   fail explicitly before their unsupported mutation/launch path. Do not
+   silently change runner. Supporting more placements is subsequent work,
+   not a claim inferred from unit tests.
+
+### Corrected staged lane board
+
+All writers use `neuralwatt/nw-flash`; none commits, delegates, deploys or changes
+live policy. Each has a separate detached worktree under `.local/round-2/`.
+The parent is integration-only after handoffs and personally reviews diffs.
+
+| Lane | Isolation path | Exclusive ownership / next gate |
+|---|---|---|
+| IPC substrate | `authority-transport` | New `forks/pi-subagents/src/{api/child-authority.ts,runs/shared/child-authority.ts,runs/shared/child-authority-ipc.ts}`, `test/unit/child-authority*.test.ts` and IPC fixtures only; real Node IPC positive/negative tests, typecheck. No launch call sites or policy derivation. |
+| Packaging | `authority-pkg` | Root `install.sh`, `forks.txt`, `justfile`, `scripts/{build-subagents,deploy-fork,deploy-fork.test}.mjs`; new fork `scripts/verify-build.mjs` only. No package manifest, source, policy or existing unit-test edits. Fixture checks and baseline build. |
+| Launch integration | provision after IPC handoff | Existing pi-subagents foreground/background/preflight/child-factory call sites and focused dispatch tests. Frozen API must be reviewed first. |
+| Permission adapter | provision after IPC handoff | Existing pi-sbx/Guardian source adapters and their focused tests. Frozen API must be reviewed first; no ambient maintenance reacquisition. |
+| Parent integration | main | Manifest/export-map fixture changes, VENDOR/docs and cross-fork acceptance after owned handoffs. No partial transport declared complete. |
+
+The initial two writers are independent: packaging works against the unchanged
+baseline export graph, and the IPC module has real fixture peers rather than
+unimplemented launch adapters. Parent adds the new export only after the module
+exists, rebuilds the complete graph and verifies consumer identity across actual
+public/bundled and compiled entry points. The saved unsafe three-writer draft is
+superseded, not a fallback.
 
 ## Acceptance and reporting
 
