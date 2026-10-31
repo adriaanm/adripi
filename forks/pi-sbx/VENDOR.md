@@ -170,14 +170,29 @@ routes in Git history are retired, not additional supported APIs.
     registered native-gate grant/deny/headless/cancellation/isolation coverage,
     helper/config/lifecycle and actual registered provider coverage, plus composed
     native-launch/real-IPC/controlled-consumer/broker/human tests. Current source:
-    **344 tests / 27 files**, typecheck/root checks pass, including seven installed
-    API bridge cases, 22 capture
+    **356 tests / 28 files**, typecheck/root checks pass, including 12 child-config
+    translation cases, seven installed API bridge cases, 22 capture
     regressions, 58 strict-policy/producer cases and the effective-HOME stamp
     regression (`.local/goal-child-policy/`). The scratch-exclusion fixture now records its actual allocation
     rather than racing other workers by diffing global temp directories.
     These are not production
     child consumers or live nested OS-sandbox tests. See the
     [wiring acceptance/handoff](../../docs/round-2-wiring-acceptance.md).
+
+19. **Policy-only child runtime translation (not installed enforcement):**
+    `src/child-config.ts` explicitly constructs a minimal shipped-SRT config from
+    the strict current-v2 decoder. It never invokes root config loading, trust,
+    maintenance or fresh Git discovery. Only transported write roots enter the
+    profile; mandatory read locks become credential DENY, all write exclusions
+    remain final and credential environment carries names/DENY only. Every
+    connection routes to the parent (no static allow bypass); broad Unix,
+    loopback, Mach/AppleEvents/PTY and weaker-isolation ceilings stay disabled.
+    Depth null retains the shipped default; unsafe shell variable names refuse.
+    The SDK environment adapter also removes shell bootstrap/option/function
+    imports before the outer local backend, not merely inside SRT's wrapped
+    command. This compiler/helper has 12 source regressions, not an active
+    controller, child acknowledgment or OS proof. Runtime dispatch, actual
+    spawn wiring, executable provenance and SDK/IPC composition remain open.
 
 ## Failure modes repaired in round 1
 

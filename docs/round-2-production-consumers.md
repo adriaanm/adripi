@@ -342,6 +342,39 @@ predates this follow-up; host Node26's known native assertion is not repaired.
 No deployment/restart/toggle, OS-containment, paid-provider or live-cost/latency
 result is claimed.
 
+## Policy-only SRT translation (source prerequisite; runtime wiring pending)
+
+`pi-sbx/src/child-config.ts` now constructs the existing controller's typed config
+from the strict decoded policy, not `loadConfig` or a child/global profile.
+No defaults/maintenance/root Git discovery can add an allow root: only transported
+workspace/admitted Git roots enter the runtime. Mandatory read exclusions use
+SRT credential **DENY**, not masking; write exclusions stay explicit and Git
+config writes/trust injection stay disabled. Environment carries deny names only;
+unrepresentable shell names refuse. The minimal profile routes **all** connections
+to the real parent (empty local allowedDomains, parent static denies retained).
+Broad Unix sockets, localhost binding, Mach/AppleEvents, PTY and weaker isolation
+are disabled rather than treating positive parent ceilings as new grants.
+
+The reusable SDK environment adapter drops bootstrap/option/imported-function
+inputs before the **outer** local shell starts. SRT's inner `unset` alone is too
+late to stop BASH_ENV or an exported wrapper function from running beforehand.
+The existing SDK operations/shell engine remains the required execution backend;
+actual spawn wiring and executable/startup provenance still need implementation
+and proof. Computing config paths here is display/type metadata, not a profile
+read or permission source; root settings/persistence/publisher handlers must never
+be installed from it.
+
+**356 pi-sbx tests / 28 files** and types pass, including **12** new translation
+cases against the actual producer/SRT schema, poison ambient profiles, changed
+Git pointer, native policy negatives, optional-depth behavior and synthetic-only
+environment filtering. The initial held-write fixture incorrectly passed the
+macOS `/var` alias to a matcher whose native gate supplies the canonical target;
+correcting that call preserves the actual gate contract and all negative checks.
+Evidence: `.local/goal-child-runtime/`. These functions do **not** install adapters,
+activate SRT, allocate scratch or acknowledge a consumer. #14, actual SDK/IPC
+composition, startup generation/lifetime model/provider fidelity, supported-tool
+ownership, and all deployed/OS/live-cost gates remain open.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the
