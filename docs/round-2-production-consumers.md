@@ -1,6 +1,7 @@
 # Production child consumers: integration commission
 
-Current source baseline: launch/provider `cd15ee4`, Guardian accounting `8f7551c`.
+Commission baseline: launch/provider `cd15ee4`, Guardian accounting `8f7551c`.
+Later source milestones and remaining gates are recorded below.
 Todo #14 remains unfinished; #15 is the separate OS/external-worktree/Git acceptance.
 This record is an implementation contract/plan, **not** consumer acceptance.
 No worker is active. The parent is the sole sequential writer in main; no
@@ -12,8 +13,9 @@ replacement are authorized by this plan.
 The SAME public API now uses provider/wire **2**. Guard/ALS/runner-latch Symbol
 keys intentionally retain their `.v1` names so old hosts observe intent and fail
 closed rather than launch bare. The policy payload now says `version: 2`;
-network/environment/host ceilings are projected below, but consumers still cannot
-ack. There is no parallel v1 approval implementation or new permission store.
+network/environment/host ceilings are projected below. At that milestone there
+was no production consumer acknowledgment; the later Guardian-only follow-up
+below does not satisfy the separate pi-sbx/readiness gate. There is no parallel v1 approval implementation or new permission store.
 
 - `tool` targets carry exact GuardianAction JSON, capped at **64,000 UTF-16
   characters / 256KiB UTF-8**; ordinary target/reason and **policy** bounds do
@@ -260,7 +262,8 @@ match the claimed cwd/canonical workspace and hold that canonical write root.
 Every file-policy/static-glob/socket prefix needs its actual prepared pin, and
 **all** pins, including extra Git/socket aliases, are revalidated. The result is
 an independent deeply frozen snapshot, **not** a claim, grant or acknowledgment.
-The consumer entry points do not use it yet; runtime enforcement remains open.
+At that milestone the consumer entry points did not use it yet. The Guardian
+follow-up below now does; actual pi-sbx runtime enforcement remains open.
 
 The real producer now expands all file-policy entries in the parent cwd/HOME
 before transport, preserving globs. A child must not reinterpret a relative or
@@ -277,6 +280,67 @@ regression. Durable evidence: `.local/goal-child-policy/`, including the failing
 pre-fix stamp probe. No SRT nesting, live config/install, credentials, reviewer
 calls or provider spending were used as proof. Production consumer acknowledgments
 remain forbidden until the actual adapters/lifecycle are active.
+
+## Guardian semantic consumer and shared installed API facade (partial wiring)
+
+The actual Guardian entry now routes child intent through the SAME co-installed
+public claim/ack API, via `pi-sbx/src/child-consumer-api.ts`. The facade resolves
+only the install's declared public launcher export, validates current API shape/
+version, and never creates an alternative registry, broker or grant. Presence of
+either stable ALS/runner key is only a fail-closed tripwire: malformed/undefined
+intent must reach the public detector, not ordinary root startup. Standalone root
+Guardian does not gain a mandatory runtime dependency on either other package.
+The source-mode installer mirrors this facade together with the complete src tree;
+no package-manifest/dependency overlay or extra export was invented.
+
+`pi-guardian/src/child-consumer.ts` installs an actual blocking hook **before**
+asynchronous API lookup. In a genuine child it never enters root config loading,
+local reviewer/broker/widget/toggle/maintenance setup or speculative review. Its
+session-start handler claims the opaque live lease, decodes/revalidates the full
+current-v2 policy, binds the SDK session, and acknowledges **only Guardian's own
+installed semantic forwarding/lifecycle**. Both real consumer ids are required.
+Missing/bad API, policy, cwd, identity, transport/revocation/cancellation or repeated
+startup stays blocked; shutdown cannot reopen root mode. Root behavior is retained
+only if the actual public detector proves an inactive context.
+
+Each tool forwards exact cloned input and the complete nested parent chain through
+the existing `tool` route. Root and delegated Guardian now share the same action/
+parent constructor. Parent records contain exactly the permitted tool/name/input
+fields, not accidental nested cwd/parent fields. Unknown/missing/cyclic/foreign or
+more-than-32 parent chains refuse, never truncate. Active evidence (not a permission
+cache) rejects duplicate active ids and is capped at 256 entries even if an SDK
+fails to deliver cleanup events. Policy pins and session/cancellation are checked
+again after awaiting the parent. The shared exact-JSON validator rejects values
+that stringify would erase/change (including accessors, custom coercion, sparse
+arrays or reference graphs), without invoking getters/toJSON. In delegated mode
+it also locks the **actual SDK execution input**, including nested values and its
+event binding, before review. The SDK explicitly permits mutable tool_call input;
+a review clone alone did not prevent in-flight or later-handler substitution.
+Guarded placements cannot patch arguments after this review boundary. No child
+usage message, local cost ledger or
+second reviewer is created; actual paid work remains the parent's accounting.
+A semantic allow grants **no path, output_file, command or host scope**.
+
+Verification: **344 pi-sbx tests / 27 files**, types; **213 non-headless Guardian
+tests**, types; fresh unchanged `f8de079a155088c5` graph and root checks (**69
+fixtures**) pass. Seven bridge tests use the actual public API/opaque lease and
+reject missing/escaping/old/partial exports. **36 Guardian consumer cases** include
+the actual registered entry loaded by Pi's real SDK/Jiti in a curated co-installed
+source layout with intentionally broken root Guardian config; exact large/nested
+inputs; unready scope; policy/cwd/replay/evidence-cap/chain/oversize negatives;
+post-allow pin drift; cancellation/revocation/session changes and teardown;
+actual-input locking and ten lossy/non-JSON argument refusals without coercion.
+Evidence: `.local/goal-child-bridge/`, `.local/goal-guardian-consumer/`.
+
+**This is partial source implementation, not combined production acceptance.**
+The focused tests' sandbox acknowledgment is explicitly a fixture. The real
+registered Guardian-entry test leaves pi-sbx unacknowledged and `assertReady`
+failing, rather than faking a first prompt. Actual pi-sbx native/Bash/SRT adapters
+remain unimplemented; full registered SDK + real IPC composition and startup
+model-generation gating remain required. The prior full Node24 HTTP result
+predates this follow-up; host Node26's known native assertion is not repaired.
+No deployment/restart/toggle, OS-containment, paid-provider or live-cost/latency
+result is claimed.
 
 ## Source-proven gaps at the initial baseline
 

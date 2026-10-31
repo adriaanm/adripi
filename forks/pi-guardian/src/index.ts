@@ -8,6 +8,8 @@ import {
 	type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { failedClosedAssessment, ruleDeniedAssessment } from "./assessment.ts";
+import { assistantToolCalls, createAction, createActionWithParents, findAssistantCursor } from "./tool-action.ts";
+import { mayBeDelegatedGuardian, registerChildGuardian } from "./child-consumer.ts";
 import { loadGuardianConfig, persistGuardianEnabled } from "./config.ts";
 import { evaluatePermissions, type PermissionDecision } from "./permissions.ts";
 import { parseDelegatedToolRequest, type DelegatedToolDecision, type DelegatedToolRequest } from "./delegated-tool.ts";
@@ -87,12 +89,6 @@ export function guardianFailureHelp(failure: string, configPath: string): string
 	return `Check reviewer.model, provider authentication, and piCommand in ${configPath}.`;
 }
 
-function cloneToolInput(input: Record<string, unknown>): Record<string, unknown> {
-	const serialized = JSON.stringify(input);
-	if (serialized === undefined) throw new Error("Tool input could not be serialized");
-	return JSON.parse(serialized) as Record<string, unknown>;
-}
-
 export function denialReason(assessment: GuardianAssessment, terminate: boolean, failed = false): string {
 	const circuitBreaker = terminate
 		? " Guardian rejected too many actions in this user turn, so this tool batch is being terminated."
@@ -143,15 +139,6 @@ function fallbackActionHash(toolName: string, toolCallId: string, input: unknown
 	}
 }
 
-function createAction(
-	toolName: string,
-	toolCallId: string,
-	input: Record<string, unknown>,
-	cwd: string,
-): GuardianAction {
-	return { tool_name: toolName, tool_call_id: toolCallId, input: cloneToolInput(input), cwd };
-}
-
 async function assessAction(
 	config: GuardianConfig,
 	state: GuardianStateV1,
@@ -185,44 +172,6 @@ async function assessAction(
 	}
 }
 
-function assistantToolCalls(message: unknown): Array<{
-	toolName: string;
-	toolCallId: string;
-	input: Record<string, unknown>;
-}> {
-	if (!message || typeof message !== "object") return [];
-	const value = message as Record<string, unknown>;
-	if (
-		value.role !== "assistant" ||
-		value.stopReason === "length" ||
-		value.stopReason === "error" ||
-		value.stopReason === "aborted" ||
-		!Array.isArray(value.content)
-	) {
-		return [];
-	}
-	const calls: Array<{ toolName: string; toolCallId: string; input: Record<string, unknown> }> = [];
-	for (const item of value.content) {
-		if (!item || typeof item !== "object") continue;
-		const block = item as Record<string, unknown>;
-		if (
-			block.type === "toolCall" &&
-			typeof block.name === "string" &&
-			typeof block.id === "string" &&
-			block.arguments !== null &&
-			typeof block.arguments === "object" &&
-			!Array.isArray(block.arguments)
-		) {
-			calls.push({
-				toolName: block.name,
-				toolCallId: block.id,
-				input: block.arguments as Record<string, unknown>,
-			});
-		}
-	}
-	return calls;
-}
-
 function branchWithPendingAssistant(
 	branch: readonly SessionEntry[],
 	message: unknown,
@@ -239,27 +188,6 @@ function branchWithPendingAssistant(
 			message: message as never,
 		},
 	];
-}
-
-function findAssistantCursor(branch: readonly SessionEntry[], toolCallId: string): string | undefined {
-	for (let index = branch.length - 1; index >= 0; index--) {
-		const entry = branch[index];
-		if (entry.type !== "message") continue;
-		const message = entry.message as unknown as Record<string, unknown>;
-		if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
-		if (
-			message.content.some(
-				(item) =>
-					Boolean(item) &&
-					typeof item === "object" &&
-					(item as Record<string, unknown>).type === "toolCall" &&
-					(item as Record<string, unknown>).id === toolCallId,
-			)
-		) {
-			return entry.id;
-		}
-	}
-	return undefined;
 }
 
 /** Canonical evidence key ignores only Guardian bookkeeping and this already-bound planned assistant call. */
@@ -281,6 +209,11 @@ export function reviewEvidenceKey(branch: readonly SessionEntry[], toolCallId?: 
 }
 
 export default function guardianExtension(pi: ExtensionAPI) {
+	if (mayBeDelegatedGuardian()) return registerChildGuardian(pi, () => rootGuardianExtension(pi));
+	return rootGuardianExtension(pi);
+}
+
+function rootGuardianExtension(pi: ExtensionAPI) {
 	registerGuardianAssessmentRenderer(pi);
 	const agentDir = getAgentDir();
 	const configPath = join(agentDir, "guardian.json");
@@ -885,31 +818,11 @@ export default function guardianExtension(pi: ExtensionAPI) {
 		pendingReviews.delete(event.toolCallId);
 
 		try {
-			const parentActions: GuardianParentAction[] = [];
-			let parentId = event.parentToolCallId;
-			const seen = new Set([event.toolCallId]);
-			while (parentId) {
-				if (seen.has(parentId)) throw new Error("Nested tool parent chain contains a cycle");
-				seen.add(parentId);
-				const parentCursor = findAssistantCursor(branch, parentId);
-				if (parentCursor) {
-					const entry = branch.find((entry) => entry.id === parentCursor)!;
-					const call = assistantToolCalls(entry.type === "message" ? entry.message : undefined)
-						.find((call) => call.toolCallId === parentId);
-					if (!call) throw new Error(`Could not locate parent tool call ${parentId}`);
-					parentActions.unshift({ tool_name: call.toolName, tool_call_id: call.toolCallId, input: cloneToolInput(call.input) });
-					cursorEntryId = parentCursor;
-					break;
-				}
-				const parent = activeCalls.get(parentId);
-				if (!parent || parent.sessionId !== parentSessionId || !parent.parentToolCallId) {
-					throw new Error(`Could not locate parent tool call ${parentId} in the active transcript`);
-				}
-				parentActions.unshift(parent.action);
-				parentId = parent.parentToolCallId;
-			}
-			const action = createAction(event.toolName, event.toolCallId, event.input, ctx.cwd);
-			if (event.parentToolCallId) action.parent_actions = parentActions;
+			const built = createActionWithParents({ toolName: event.toolName, toolCallId: event.toolCallId,
+				input: event.input, cwd: ctx.cwd, parentToolCallId: event.parentToolCallId,
+				branch, activeCalls, sessionId: parentSessionId });
+			const action = built.action;
+			cursorEntryId = built.cursorEntryId;
 			actionHash = hashAction(action);
 			if (ruleExecution) {
 				pending = { parentSessionId, state, actionHash, promise: Promise.resolve(ruleExecution) };

@@ -225,8 +225,40 @@ deltas are listed below; nothing else is modified.
     The real-IPC fixture now supplies explicit baseline SRT/environment data for
     the staged v2 runtime-policy contract; all **13 delegated tests** and types
     pass after that amendment. This does not add an acknowledgment consumer.
-    Production child consumers/SRT enforcement remain unimplemented. See the
+    At that milestone production child consumers/SRT enforcement were not yet
+    implemented. See the follow-up below and the
     [consumer integration record](../../docs/round-2-production-consumers.md).
+
+19. `src/child-consumer.ts`, root dispatch and shared `tool-action.ts` — the actual
+    Guardian child semantic forwarder claims/acks the SAME public live lease via
+    pi-sbx's co-installed source facade. It never loads child/global Guardian
+    config, starts a local reviewer, publishes a broker, exposes a toggle or
+    borrows maintenance. A blocking hook exists before async API lookup; only
+    the public detector proving inactive context may enter ordinary root mode.
+    Real handlers/lifecycle and full current-v2 policy/pins precede Guardian's
+    own acknowledgment; pi-sbx's real active enforcement is still separately
+    required. Every tool, including parent-exempt reads, forwards exact inputs
+    and complete nested evidence to the real parent; no speculative local
+    review, result cache or synthetic usage. Session/cwd drift, malformed data,
+    bridge/loss/cancellation and teardown cannot reopen root authority. Active
+    evidence is bounded and duplicate active ids refuse. Root and child share
+    the same nested-action construction; active parent records lose no inputs
+    but cannot smuggle extra cwd/parent fields into the strict parent-action
+    envelope. Chains beyond 32 refuse without truncation.
+    The shared exact-JSON validator rejects lossy/custom/nonfinite/reference
+    data without executing coercion. Delegated input is deeply locked together
+    with its SDK event binding before async review: SDK tool_call args are
+    otherwise mutable and a cloned verdict could execute substituted inputs.
+    Guarded placements cannot patch arguments after that review boundary.
+    **36 child-consumer cases** include the real SDK/Jiti-loaded registered entry
+    in a curated co-installed source layout (broken root config ignored), exact
+    large/nested inputs, pending-allow revocation, policy/cwd/parent/replay/budget
+    negatives, actual-input locking/ten lossy argument refusals and actual public
+    claim/ack. The sandbox side is explicitly a focused fixture, never production
+    SRT readiness. **213 non-headless tests**,
+    types and root checks pass on Node26; the historical full Node24 result below
+    predates this follow-up. No source-only or fixture result establishes combined
+    production SDK/IPC/SRT acceptance, loaded deployment or live accounting.
 
 Upstream 0.2.0 already covers the rest of what the 0.1.0 fork needed: the
 deterministic `permissions.allow` / `permissions.deny` rule family (evaluated

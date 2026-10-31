@@ -49,15 +49,44 @@ function cwd(value: unknown): string {
 	return path;
 }
 
-function validateJson(root: unknown): void {
-	// Iterative validation avoids a stack overflow on attacker-controlled nesting.
+/** Exact JSON trees only: stringify must not silently drop fields, invoke a
+ * getter/toJSON, change a number or erase reference identity. The optional lock
+ * binds delegated SDK execution to the data actually sent for parent review. */
+export function validateExactToolJson(root: unknown, { lock = false, bounded = true }: { lock?: boolean; bounded?: boolean } = {}): void {
 	const pending: Array<{ value: unknown; depth: number }> = [{ value: root, depth: 0 }];
+	const seen = new Set<object>();
+	let count = 0, minimumChars = 0;
 	while (pending.length) {
 		const { value, depth } = pending.pop()!;
-		if (depth > 64) throw new Error("Delegated tool input exceeds 64 levels of nesting");
-		if (typeof value === "number" && !Number.isFinite(value)) throw new Error("Delegated tool input contains a nonfinite JSON number");
-		if (value && typeof value === "object") {
-			for (const item of Object.values(value)) pending.push({ value: item, depth: depth + 1 });
+		if (bounded && depth > 64) throw new Error("Delegated tool input exceeds 64 levels of nesting");
+		count++;
+		if (typeof value === "string") minimumChars += value.length;
+		if (bounded && (count > MAX_DELEGATED_TOOL_CHARS || minimumChars > MAX_DELEGATED_TOOL_CHARS)) throw new Error("Delegated tool input exceeds the exact JSON tree bound");
+		if (value === null || typeof value === "string" || typeof value === "boolean") continue;
+		if (typeof value === "number") {
+			if (!Number.isFinite(value) || Object.is(value, -0)) throw new Error("Delegated tool input contains a nonexact JSON number");
+			continue;
+		}
+		if (typeof value !== "object") throw new Error("Delegated tool input contains non-JSON data");
+		if (seen.has(value)) throw new Error("Delegated tool input contains a cycle or shared reference");
+		seen.add(value);
+		if (lock) Object.freeze(value);
+		const array = Array.isArray(value);
+		const prototype = Object.getPrototypeOf(value);
+		if (prototype !== (array ? Array.prototype : Object.prototype) && prototype !== null) throw new Error("Delegated tool input must contain only plain JSON data");
+		const names = Reflect.ownKeys(value);
+		if (bounded && names.length + pending.length + count > MAX_DELEGATED_TOOL_CHARS) throw new Error("Delegated tool input exceeds the exact JSON tree bound");
+		const descriptors = Object.getOwnPropertyDescriptors(value);
+		if (array && names.length !== value.length + 1) throw new Error("Delegated tool input contains a sparse or decorated array");
+		for (const name of names) {
+			if (array && name === "length") continue;
+			if (typeof name !== "string") throw new Error("Delegated tool input contains a symbol field");
+			if (!array) minimumChars += name.length;
+			if (bounded && minimumChars > MAX_DELEGATED_TOOL_CHARS) throw new Error("Delegated tool input exceeds the exact JSON tree bound");
+			const descriptor = descriptors[name];
+			if (!descriptor.enumerable || !("value" in descriptor)) throw new Error("Delegated tool input contains a hidden field or accessor");
+			if (array && (!/^(0|[1-9][0-9]*)$/.test(name) || Number(name) >= value.length)) throw new Error("Delegated tool input contains a decorated array");
+			pending.push({ value: descriptor.value, depth: depth + 1 });
 		}
 	}
 }
@@ -106,6 +135,6 @@ export function parseDelegatedToolRequest(value: unknown): { identity: Delegated
 		const ids = [action.tool_call_id, ...action.parent_actions.map(item => item.tool_call_id)];
 		if (new Set(ids).size !== ids.length) throw new Error("Delegated parent chain contains a cycle or duplicate id");
 	}
-	validateJson(action);
+	validateExactToolJson(action);
 	return { identity, action, signal: request.signal as AbortSignal | undefined };
 }

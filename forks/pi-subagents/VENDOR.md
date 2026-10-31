@@ -175,9 +175,12 @@ child-project override code and accepted model/startup substitution. See the
 current verification and remaining production/runtime gates.
 
 pi-sbx now has the actual registered parent publisher, narrowing policy and shared
-Guardian/human adapter. **Production child consumers are not implemented**: real
-required extensions cannot acknowledge and therefore must not reach a first
-model prompt. These seams do not certify child containment, full headless,
+Guardian/human adapter. The actual Guardian semantic child consumer now claims/
+acknowledges only its installed forwarding/lifecycle through that same public API;
+**pi-sbx's production native/Bash/SRT consumer remains unimplemented**. Combined
+readiness must still fail and no first model prompt is authorized. Real registered
+SDK/IPC composition is not replaced by the focused sandbox-ack fixture. These
+seams do not certify child containment, full headless,
 external worktrees or authenticated Git. No live installation/policy/restart/push
 was performed. See the [current wiring acceptance and payload handoff](../../docs/round-2-wiring-acceptance.md)
 and [component history](../../docs/round-2-child-authority.md).

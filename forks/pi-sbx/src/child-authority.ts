@@ -600,14 +600,12 @@ function exportedEntry(value: unknown): string | undefined {
 }
 
 /**
- * Load the installed launcher's public registration export (`bundle/*.js` in a
- * built deploy, `src/*.ts` in a source deploy — the package's own export map
- * decides). A missing package means no child launch exists to guard; anything
- * else that is wrong is a registration failure the provider must survive.
+ * Load one installed launcher public export (`bundle/*.js` in a built deploy,
+ * or the package's source export). Registration and child consumption share
+ * this resolution path; neither invents a second registry or source fallback.
+ * A missing package is optional for root publication, never for a latched child.
  */
-export async function loadInstalledChildAuthorityRegistration(
-  agentDir: string,
-): Promise<ChildAuthorityRegistrationApi> {
+export async function loadInstalledChildAuthorityModule(agentDir: string, subpath: "./required-child-extensions" | "./child-authority"): Promise<Record<string, unknown>> {
   const packageRoot = join(agentDir, "npm", "node_modules", LAUNCHER_PACKAGE);
   const manifestPath = join(packageRoot, "package.json");
   if (!existsSync(manifestPath)) {
@@ -623,19 +621,24 @@ export async function loadInstalledChildAuthorityRegistration(
       `the installed ${LAUNCHER_PACKAGE} manifest could not be read: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  const target = exportedEntry(manifest.exports?.[LAUNCHER_REGISTRATION_EXPORT]);
+  const target = exportedEntry(manifest.exports?.[subpath]);
   if (!target) {
     throw new Error(
-      `the installed ${LAUNCHER_PACKAGE} package exposes no ${LAUNCHER_REGISTRATION_EXPORT} entry, so child extensions cannot be demanded`,
+      `the installed ${LAUNCHER_PACKAGE} package exposes no ${subpath} entry, so guarded child startup is unavailable`,
     );
   }
   const modulePath = resolve(packageRoot, target);
+  if (!target.startsWith("./") || !isWithin(modulePath, packageRoot)) throw new Error("the installed launcher public export escapes its package root");
   if (!existsSync(modulePath)) {
     throw new Error(`the installed ${LAUNCHER_PACKAGE} entry ${modulePath} is missing`);
   }
-  const loaded = await import(pathToFileURL(modulePath).href) as { registerRequiredChildExtensions?: unknown };
+  return await import(pathToFileURL(modulePath).href) as Record<string, unknown>;
+}
+
+export async function loadInstalledChildAuthorityRegistration(agentDir: string): Promise<ChildAuthorityRegistrationApi> {
+  const loaded = await loadInstalledChildAuthorityModule(agentDir, LAUNCHER_REGISTRATION_EXPORT);
   if (typeof loaded.registerRequiredChildExtensions !== "function") {
-    throw new Error(`the installed ${LAUNCHER_PACKAGE} entry ${modulePath} does not export registerRequiredChildExtensions`);
+    throw new Error(`the installed ${LAUNCHER_PACKAGE} public registration entry does not export registerRequiredChildExtensions`);
   }
   return loaded as unknown as ChildAuthorityRegistrationApi;
 }
