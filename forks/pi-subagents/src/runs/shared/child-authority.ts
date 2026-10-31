@@ -25,6 +25,9 @@ export const CHILD_AUTHORITY_PROVIDER_VERSION = 2;
  */
 export const CHILD_AUTHORITY_LEASE_SLOT_KEY = Symbol.for("pi-subagents.child-authority-lease.v1");
 export const CHILD_AUTHORITY_LEASE_SLOT_VERSION = 1;
+/** Same process-lifetime intent key used by the native runner. Presence, even
+ * malformed/undefined, must never let a consumer fall back to root startup. */
+export const CHILD_AUTHORITY_RUNNER_LATCH_KEY = Symbol.for("pi-subagents.child-authority-runner.v1");
 
 export const CHILD_AUTHORITY_MAX_PAYLOAD_BYTES = 32 * 1024;
 export const CHILD_AUTHORITY_MAX_PAYLOAD_DEPTH = 6;
@@ -548,6 +551,20 @@ function leaseSlot(): ChildAuthorityLeaseSlot {
 	}
 	if (!isLeaseSlot(existing)) throw new ChildAuthorityError("service-malformed", "The process-wide child authority lease slot is malformed or unsupported.");
 	return existing;
+}
+
+/** A consumer's root/child dispatch check, not an authority grant. Do not create
+ * a registry as a side effect of ordinary root startup. An inactive valid ALS
+ * is root context; a latched runner is ALWAYS child, including after scope exit,
+ * revocation, disposal, or malformed/undefined latch state. A corrupt registry
+ * refuses instead of pretending there was no child context. */
+export function hasChildAuthorityContext(): boolean {
+	const root = globalThis as Record<PropertyKey, unknown>;
+	if (CHILD_AUTHORITY_RUNNER_LATCH_KEY in root) return true;
+	if (!(CHILD_AUTHORITY_LEASE_SLOT_KEY in root)) return false;
+	const slot = root[CHILD_AUTHORITY_LEASE_SLOT_KEY];
+	if (!isLeaseSlot(slot)) throw new ChildAuthorityError("service-malformed", "Cannot establish root context: the process-wide child authority lease slot is malformed or unsupported.");
+	return slot.storage.getStore() !== undefined;
 }
 
 /**

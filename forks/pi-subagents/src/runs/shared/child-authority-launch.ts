@@ -18,6 +18,7 @@ import {
 } from "../../shared/required-child-extensions.ts";
 import {
 	CHILD_AUTHORITY_PROVIDER_KEY,
+	CHILD_AUTHORITY_RUNNER_LATCH_KEY,
 	ChildAuthorityError,
 	readChildAuthorityProvider,
 	type ChildAuthorityIdentity,
@@ -45,7 +46,7 @@ export interface ChildAuthorityRunnerRequest {
  * Pi process, and a guarded runner must refuse a nested child at any later moment. It carries no
  * permission — admission, identity and consumer acknowledgments still decide what the child may do.
  */
-export const CHILD_AUTHORITY_RUNNER_LATCH_KEY = Symbol.for("pi-subagents.child-authority-runner.v1");
+export { CHILD_AUTHORITY_RUNNER_LATCH_KEY } from "./child-authority.ts";
 export const CHILD_AUTHORITY_RUNNER_LATCH_VERSION = 1;
 
 interface ChildAuthorityRunnerLatch {
@@ -55,12 +56,12 @@ interface ChildAuthorityRunnerLatch {
 
 /** True once this process's own launch required a live child authority lease. */
 export function childAuthorityRunnerLatched(): boolean {
-	return (globalThis as Record<PropertyKey, unknown>)[CHILD_AUTHORITY_RUNNER_LATCH_KEY] !== undefined;
+	return CHILD_AUTHORITY_RUNNER_LATCH_KEY in globalThis;
 }
 
 function latchChildAuthorityRunner(): void {
 	const root = globalThis as Record<PropertyKey, unknown>;
-	if (root[CHILD_AUTHORITY_RUNNER_LATCH_KEY] !== undefined) return;
+	if (CHILD_AUTHORITY_RUNNER_LATCH_KEY in root) return;
 	const latch: ChildAuthorityRunnerLatch = Object.freeze({ version: CHILD_AUTHORITY_RUNNER_LATCH_VERSION, latchedAt: Date.now() });
 	root[CHILD_AUTHORITY_RUNNER_LATCH_KEY] = latch;
 }

@@ -17,6 +17,7 @@ export {
 	ChildAuthorityError,
 	acknowledgeChildAuthority,
 	claimChildAuthority,
+	hasChildAuthorityContext,
 	readChildAuthorityProvider,
 	withChildAuthority,
 	type ChildAuthorityAction,

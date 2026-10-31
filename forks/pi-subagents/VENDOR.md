@@ -118,6 +118,29 @@ failures, not as containment evidence. Graph remains **383 inputs / 17 exports /
 cross-fork; production acknowledgments are still forbidden until enforcement.
 See the [consumer contract/record](../../docs/round-2-production-consumers.md).
 
+### Child-context dispatch prerequisite (source only)
+
+The same public `child-authority` API now exposes `hasChildAuthorityContext` for
+future consumer root/child dispatch. It creates no ALS registry on ordinary root
+startup; an inactive valid registry is not child authority, while an active store
+selects child dispatch. A malformed or explicitly undefined registry refuses
+instead of reopening root startup. Any process-lifetime runner-latch **presence**,
+including malformed/undefined values and after scope exit, selects child mode and
+refuses nested placement. The latch key is shared with the launcher, not a second
+registry. This is intent detection, not a lease grant or consumer acknowledgment.
+
+Verification: **83** focused authority tests and typecheck pass; fresh build and
+verifier plus **4 actual bundle/compiled graph tests** pass (including cross-graph
+context/latch checks). Graph remains **383 inputs / 17 exports / 329 compiled
+modules / 18 module-URL targets / 765 artifacts**, artifact prefix
+`e687d77d2d57b6eb`; root **69 deployment fixtures** pass. The full unit command was
+attempted inside the sandbox and hit process-inspection/socket restrictions
+(including `spawnSync ps EPERM`). Its host rerun did **not** execute: the current
+Guardian broker is unavailable. Full-suite verification of this revision remains
+open; the earlier 4,219-pass host result above belongs to the earlier source.
+Evidence: `.local/goal-consumers/open-*` plus the command/denial transcript; no
+new full-suite or containment claim, deployment, restart or live-policy change.
+
 pi-sbx now has the actual registered parent publisher, narrowing policy and shared
 Guardian/human adapter. **Production child consumers are not implemented**: real
 required extensions cannot acknowledge and therefore must not reach a first

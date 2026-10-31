@@ -145,6 +145,29 @@ including **69 deployment fixtures**, and `git diff --check` pass. This repairs
 provider scope derivation only; production consumers, SDK resource isolation and
 actual OS/Git containment remain unfinished. No deployment/live change occurred.
 
+## Child-context dispatch follow-up: source prerequisite, not consumer acceptance
+
+`pi-subagents/child-authority` now exports `hasChildAuthorityContext`. Ordinary
+root dispatch does not create a registry. A live ALS store selects child dispatch;
+a corrupt/undefined registry refuses. Any runner-latch presence, even an
+undefined/malformed value, preserves child intent and nested-launch refusal after
+scope exit. The function creates no authority and does not claim or acknowledge a
+consumer. Real extension startup has not yet been wired to this prerequisite.
+
+Verification: **83 focused authority tests**, types, fresh build/verifier and
+**4 actual bundle/compiled graph tests** pass; root **69 deployment fixtures**
+pass. Artifact prefix `e687d77d2d57b6eb`. The full subagents unit suite hit sandbox
+process/socket restrictions; a host rerun was refused because no Guardian sandbox
+broker is published, so full-suite verification of this revision remains open.
+No fallback, broker/toggle change, deployment or restart was performed.
+
+Still needed before readiness: audit/fix guarded SDK settings/resource loading so
+another cwd cannot borrow parent project trust or load child-local code/config as
+authority; preserve the explicitly configured provider/model without fallback.
+Then implement and compose the real pi-sbx/Guardian consumers under SDK + IPC,
+including strict policy decoding, active narrowed SRT/native adapters, exact
+parent review, action/scratch pins, freshness and fail-closed teardown.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

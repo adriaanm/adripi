@@ -23,18 +23,34 @@ for (const [producer, consumer] of [[bundled, compiled], [compiled, bundled]]) {
 		try {
 			await producer.withChildAuthority(handle.lease, async () => {
 				await Promise.resolve();
+				assert.equal(producer.hasChildAuthorityContext(), true);
+				assert.equal(consumer.hasChildAuthorityContext(), true);
 				const claimed = consumer.claimChildAuthority("pi-sbx", "/workspace/built");
 				assert.equal(claimed, handle.lease);
 				consumer.acknowledgeChildAuthority("pi-sbx");
 				handle.lease.assertReady();
 				assert.deepEqual(await claimed.request({ surface: "write", target: "/workspace/built/file", reason: "build fixture" }), { outcome: "allow" });
 			});
+			assert.equal(producer.hasChildAuthorityContext(), false);
+			assert.equal(consumer.hasChildAuthorityContext(), false);
 			assert.throws(() => consumer.claimChildAuthority("pi-sbx", "/workspace/built"), /active withChildAuthority/);
 		} finally {
 			handle.lease.dispose();
 		}
 	});
 }
+
+test("bundle and compiled APIs retain child intent for an explicitly undefined runner latch", () => {
+	const key = Symbol.for("pi-subagents.child-authority-runner.v1");
+	assert.equal(key in globalThis, false, "fixture must not replace a latched runner");
+	globalThis[key] = undefined;
+	try {
+		assert.equal(bundled.hasChildAuthorityContext(), true);
+		assert.equal(compiled.hasChildAuthorityContext(), true);
+	} finally {
+		delete globalThis[key];
+	}
+});
 
 test("bundle and compiled APIs read the very same live provider slot", () => {
 	const key = Symbol.for("pi-sbx.session-authority.v1");
