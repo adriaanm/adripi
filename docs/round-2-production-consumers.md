@@ -251,6 +251,33 @@ entire suite passes at concurrency 4. No production timeout, dependency, model,
 installed runtime, policy or Guardian toggle was changed to obtain that result.
 The remaining acceptance boundaries above are unchanged.
 
+## Full current-v2 policy decoder and parent-expanded paths (source only)
+
+`pi-sbx/src/child-policy.ts` now supplies one strict decoder for the real consumer
+work. It checks the complete current-v2 schema, exact tags/booleans/arrays and
+unknown fields; all existing transport bounds remain unchanged. A snapshot must
+match the claimed cwd/canonical workspace and hold that canonical write root.
+Every file-policy/static-glob/socket prefix needs its actual prepared pin, and
+**all** pins, including extra Git/socket aliases, are revalidated. The result is
+an independent deeply frozen snapshot, **not** a claim, grant or acknowledgment.
+The consumer entry points do not use it yet; runtime enforcement remains open.
+
+The real producer now expands all file-policy entries in the parent cwd/HOME
+before transport, preserving globs. A child must not reinterpret a relative or
+tilde credential/path rule in another HOME; old relative-entry candidates refuse
+at this decoder instead of being rebased. Complete source deployment and restart
+remain necessary; no mixed-version live rollout is claimed. Private baseline
+consistency stamps use the same effective absolute policy. A regression with the
+prior raw stamp returned **allow** after HOME changed an effective parent deny;
+the repaired stamp revokes before exact-tool review can consume stale scope.
+
+Verification: **337 pi-sbx tests / 26 files**, types and root checks pass. This
+includes **58 decoder/producer cases** and the separate effective-HOME freshness
+regression. Durable evidence: `.local/goal-child-policy/`, including the failing
+pre-fix stamp probe. No SRT nesting, live config/install, credentials, reviewer
+calls or provider spending were used as proof. Production consumer acknowledgments
+remain forbidden until the actual adapters/lifecycle are active.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

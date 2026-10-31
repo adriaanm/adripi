@@ -588,8 +588,8 @@ describe("derived child policy from the parent baseline", () => {
     expect(payload.anchor.cwd).toBe(session.root);
     // Reads stay deny-based with the parent's own spellings; relative entries are
     // anchored at the parent cwd, never at the child's.
-    expect(payload.read.deny).toEqual(["secrets", join(session.agentDir, "auth.json")]);
-    expect(payload.read.allow).toEqual(["secrets/public"]);
+    expect(payload.read.deny).toEqual([join(session.root, "secrets"), join(session.agentDir, "auth.json")]);
+    expect(payload.read.allow).toEqual([join(session.root, "secrets/public")]);
     expect(payload.read.mandatoryDeny).toEqual([join(session.agentDir, "auth.json")]);
     // Writes are the assigned workspace and its verified git metadata: no parent
     // write root, no temp root, no maintenance grant.

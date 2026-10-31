@@ -11,7 +11,7 @@ import { decideSandboxException } from "./broker.ts";
 import type { HumanChannel } from "./human-channel.ts";
 import { childParentFilePolicy, loadChildDomainMatcher, projectChildRuntime, type ChildEnvironmentPolicy, type ChildIsolationPolicy, type ChildNetworkPolicy } from "./child-runtime-policy.ts";
 import { mandatoryWriteBlock } from "./path-authorizer.ts";
-import { canWrite, canonicalizeTarget, capturePolicyPathAnchor, isWithin, policyPathAnchorsUnchanged, resolveTarget, type FilePolicy } from "./path-policy.ts";
+import { canWrite, canonicalizeTarget, capturePolicyPathAnchor, expandPolicyPath, isWithin, policyPathAnchorsUnchanged, resolveTarget, type FilePolicy } from "./path-policy.ts";
 
 /**
  * The parent half of trusted child delegation.
@@ -142,8 +142,9 @@ export class ChildAuthorityLauncherMissingError extends Error {
 /**
  * The parent's derived policy for one child. Writes are an explicit allowlist
  * (assigned workspace plus separately verified Git metadata); reads stay
- * deny-based. `anchor.cwd` is the parent baseline cwd: every relative or glob
- * entry resolves against it, never against the child's cwd.
+ * deny-based. `anchor.cwd` is the parent baseline cwd. File-policy entries are
+ * expanded there before transport: no child cwd/HOME may reinterpret a relative
+ * or tilde path. Glob prefixes and aliases retain separately checked pins.
  */
 export interface ChildAuthorityPolicyPayload extends ChildAuthorityPayload {
   readonly version: typeof CHILD_AUTHORITY_PROVIDER_VERSION;
@@ -383,7 +384,7 @@ export interface DerivedChildPolicy {
  * parent; otherwise the child simply gets the workspace and no git write scope.
  */
 export function deriveChildPolicy(input: DeriveChildPolicyInput): DerivedChildPolicy {
-  const baseline = { ...input.baseline, policy: childParentFilePolicy(input.baseline) };
+  const baseline = { ...input.baseline, policy: absoluteFilePolicy(childParentFilePolicy(input.baseline), input.baseline.cwd) };
   const spelled = resolveTarget(input.identity.cwd, baseline.cwd);
   const workspace = canonicalizeTarget(input.identity.cwd, baseline.cwd);
   const aliases = spelled === workspace ? [] : [spelled];
@@ -434,6 +435,9 @@ export function deriveChildPolicy(input: DeriveChildPolicyInput): DerivedChildPo
     .filter((candidate) => [candidate.root, ...candidate.aliases].every((path) => canWrite(path, baseline.cwd, baseline.policy)));
 
   const runtime = projectChildRuntime(baseline, baseline.cwd);
+  // Expand in the authoritative parent, not in a child's potentially different
+  // cwd/HOME. Keep globs intact and pin their literal prefixes below.
+  const policyPaths = (entries: readonly string[]): string[] => unique(entries.map(entry => expandPolicyPath(entry, baseline.cwd)));
   const payload: ChildAuthorityPolicyPayload = {
     version: CHILD_AUTHORITY_PROVIDER_VERSION,
     kind: "pi-sbx.child-policy",
@@ -441,16 +445,16 @@ export function deriveChildPolicy(input: DeriveChildPolicyInput): DerivedChildPo
     workspace: { spelled: input.identity.cwd, canonical: workspace },
     read: {
       policy: "deny-based",
-      deny: unique(baseline.policy.denyRead),
+      deny: policyPaths(baseline.policy.denyRead),
       // The parent's own scratchpad is a session grant, not a child capability.
-      allow: unique(baseline.policy.allowRead.filter((entry) => entry !== input.sessionScratchDir)),
-      mandatoryDeny: unique(baseline.policy.mandatoryDenyRead),
+      allow: policyPaths(baseline.policy.allowRead.filter((entry) => entry !== input.sessionScratchDir)),
+      mandatoryDeny: policyPaths(baseline.policy.mandatoryDenyRead),
     },
     write: {
       policy: "allowlist",
       allow: unique([workspace, ...git.map((candidate) => candidate.root)]),
-      deny: unique(baseline.policy.denyWrite),
-      mandatoryDeny: unique([
+      deny: policyPaths(baseline.policy.denyWrite),
+      mandatoryDeny: policyPaths([
         ...baseline.policy.mandatoryDenyWrite,
         join(workspace, input.configDirName),
         ...discoveredGit.flatMap((candidate) => candidate.mandatoryDeny),
@@ -548,6 +552,14 @@ function requireIdentity(value: unknown, sessionId: string): ChildAuthorityIdent
   });
 }
 
+/** Expand effective policy in its owning process, including in consistency stamps. */
+function absoluteFilePolicy(policy: FilePolicy, cwd: string): FilePolicy {
+  const paths = (entries: readonly string[]): string[] => unique(entries.map(entry => expandPolicyPath(entry, cwd)));
+  return { denyRead: paths(policy.denyRead), allowRead: paths(policy.allowRead),
+    mandatoryDenyRead: paths(policy.mandatoryDenyRead), allowWrite: paths(policy.allowWrite),
+    denyWrite: paths(policy.denyWrite), mandatoryDenyWrite: paths(policy.mandatoryDenyWrite) };
+}
+
 /**
  * The prepared payload as an immutable narrowing policy. A decision must be
  * admitted by this *and* the current parent baseline; the ceiling never grants
@@ -568,7 +580,7 @@ function childPolicyCeiling(payload: ChildAuthorityPolicyPayload): FilePolicy {
  * Tool review must not bless locally enforced Bash/native scope after the parent
  * baseline changed; a fresh child is required instead of keeping stale SRT. */
 function baselineStamp(baseline: ParentDecisionBaseline): string {
-  return JSON.stringify({ cwd: baseline.cwd, policy: childParentFilePolicy(baseline),
+  return JSON.stringify({ cwd: baseline.cwd, policy: absoluteFilePolicy(childParentFilePolicy(baseline), baseline.cwd),
     allowHost: baseline.allowUnsandboxedCommands, ...projectChildRuntime(baseline, baseline.cwd) });
 }
 

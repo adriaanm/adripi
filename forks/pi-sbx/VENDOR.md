@@ -141,7 +141,19 @@ routes in Git history are retired, not additional supported APIs.
     Opt-in logs can fill disk and persist until the operator cleans them up;
     scratch logs retain scratch lifetime. Five credential-free actual installed
     SDK1.4 backend probes also pass; no nested SRT or production OS claim.
-16. **Tests:** registered bash dispatch with mocked execution/runtime, concurrent
+16. **Strict child-policy data, not readiness:** `src/child-policy.ts` validates
+    the complete current-v2 payload and bounds without coercion, verifies the
+    consumer cwd/canonical workspace plus every prepared path prefix/all extra
+    alias pins, and returns an independent frozen snapshot. No file/env data can
+    create a live lease; this decoder does not claim/ack or install enforcement.
+    The actual producer now expands file rules against parent cwd/HOME before
+    transport; relative/tilde candidate payloads refuse rather than being
+    reinterpreted in a child. Private consistency stamps use effective absolute
+    rules too: the old raw stamp allowed an exact tool after HOME moved a parent
+    denial; the fixed probe revokes before broker review. Existing fixtures now
+    assert the expanded rules, not copied relative strings. Production consumer
+    dispatch/adapters remain unfinished; source tests are not containment.
+17. **Tests:** registered bash dispatch with mocked execution/runtime, concurrent
     scoped versus plain/native-file actions, partial approval, queue cancellation,
     prompt cancellation, setting serialization, partial refresh/rollback failure,
     host admission/fallback, per-connection decisions, policy prepare-before-prompt,
@@ -149,8 +161,9 @@ routes in Git history are retired, not additional supported APIs.
     registered native-gate grant/deny/headless/cancellation/isolation coverage,
     helper/config/lifecycle and actual registered provider coverage, plus composed
     native-launch/real-IPC/controlled-consumer/broker/human tests. Current source:
-    **278 tests / 25 files**, typecheck/root checks pass, including 22 capture
-    regressions. The scratch-exclusion fixture now records its actual allocation
+    **337 tests / 26 files**, typecheck/root checks pass, including 22 capture
+    regressions, 58 strict-policy/producer cases and the effective-HOME stamp
+    regression (`.local/goal-child-policy/`). The scratch-exclusion fixture now records its actual allocation
     rather than racing other workers by diffing global temp directories.
     These are not production
     child consumers or live nested OS-sandbox tests. See the

@@ -848,6 +848,28 @@ describe("exact parent tool review is not a sandbox exception", () => {
     }
   });
 
+  it("revokes before tool review when HOME changes the effective parent file policy", async () => {
+    const originalHome = process.env.HOME;
+    const first = join(ROOT, "first-home"), second = join(ROOT, "second-home");
+    mkdirSync(first); mkdirSync(second);
+    const reviewTool = vi.fn(async () => ({ outcome: "allow" as const }));
+    cleanup.push(publishGuardianBrokerForTest({ review: async () => { throw new Error("unexpected exception"); }, reviewTool }));
+    try {
+      process.env.HOME = first;
+      const baseline = grantedBaseline({ denyRead: ["~/private"] });
+      const published = publication(() => baseline);
+      const lease = await leaseFor(published);
+      expect(lease.payload.read.deny).toContain(join(first, "private"));
+      process.env.HOME = second;
+      expect((await lease.decide(action, new AbortController().signal)).outcome).toBe("cancelled");
+      expect(lease.signal.aborted).toBe(true);
+      expect(reviewTool).not.toHaveBeenCalled();
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+    }
+  });
+
   it("revoking a prepared lease cancels a late exact-tool allow", async () => {
     const pending = deferred<{ outcome: "allow" }>();
     const reviewTool = vi.fn(() => pending.promise);
