@@ -1,6 +1,7 @@
 import { decideSandboxException, getGuardianBroker, type SandboxSurface } from "./broker.ts";
 import type { HumanChannel, HumanRequest } from "./human-channel.ts";
 import { parseHostCommand } from "./host-command.ts";
+import { childNetworkDisposition, childParentFilePolicy, loadChildDomainMatcher, projectChildRuntime, type ChildNetworkPolicy, type RuntimeBaseline } from "./child-runtime-policy.ts";
 import { authorizePathAction, type PathAuthorization } from "./path-authorizer.ts";
 import { canonicalizeTarget, resolveTarget, type FilePolicy } from "./path-policy.ts";
 
@@ -51,7 +52,7 @@ export interface ChildActionDecision {
 }
 
 /** The parent baseline a decision is made against; re-read for every request. */
-export interface ParentDecisionBaseline {
+export interface ParentDecisionBaseline extends RuntimeBaseline {
   /** The parent session cwd. Relative child targets resolve elsewhere; rules anchor here. */
   cwd: string;
   /** The parent's baseline file policy, never a command-scoped widening. */
@@ -227,6 +228,9 @@ export interface ChildActionContext {
    * parent baseline: anything outside it takes the review + human route.
    */
   ceiling: FilePolicy;
+  /** Prepared network and host ceilings cannot be reopened by a later loosening. */
+  networkCeiling: ChildNetworkPolicy;
+  hostCeiling: boolean;
   human: Pick<HumanChannel, "ask">;
   signal?: AbortSignal;
   decide?: typeof decideSandboxException;
@@ -299,7 +303,7 @@ async function decideChildPathAction(
     agentName: context.identity.agent,
   }, {
     cwd: context.baseline.cwd,
-    policy: context.baseline.policy,
+    policy: childParentFilePolicy(context.baseline),
     ceiling: context.ceiling,
     admission: "always",
     human: context.human,
@@ -313,10 +317,16 @@ async function decideChildNetworkAction(
   action: ChildAction,
   context: ChildActionContext,
 ): Promise<ChildActionDecision> {
-  // V1 deliberately routes every child connection through the parent's real
-  // decision route: the payload carries no static network state, so a child can
-  // never claim local network policy. That is an explicit intermediate limit,
-  // not proof of network containment.
+  let disposition: ReturnType<typeof childNetworkDisposition>;
+  try {
+    const current = projectChildRuntime(context.baseline, context.baseline.cwd).network;
+    disposition = childNetworkDisposition(action.target, context.networkCeiling, current, await loadChildDomainMatcher());
+  } catch {
+    return decision("unavailable", "the parent's network runtime policy cannot be enforced; no connection was granted");
+  }
+  if (context.signal?.aborted) return decision("cancelled", "the network request was cancelled before policy consumption");
+  if (disposition === "deny") return decision("deny", "the prepared or current parent network policy denies this destination (or it is not an exact host:numeric-port)");
+  if (disposition === "held") return decision("allow", "this connection is allowed by both the prepared and current parent network policies");
   const route = await decideWithParentRoute({
     surface: "network",
     target: action.target.trim(),
@@ -335,8 +345,8 @@ async function decideChildCommandAction(
   const { baseline } = context;
   // The host tier is the parent's own policy, and its shape gate runs before any
   // review: a child cannot widen either.
-  if (!baseline.allowUnsandboxedCommands) {
-    return decision("deny", "the parent's sandbox policy does not allow unsandboxed commands (allowUnsandboxedCommands is false)");
+  if (!context.hostCeiling || !baseline.allowUnsandboxedCommands) {
+    return decision("deny", "the prepared or current parent sandbox policy does not allow unsandboxed commands (allowUnsandboxedCommands is false)");
   }
   const parsed = parseHostCommand(action.target);
   if (!parsed.ok) return decision("deny", `host execution is not eligible: ${parsed.reason}`);
@@ -344,10 +354,10 @@ async function decideChildCommandAction(
     surface: "command",
     target: parsed.command.command,
     origin: "tool",
-    reason: action.reason,
+    reason: `${action.reason}\nFull-host execution, not confined to the child workspace; host-assigned execution cwd: ${context.childCwd}`,
     command: parsed.command.command,
-    violation: "the child asked to run a command on the host",
+    violation: `the child asked for full-host execution (not a child filesystem jail), in its host-assigned cwd ${context.childCwd}; rules remain anchored to the actual parent session`,
     child: context.identity,
-  }, { cwd: baseline.cwd, human: context.human, signal: context.signal, decide: context.decide });
-  return routeDecision(route, "the parent admitted this host command for one execution");
+  }, { cwd: baseline.cwd, human: context.human, signal: context.signal, decide: context.decide }, "always");
+  return routeDecision(route, "the parent human admitted this full-host command for one execution");
 }

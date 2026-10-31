@@ -9,6 +9,7 @@ import {
 } from "./action-authorizer.ts";
 import { decideSandboxException } from "./broker.ts";
 import type { HumanChannel } from "./human-channel.ts";
+import { childParentFilePolicy, loadChildDomainMatcher, projectChildRuntime, type ChildEnvironmentPolicy, type ChildIsolationPolicy, type ChildNetworkPolicy } from "./child-runtime-policy.ts";
 import { mandatoryWriteBlock } from "./path-authorizer.ts";
 import { canWrite, canonicalizeTarget, capturePolicyPathAnchor, isWithin, policyPathAnchorsUnchanged, resolveTarget, type FilePolicy } from "./path-policy.ts";
 
@@ -161,8 +162,10 @@ export interface ChildAuthorityPolicyPayload extends ChildAuthorityPayload {
     readonly deny: readonly string[];
     readonly mandatoryDeny: readonly string[];
   };
-  readonly network: { readonly policy: "parent-decision" };
-  readonly command: { readonly policy: "parent-decision" };
+  readonly network: ChildNetworkPolicy;
+  readonly environment: ChildEnvironmentPolicy;
+  readonly isolation: ChildIsolationPolicy;
+  readonly command: { readonly policy: "parent-decision"; readonly allowHost: boolean };
 }
 
 export interface ChildAuthorityPublication {
@@ -380,7 +383,7 @@ export interface DerivedChildPolicy {
  * parent; otherwise the child simply gets the workspace and no git write scope.
  */
 export function deriveChildPolicy(input: DeriveChildPolicyInput): DerivedChildPolicy {
-  const { baseline } = input;
+  const baseline = { ...input.baseline, policy: childParentFilePolicy(input.baseline) };
   const spelled = resolveTarget(input.identity.cwd, baseline.cwd);
   const workspace = canonicalizeTarget(input.identity.cwd, baseline.cwd);
   const aliases = spelled === workspace ? [] : [spelled];
@@ -426,6 +429,7 @@ export function deriveChildPolicy(input: DeriveChildPolicyInput): DerivedChildPo
     .filter((candidate) => !mandatoryWriteBlock(candidate.root, candidate.aliases, baseline.cwd, baseline.policy))
     .filter((candidate) => [candidate.root, ...candidate.aliases].every((path) => canWrite(path, baseline.cwd, baseline.policy)));
 
+  const runtime = projectChildRuntime(baseline, baseline.cwd);
   const payload: ChildAuthorityPolicyPayload = {
     version: CHILD_AUTHORITY_PROVIDER_VERSION,
     kind: "pi-sbx.child-policy",
@@ -448,13 +452,16 @@ export function deriveChildPolicy(input: DeriveChildPolicyInput): DerivedChildPo
         ...discoveredGit.flatMap((candidate) => candidate.mandatoryDeny),
       ]),
     },
-    network: { policy: "parent-decision" },
-    command: { policy: "parent-decision" },
+    ...runtime,
+    command: { policy: "parent-decision", allowHost: baseline.allowUnsandboxedCommands },
   };
   const paths = [baseline.cwd, spelled, workspace,
     ...payload.read.deny, ...payload.read.allow, ...payload.read.mandatoryDeny,
     ...payload.write.allow, ...payload.write.deny, ...payload.write.mandatoryDeny,
-    ...git.flatMap(candidate => [candidate.root, ...candidate.aliases])];
+    ...git.flatMap(candidate => [candidate.root, ...candidate.aliases]),
+    // Retain spellings too: canonicalizing a socket ceiling once is not proof
+    // that its alias still names the same held namespace later.
+    ...(baseline.runtime.network.allowUnixSockets ?? []), ...runtime.network.unixSocketCeiling.roots];
   const anchors = [...new Map(paths.map(path => {
     const anchor = capturePolicyPathAnchor(path, baseline.cwd);
     return [anchor.spelled, anchor] as const;
@@ -551,6 +558,14 @@ function childPolicyCeiling(payload: ChildAuthorityPolicyPayload): FilePolicy {
     denyWrite: [...payload.write.deny],
     mandatoryDenyWrite: [...payload.write.mandatoryDeny],
   });
+}
+
+/** Private consistency evidence, never an approval cache or serialized grant.
+ * Tool review must not bless locally enforced Bash/native scope after the parent
+ * baseline changed; a fresh child is required instead of keeping stale SRT. */
+function baselineStamp(baseline: ParentDecisionBaseline): string {
+  return JSON.stringify({ cwd: baseline.cwd, policy: childParentFilePolicy(baseline),
+    allowHost: baseline.allowUnsandboxedCommands, ...projectChildRuntime(baseline, baseline.cwd) });
 }
 
 interface LiveLease {
@@ -707,6 +722,10 @@ export function publishChildAuthority(options: ChildAuthorityPublishOptions): Ch
     if (disposed) throw new Error("the child authority provider was disposed while preparing the lease");
     if (signal?.aborted) throw new Error("child authority preparation was cancelled");
     const bound = requireIdentity(identity, sessionId);
+    // Missing helpers refuse preparation while the guarded slot stays visible.
+    await loadChildDomainMatcher();
+    if (disposed || signal.aborted) throw new Error("child authority preparation was cancelled while validating runtime helpers");
+    // Re-read after the await: a reload can revoke before any lease exists.
     const baseline = options.getBaseline();
     if (!baseline) {
       throw new Error(
@@ -722,6 +741,7 @@ export function publishChildAuthority(options: ChildAuthorityPublishOptions): Ch
       sessionScratchDir: options.getSessionScratchDir?.(),
     });
     if (disposed) throw new Error("the child authority provider was disposed while preparing the lease");
+    const preparedStamp = baselineStamp(baseline);
 
     const entry: LiveLease = { controller: new AbortController(), disposed: false };
     leases.add(entry);
@@ -740,11 +760,28 @@ export function publishChildAuthority(options: ChildAuthorityPublishOptions): Ch
       // tightening, a disabled sandbox or a shutdown denies from here on.
       const current = options.getBaseline();
       if (!current) {
+        disposeLease();
         return {
           outcome: "unavailable",
           rationale: "the parent sandbox policy is no longer authoritative, so the request was not decided",
         };
       }
+      let currentStamp: string;
+      try { currentStamp = baselineStamp(current); }
+      catch {
+        disposeLease();
+        return { outcome: "unavailable", rationale: "the current parent runtime policy cannot be projected; child authority was revoked" };
+      }
+      if (action.surface === "tool" && currentStamp !== preparedStamp) {
+        disposeLease();
+        return { outcome: "cancelled", rationale: "the parent baseline changed; a tool cannot execute against stale child runtime policy" };
+      }
+      const decisionStillCurrent = (): boolean => {
+        try {
+          const latest = options.getBaseline();
+          return Boolean(latest && baselineStamp(latest) === currentStamp && policyPathAnchorsUnchanged(derived.payload.anchor.paths, derived.payload.anchor.cwd));
+        } catch { return false; }
+      };
       if (!policyPathAnchorsUnchanged(derived.payload.anchor.paths, derived.payload.anchor.cwd)) {
         disposeLease();
         return { outcome: "cancelled", rationale: "a prepared policy path was retargeted; child authority was revoked instead of following fresh scope" };
@@ -755,25 +792,27 @@ export function publishChildAuthority(options: ChildAuthorityPublishOptions): Ch
         childCwd: bound.cwd,
         baseline: current,
         ceiling: childPolicyCeiling(derived.payload),
+        networkCeiling: derived.payload.network,
+        hostCeiling: derived.payload.command.allowHost,
         human: options.getHuman(),
         signal: AbortSignal.any([entry.controller.signal, decisionSignal]),
         decide: async request => {
-          if (!policyPathAnchorsUnchanged(derived.payload.anchor.paths, derived.payload.anchor.cwd)) {
+          if (!decisionStillCurrent()) {
             disposeLease();
-            return { kind: "deny", reason: "prepared policy path changed before review", review: { source: "rule", rationale: "the child lease was revoked" } };
+            return { kind: "deny", reason: "parent baseline or prepared policy path changed before review", review: { source: "rule", rationale: "the child lease was revoked" } };
           }
           const reviewed = await (options.decide ?? decideSandboxException)(request);
-          if (!policyPathAnchorsUnchanged(derived.payload.anchor.paths, derived.payload.anchor.cwd)) {
+          if (!decisionStillCurrent()) {
             disposeLease();
-            return { kind: "deny", reason: "prepared policy path changed during review", review: { source: "rule", rationale: "the child lease was revoked before human admission" } };
+            return { kind: "deny", reason: "parent baseline or prepared policy path changed during review", review: { source: "rule", rationale: "the child lease was revoked before human admission" } };
           }
           return reviewed;
         },
       });
       if (entry.disposed || decisionSignal.aborted) return { outcome: "cancelled", rationale: "child authority was revoked before decision consumption" };
-      if (!policyPathAnchorsUnchanged(derived.payload.anchor.paths, derived.payload.anchor.cwd)) {
+      if (!decisionStillCurrent()) {
         disposeLease();
-        return { outcome: "cancelled", rationale: "a prepared policy path changed during review; late authority was revoked" };
+        return { outcome: "cancelled", rationale: "the parent baseline or a prepared policy path changed during review; late authority was revoked" };
       }
       return result;
     };

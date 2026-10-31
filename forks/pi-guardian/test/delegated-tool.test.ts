@@ -156,7 +156,10 @@ test("real Node IPC binds pi-sbx's prepared provider to the registered parent Gu
 	const f = fixture();
 	const policy = createFilePolicy({ filesystem: { denyRead: [], allowWrite: [f.parent], denyWrite: [] }, mandatoryDenyWrite: [f.agentDir] });
 	const publication = publishChildAuthority({ sessionId: "parent", agentDir: f.agentDir, configDirName: ".pi",
-		getBaseline: () => ({ cwd: f.parent, policy, allowUnsandboxedCommands: false }),
+		getBaseline: () => ({ cwd: f.parent, policy, allowUnsandboxedCommands: false,
+			runtime: { network: { allowedDomains: [], deniedDomains: [] }, filesystem: { denyRead: [], allowWrite: [f.parent], denyWrite: [] } },
+			environmentDeny: [],
+		}),
 		getHuman: () => ({ ask: async () => { throw new Error("Semantic review must not ask for a path exception"); } }),
 		requiredExtensions: [
 			{ id: "pi-sbx", path: fileURLToPath(new URL("../../pi-sbx/src/index.ts", import.meta.url)) },

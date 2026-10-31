@@ -92,9 +92,15 @@ Detailed provenance and update records:
   exact-tool semantic review through the SAME parent broker, sharing the ordinary
   engine, writer, denial/audit consumption and costs. Old versions fail closed;
   registry keys stay stable to preserve guard intent. Exact child action/audience
-  is evidence, not a filesystem/host grant; parent cursor is not consumed. Static
-  runtime projection and actual production consumers are still required before
-  readiness. See the [consumer contract/verification](round-2-production-consumers.md)
+  is evidence, not a filesystem/host grant; parent cursor is not consumed.
+  Prepared/current static network/host ceilings and credential-file/env locks now
+  project from actual baseline, using lazy validated shipped SRT host helpers.
+  Final denials precede UI/review; child full-host requests always need the actual
+  parent human, never semantic approval alone. Baseline changes during review
+  cancel late decisions; changed prepared runtime revokes before tool review.
+  Socket/loopback/PTY ceilings still require safe platform narrowing, not blind
+  copying; unsupported restrictive services/helpers refuse. Actual child SRT
+  profile construction and production consumers are still required for readiness. See the [consumer contract/verification](round-2-production-consumers.md)
   and historical [#22 payload handoff](round-2-wiring-acceptance.md).
 - **Accounting:** nonce/UUID-bound reviewer usage snapshots and parent custom
   records report Guardian-only tokens/known USD estimates, separately from native

@@ -294,7 +294,12 @@ parent Guardian broker's fixed/semantic engine; its audit/writer/evidence/cost
 paths are shared with ordinary review. This does not itself grant any sandbox
 exception or consume the parent cursor. Old protocol versions fail closed.
 The [production consumer contract](round-2-production-consumers.md) records
-current verification and still-required static runtime policy projection.
+current verification, explicit prepared/current network/host and credential
+file/environment ceilings, and still-required actual child runtime construction.
+Positive socket/loopback/PTY ceilings are not grants to borrow parent namespaces;
+unsupported restrictive services/helpers refuse. Child full-host execution needs
+actual parent human admission even after a semantic allow, with explicit non-jail
+scope. Changed baseline/runtime cancels stale decisions.
 **Production child policy/Guardian consumers remain unimplemented** and cannot
 acknowledge readiness: no first model prompt is permitted merely because the
 extension files loaded. This is not child containment or installed-runtime proof.

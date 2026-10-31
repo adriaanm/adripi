@@ -221,6 +221,9 @@ deltas are listed below; nothing else is modified.
     generation/parent/shutdown/cancellation, new denial/tool-warning and queued
     sibling negatives. **177 tests pass**, only the known Node26 HTTP-headless
     native failure remains (178 total); typecheck passes.
+    The real-IPC fixture now supplies explicit baseline SRT/environment data for
+    the staged v2 runtime-policy contract; all **13 delegated tests** and types
+    pass after that amendment. This does not add an acknowledgment consumer.
     Production child consumers/SRT enforcement remain unimplemented. See the
     [consumer integration record](../../docs/round-2-production-consumers.md).
 

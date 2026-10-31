@@ -11,8 +11,8 @@ replacement are authorized by this plan.
 
 The SAME public API now uses provider/wire **2**. Guard/ALS/runner-latch Symbol
 keys intentionally retain their `.v1` names so old hosts observe intent and fail
-closed rather than launch bare. The policy payload now says `version: 2`; network/
-environment/host-ceiling projection is still staged and consumers still cannot
+closed rather than launch bare. The policy payload now says `version: 2`;
+network/environment/host ceilings are projected below, but consumers still cannot
 ack. There is no parallel v1 approval implementation or new permission store.
 
 - `tool` targets carry exact GuardianAction JSON, capped at **64,000 UTF-16
@@ -60,6 +60,75 @@ not production consumers or SRT enforcement. No first production child model
 prompt is authorized by these results. Full compatible-runtime HTTP, actual
 child OS/Git containment and live usage/latency remain open. No deployment,
 restart, runtime/dependency installation, live-policy/toggle edit or push.
+
+## Runtime-authority phase: parent projection and decisions (source only)
+
+`child-runtime-policy.ts` now derives explicit policy data from the actual parent
+**baseline** SRT config and environment denial names; a command-local widening or
+ambient child configuration is not an input. In addition to existing paths/pins,
+the staged v2 policy contains:
+
+```text
+network.policy = "parent-decision"
+network.allowedDomains / deniedDomains / strictAllowlist
+network.unixSocketCeiling = { all, roots }   # ceilings, NOT child SRT grants
+network.allowLocalBinding                   # parent ceiling, NOT direct permission
+command = { policy: "parent-decision", allowHost }
+environment.deny                            # names only; includes masked sources
+isolation = { allowPty, mandatoryDenySearchDepth } # depth null means SRT default
+```
+
+- Delegated connection decisions use the shipped SRT splitter, host validator/canonicalizer and
+  domain matcher. A destination must name an exact host and **numeric port**;
+  unknown ports cannot skip a port-specific deny. Validate the original host
+  **before** the splitter canonicalizes brackets (otherwise `[user@allowed.com]`
+  becomes `allowed.com`). Prepared AND current deny/strict-off-list restrictions
+  are final, with no reviewer/UI call. An allow held by both static policies has
+  no extra review charge. Other connections use the existing actual-parent route,
+  without adding a domain/token or silently treating a repeated allow as standing.
+  Lazy helper loading refuses incompatible/missing SRT after guard publication;
+  it never falls back to another matcher or absent provider slot.
+- Parent Unix socket paths are pinned in both original and canonical spellings.
+  The exported intersection helper narrows ceilings to separately held child
+  workspace/private-scratch directories, not parent temp, Git-only metadata or
+  maintenance namespaces. It is **not** itself runtime enforcement. Loopback/PTY
+  booleans likewise cannot simply be copied: shipped macOS `allowLocalBinding`
+  can open all localhost ports and `allowPty` allows the TTY namespace. Actual
+  consumers must prove a narrowed platform implementation or leave those features
+  disabled/refuse unsupported placement, never claim bounded enforcement from a
+  parent-positive bit. These consumer/OS gates remain unfinished.
+- Declared credential environment **names**, including masked sources, tighten
+  to deny; socket-handle names `SSH_AUTH_SOCK` and `GPG_AGENT_INFO` are also denied.
+  No values are read/copied. Actual runtime credential file declarations (deny
+  **and** mask) enter mandatory child read/write locks, even if a native baseline
+  adapter omitted one; a credential directory cannot become a child workspace. Credential injection, filesystem disablement, Git-config-write,
+  weaker isolation, AppleEvents/Mach authority and parent Git trust exceptions
+  are not lent to the child. Known restrictive request filters, proxy/TLS services
+  and custom execution helpers explicitly refuse rather than being dropped or
+  replaced. Unknown top-level/network/filesystem/credential/Git policy fields,
+  malformed feature bits/depth/names, and policy bounds fail closed. Actual
+  translation into a child SRT profile still requires implementation/verification.
+- A prepared host-disabled ceiling cannot reopen after parent loosening. An
+  eligible child **full-host** command now requires actual parent human admission,
+  even after a rule/reviewer allow; no UI is unavailable, not consent. The review
+  and human see the host-assigned execution cwd and explicit non-jail scope. No
+  child standing rule is offered. This is one exact host execution, **not**
+  credential/filesystem containment of the approved host process tree.
+- Private baseline consistency evidence (not a grant store) revokes stale child
+  runtime before exact-tool semantic review. Mechanical path/network actions
+  continue checking prepared/current authority. If the baseline changes while
+  broker review or human admission is pending, late permission is cancelled;
+  the pre-human check prevents a stale broker allow from reaching the UI. Losing
+  the authoritative baseline also revokes the lease. Source covers files,
+  environment/socket changes, late network tightening and host disablement.
+
+Verification in `.local/goal-consumers/runtime-*`: pi-sbx **254 tests / 24 files**
+and types; Guardian **177 non-headless tests** (including all **13 delegated**
+actual-IPC/service tests and two cross-fork authority integration tests) and types;
+subagents **79 focused tests**
+and fresh unchanged build verifier; root **69 deployment fixtures**/checks. These
+are source tests, not production consumers or nested/host OS containment. No new
+full Guardian HTTP/runtime clearance or live cost/latency measurement is claimed.
 
 ## Source-proven gaps at the initial baseline
 

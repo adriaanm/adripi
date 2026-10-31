@@ -106,6 +106,22 @@ routes in Git history are retired, not additional supported APIs.
     revokes before/after decisions and after broker review before human UI.
     Ordinary file creation remains valid. Literal glob-bearing workspace/Git
     metadata roots refuse rather than widen a scope or weaken exclusions.
+    `src/child-runtime-policy.ts` projects explicit prepared network/env/host
+    ceilings from actual baseline SRT policy. Shipped lazy-validated SRT helpers
+    decide exact host:numeric-port intersection; prepared/current deny and strict
+    off-list restrictions precede broker/UI, while both-held static allows avoid
+    extra review. Declared credential files (including mask) are mandatory child
+    read/write locks; env names tighten to deny without reading values. Broad
+    socket, loopback and PTY bits are ceilings, not ready-to-copy runtime grants;
+    only held directory intersections can become child socket scope. Unsupported
+    restrictive filters/proxy/TLS/custom-helper policies and unknown/malformed
+    fields refuse. Weak isolation, AppleEvents/Mach/credential injection and
+    filesystem/Git-write bypasses are not inherited. Child full-host requests
+    require actual parent human admission even after semantic/rule allow; no UI
+    is not consent, and the cwd/non-jail scope is explicit. Private consistency
+    stamps revoke stale runtime before semantic tool review and cancel baseline
+    changes during broker/human waits before consuming late permission. Actual
+    child profile construction/consumers and OS containment remain unfinished.
 15. **Tests:** registered bash dispatch with mocked execution/runtime, concurrent
     scoped versus plain/native-file actions, partial approval, queue cancellation,
     prompt cancellation, setting serialization, partial refresh/rollback failure,
@@ -114,7 +130,7 @@ routes in Git history are retired, not additional supported APIs.
     registered native-gate grant/deny/headless/cancellation/isolation coverage,
     helper/config/lifecycle and actual registered provider coverage, plus composed
     native-launch/real-IPC/controlled-consumer/broker/human tests. Current source:
-    **222 tests / 22 files**, typecheck/root checks pass. These are not production
+    **254 tests / 24 files**, typecheck/root checks pass. These are not production
     child consumers or live nested OS-sandbox tests. See the
     [wiring acceptance/handoff](../../docs/round-2-wiring-acceptance.md).
 

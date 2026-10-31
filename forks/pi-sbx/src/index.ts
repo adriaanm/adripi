@@ -801,6 +801,8 @@ export default function sandboxExtension(pi: ExtensionAPI) {
             cwd: active.cwd,
             policy: filePolicyFor(config),
             allowUnsandboxedCommands: config.allowUnsandboxedCommands,
+            runtime: config.runtime,
+            environmentDeny: config.environment.deny,
           };
         },
         getHuman: () => humanChannel,

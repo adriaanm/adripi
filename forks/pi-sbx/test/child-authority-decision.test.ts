@@ -17,6 +17,7 @@ import {
 } from "../src/broker.ts";
 import { publishChildAuthority, type ChildAuthorityPublication } from "../src/child-authority.ts";
 import { HumanChannel } from "../src/human-channel.ts";
+import { projectChildRuntime } from "../src/child-runtime-policy.ts";
 import { canWrite, createFilePolicy, type FilePolicy } from "../src/path-policy.ts";
 
 /**
@@ -86,7 +87,13 @@ function grantedBaseline(
     allowWrite: [ROOT, AGENT_DIR, SIBLING, tmpdir()],
     ...overrides,
   });
-  return { cwd: ROOT, policy: base, allowUnsandboxedCommands: true, ...extra };
+  return {
+    cwd: ROOT, policy: base, allowUnsandboxedCommands: true,
+    runtime: { network: { allowedDomains: [], deniedDomains: [] }, filesystem: {
+      allowWrite: base.allowWrite, denyWrite: base.denyWrite, denyRead: base.denyRead, allowRead: base.allowRead,
+    } },
+    environmentDeny: [], ...extra,
+  };
 }
 
 /** What a prepared payload reduces to for one workspace: a narrowing ceiling. */
@@ -144,6 +151,8 @@ function childContext(overrides: Partial<ChildActionContext> = {}): ChildActionC
     childCwd: CHILD,
     baseline: grantedBaseline(),
     ceiling: ceiling(),
+    networkCeiling: projectChildRuntime(grantedBaseline(), ROOT).network,
+    hostCeiling: true,
     human: humanChannel(humanContext()),
     ...overrides,
   };
@@ -613,6 +622,59 @@ describe("current parent authority on every child request", () => {
     expect(lease.payload.write.allow).toEqual([CHILD]);
     expect(lease.payload.write.mandatoryDeny).toContain(join(CHILD, ".pi"));
   });
+});
+
+describe("prepared runtime and asynchronous baseline consistency", () => {
+  it("does not reopen prepared network or host denials after the parent loosens", async () => {
+    const broker = publishBroker();
+    let current = grantedBaseline({}, {
+      runtime: { network: { allowedDomains: [], deniedDomains: ["*:443"] }, filesystem: { allowWrite: [ROOT], denyWrite: [], denyRead: [] } },
+      allowUnsandboxedCommands: false,
+    });
+    const lease = await leaseFor(publication(() => current));
+    current = grantedBaseline();
+    expect((await lease.decide({ surface: "network", target: "example.com:443", reason: "fetch" }, new AbortController().signal)).outcome).toBe("deny");
+    expect((await lease.decide({ surface: "command", target: "git status", reason: "host" }, new AbortController().signal)).outcome).toBe("deny");
+    expect(broker.review).not.toHaveBeenCalled();
+  });
+
+  it("cancels before human admission if baseline restrictions change during review", async () => {
+    const reviewed = deferred<SandboxExceptionDecision>();
+    const broker = publishBroker(() => reviewed.promise), select = vi.fn(async () => "Allow this connection");
+    let current = grantedBaseline();
+    const lease = await leaseFor(publication(() => current, { select }));
+    const pending = lease.decide({ surface: "network", target: "example.com:443", reason: "fetch" }, new AbortController().signal);
+    await vi.waitFor(() => expect(broker.review).toHaveBeenCalledOnce());
+    current = grantedBaseline({}, { runtime: { network: { allowedDomains: [], deniedDomains: ["*:443"] }, filesystem: { allowWrite: [ROOT], denyWrite: [], denyRead: [] } } });
+    reviewed.resolve({ kind: "allow", scope: "once", review: { source: "reviewer", rationale: "late semantic allow" } });
+    expect((await pending).outcome).toBe("cancelled");
+    expect(lease.signal.aborted).toBe(true); expect(select).not.toHaveBeenCalled();
+  });
+
+  it("cannot consume a late human full-host allow after host execution is disabled", async () => {
+    publishBroker();
+    const entered = deferred<void>(), answered = deferred<string>();
+    const select = vi.fn(async () => { entered.resolve(); return answered.promise; });
+    let current = grantedBaseline();
+    const lease = await leaseFor(publication(() => current, { select }));
+    const pending = lease.decide({ surface: "command", target: "git status", reason: "host" }, new AbortController().signal);
+    await entered.promise;
+    current = grantedBaseline({}, { allowUnsandboxedCommands: false });
+    answered.resolve("Run once outside the sandbox");
+    expect((await pending).outcome).toBe("cancelled"); expect(lease.signal.aborted).toBe(true);
+  });
+
+  for (const change of ["files", "environment", "sockets"] as const) {
+    it(`requires a fresh runtime before semantic tool review after ${change} policy changes`, async () => {
+      const broker = publishBroker(); let current = grantedBaseline();
+      const lease = await leaseFor(publication(() => current));
+      current = change === "files" ? grantedBaseline({ denyRead: [CHILD] }) : change === "environment" ?
+        grantedBaseline({}, { environmentDeny: ["NEW_SECRET_NAME"] }) :
+        grantedBaseline({}, { runtime: { network: { allowedDomains: [], deniedDomains: [], allowLocalBinding: true }, filesystem: { allowWrite: [ROOT], denyWrite: [], denyRead: [] } } });
+      expect((await lease.decide({ surface: "tool", target: "{}", reason: "exact tool" }, new AbortController().signal)).outcome).toBe("cancelled");
+      expect(lease.signal.aborted).toBe(true); expect(broker.review).not.toHaveBeenCalled();
+    });
+  }
 });
 
 describe("the child's own policy and metadata stay final", () => {
