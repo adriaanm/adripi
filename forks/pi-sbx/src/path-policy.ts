@@ -68,6 +68,23 @@ export function canonicalizeTarget(value: string, cwd: string): string {
   return resolve(canonicalAncestor, ...suffix);
 }
 
+export interface PolicyPathAnchor {
+  readonly spelled: string;
+  readonly canonical: string;
+}
+
+/** Pin the non-glob path prefix; symlink drift cannot reinterpret prepared authority. */
+export function capturePolicyPathAnchor(pattern: string, cwd: string): PolicyPathAnchor {
+  const expanded = expandPolicyPath(pattern, cwd);
+  const index = expanded.search(/[*?[]/);
+  const spelled = index === -1 ? expanded : expanded.slice(0, index).replace(/[\\/]$/, "") || sep;
+  return Object.freeze({ spelled, canonical: canonicalizeTarget(spelled, cwd) });
+}
+
+export function policyPathAnchorsUnchanged(anchors: readonly PolicyPathAnchor[], cwd: string): boolean {
+  return anchors.every(anchor => canonicalizeTarget(anchor.spelled, cwd) === anchor.canonical);
+}
+
 export function isWithin(path: string, parent: string): boolean {
   const rel = relative(parent, path);
   return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));

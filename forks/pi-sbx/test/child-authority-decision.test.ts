@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +17,7 @@ import {
 } from "../src/broker.ts";
 import { publishChildAuthority, type ChildAuthorityPublication } from "../src/child-authority.ts";
 import { HumanChannel } from "../src/human-channel.ts";
-import { createFilePolicy, type FilePolicy } from "../src/path-policy.ts";
+import { canWrite, createFilePolicy, type FilePolicy } from "../src/path-policy.ts";
 
 /**
  * The child asks the live parent; these tests use the real Guardian broker slot,
@@ -659,6 +659,130 @@ describe("the child's own policy and metadata stay final", () => {
     expect(beyond.outcome).toBe("allow");
     expect(beyond.rationale).toContain("human");
     expect(select).toHaveBeenCalledOnce();
+  });
+});
+
+describe("prepared path anchors cannot be retargeted into fresh authority", () => {
+  it("refuses a literal workspace name that would become a sibling-matching allow glob", async () => {
+    const workspace = join(ROOT, "literal[ab]"); mkdirSync(workspace);
+    const published = publication(() => grantedBaseline());
+    await expect(leaseFor(published, workspace)).rejects.toThrow(/glob characters.*exact delegated root/);
+  });
+
+  it("refuses verified Git metadata whose literal name cannot preserve exact exclusions", async () => {
+    const workspace = join(ROOT, "git-glob-workspace"), metadata = join(ROOT, "git[ab]");
+    mkdirSync(workspace); mkdirSync(metadata); writeFileSync(join(metadata, "HEAD"), "ref: refs/heads/main\n");
+    symlinkSync(metadata, join(workspace, ".git"));
+    const published = publication(() => grantedBaseline());
+    await expect(leaseFor(published, workspace)).rejects.toThrow(/Git metadata contains glob characters/);
+  });
+
+  it("keeps ordinary file creation and policy-prefix materialization inside the admitted namespace", async () => {
+    const broker = publishBroker();
+    const workspace = join(ROOT, "stable-prefix"), cache = join(workspace, "new-cache"); mkdirSync(workspace);
+    const baseline = grantedBaseline({ allowRead: [cache] });
+    const published = publication(() => baseline);
+    const lease = await leaseFor(published, workspace);
+    expect(lease.payload.anchor.paths).toContainEqual({ spelled: cache, canonical: cache });
+    mkdirSync(cache); writeFileSync(join(cache, "file"), "ordinary data");
+    expect((await lease.decide({ surface: "write", target: join(cache, "next"), reason: "ordinary file creation" }, new AbortController().signal)).outcome).toBe("allow");
+    expect(lease.signal.aborted).toBe(false);
+    expect(broker.review).not.toHaveBeenCalled();
+  });
+
+  it("revalidates anchors after asynchronous review before asking the parent human", async () => {
+    const reviewed = deferred<SandboxExceptionDecision>();
+    const broker = publishBroker(() => reviewed.promise);
+    const select = vi.fn(async () => "Allow this one file write");
+    const workspace = join(ROOT, "retarget-during-review"); mkdirSync(workspace);
+    const published = publication(() => grantedBaseline(), { select });
+    const lease = await leaseFor(published, workspace);
+    const pending = lease.decide({ surface: "write", target: join(SIBLING, "outside.txt"), reason: "one outside file" }, new AbortController().signal);
+    expect(broker.review).toHaveBeenCalledOnce();
+    rmdirSync(workspace); symlinkSync(SIBLING, workspace);
+    reviewed.resolve({ kind: "allow", scope: "once", review: { source: "reviewer", rationale: "late semantic allow" } });
+    expect((await pending).outcome).toBe("cancelled");
+    expect(select).not.toHaveBeenCalled();
+    expect(lease.signal.aborted).toBe(true);
+  });
+
+  it("revokes if the admitted workspace becomes a symlink to a parent-held sibling", async () => {
+    const broker = publishBroker();
+    const workspace = join(ROOT, "retarget-workspace");
+    mkdirSync(workspace);
+    const published = publication(() => grantedBaseline());
+    const lease = await leaseFor(published, workspace);
+    rmdirSync(workspace);
+    symlinkSync(SIBLING, workspace);
+    const result = await lease.decide({ surface: "write", target: join(SIBLING, "escape.txt"), reason: "follow moved workspace" }, new AbortController().signal);
+    expect(result.outcome).not.toBe("allow");
+    expect(lease.signal.aborted).toBe(true);
+    expect(broker.review).not.toHaveBeenCalled();
+  });
+
+  it("revokes when a writable read-carveout alias is repointed into a prepared read denial", async () => {
+    const broker = publishBroker();
+    const workspace = join(ROOT, "retarget-carveout"), visible = join(workspace, "visible"), alias = join(workspace, "allowed");
+    const denied = join(SIBLING, "sensitive");
+    mkdirSync(join(visible, "sub"), { recursive: true }); mkdirSync(join(denied, "sub"), { recursive: true });
+    symlinkSync(visible, alias);
+    const baseline = grantedBaseline({ denyRead: [denied], allowRead: [join(alias, "sub")] });
+    const published = publication(() => baseline);
+    const lease = await leaseFor(published, workspace);
+    unlinkSync(alias); symlinkSync(denied, alias);
+    const result = await lease.decide({ surface: "read", target: join(denied, "sub", "data.txt"), reason: "follow writable carveout" }, new AbortController().signal);
+    expect(result.outcome).not.toBe("allow");
+    expect(lease.signal.aborted).toBe(true);
+    expect(broker.review).not.toHaveBeenCalled();
+  });
+});
+
+describe("exact parent tool review is not a sandbox exception", () => {
+  const action = { surface: "tool" as const, target: JSON.stringify({ tool_name: "write", tool_call_id: "tool", cwd: CHILD, input: { path: "file", content: "界".repeat(3000) } }), reason: "review full runtime arguments" };
+
+  it("fails closed on an absent or legacy broker and cannot invent a parent identity", async () => {
+    const context = childContext({ parentSessionId: SESSION_ID });
+    expect((await decideChildAction(action, context)).outcome).toBe("unavailable");
+    const broker = publishBroker();
+    expect((await decideChildAction(action, context)).outcome).toBe("unavailable");
+    expect(broker.review).not.toHaveBeenCalled();
+  });
+
+  it("forwards exact content/host identity to the same broker without path grants or local UI", async () => {
+    const review = vi.fn(async () => { throw new Error("no exception request belongs here"); });
+    const reviewTool = vi.fn(async () => ({ outcome: "deny" as const, rationale: "parent semantic denial", terminate: true }));
+    cleanup.push(publishGuardianBrokerForTest({ review, reviewTool }));
+    const context = childContext({ parentSessionId: SESSION_ID });
+    const result = await decideChildAction(action, context);
+    expect(result).toMatchObject({ outcome: "deny", terminate: true });
+    expect(reviewTool).toHaveBeenCalledWith({ action: action.target,
+      identity: { ...IDENTITY, parentSessionId: SESSION_ID, cwd: CHILD }, signal: undefined });
+    expect(canWrite(join(SIBLING, "file"), ROOT, context.ceiling)).toBe(false);
+    expect(review).not.toHaveBeenCalled();
+    expect((await decideChildAction(action, { ...context, parentSessionId: undefined })).outcome).toBe("unavailable");
+    expect(reviewTool).toHaveBeenCalledOnce();
+  });
+
+  it("never accepts a malformed or contradictory tool verdict", async () => {
+    for (const result of [{ outcome: "ALLOW" }, { outcome: "allow", terminate: true }, { outcome: "deny", terminate: "true" }, { outcome: "allow", rationale: 1 }]) {
+      const dispose = publishGuardianBrokerForTest({ review: async () => { throw new Error("unexpected exception"); },
+        reviewTool: async () => result as never });
+      try { expect((await decideChildAction(action, childContext({ parentSessionId: SESSION_ID }))).outcome).toBe("unavailable"); }
+      finally { dispose(); }
+    }
+  });
+
+  it("revoking a prepared lease cancels a late exact-tool allow", async () => {
+    const pending = deferred<{ outcome: "allow" }>();
+    const reviewTool = vi.fn(() => pending.promise);
+    cleanup.push(publishGuardianBrokerForTest({ review: async () => { throw new Error("unexpected exception"); }, reviewTool }));
+    const published = publication(() => grantedBaseline());
+    const lease = await leaseFor(published);
+    const decision = lease.decide(action, new AbortController().signal);
+    expect(reviewTool).toHaveBeenCalledOnce();
+    published.revoke("parent policy changed");
+    pending.resolve({ outcome: "allow" });
+    expect((await decision).outcome).toBe("cancelled");
   });
 });
 

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
 	ChildAuthorityError,
+	CHILD_AUTHORITY_PROVIDER_VERSION,
 	createChildAuthorityController,
 	readChildAuthorityProvider,
 	type ChildAuthorityController,
@@ -45,7 +46,7 @@ const PAYLOAD: ChildAuthorityPayload = { version: 1, marker: "opaque-policy-byte
 
 function providerFor(sessionId: string, options: { consumers?: readonly string[]; payload?: ChildAuthorityPayload; dispose?: () => void } = {}): ChildAuthorityProvider {
 	return {
-		version: 1,
+		version: CHILD_AUTHORITY_PROVIDER_VERSION,
 		sessionId,
 		requiredExtensions: [
 			{ id: "pi-sbx", path: CONSUMER_FACTORY },
@@ -132,7 +133,7 @@ describe("child authority launch admission", () => {
 	});
 
 	it("refuses a malformed, unsupported or foreign-session provider instead of reading it as absent", () => {
-		publishProvider({ ...providerFor(SESSION_ID), version: 2 });
+		publishProvider({ ...providerFor(SESSION_ID), version: 1 });
 		assert.throws(() => admitChildAuthorityLaunch({ hostSessionId: SESSION_ID }), requireCode("version-mismatch"));
 		publishProvider(providerFor(SESSION_ID));
 		assert.throws(() => admitChildAuthorityLaunch({ hostSessionId: "session-other" }), requireCode("session-mismatch"));
@@ -630,7 +631,7 @@ describe("registered async dispatch under child authority", { skip: isAsyncAvail
 	it("refuses a malformed or foreign-session provider before the runner starts", () => {
 		registerHostGuard();
 		const cases: Array<[unknown, RegExp]> = [
-			[{ ...providerFor(SESSION_ID), version: 2 }, /version 2 is unsupported/],
+			[{ ...providerFor(SESSION_ID), version: 1 }, /version 1 is unsupported/],
 			[providerFor("session-other"), /belongs to session 'session-other'/],
 		];
 		for (const [provider, expected] of cases) {

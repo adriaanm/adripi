@@ -375,6 +375,8 @@ export function evaluatePermissions(
 	input: Record<string, unknown>,
 	cwd: string,
 	agentDir: string,
+	/** Relative child paths resolve here; RULES/maintenance still anchor to the real parent cwd. */
+	actionCwd: string = cwd,
 ): PermissionDecision {
 	let serializedInput: string;
 	try {
@@ -387,7 +389,7 @@ export function evaluatePermissions(
 		tool,
 		serializedInput,
 		command: typeof input.command === "string" ? splitCommands(input.command) : undefined,
-		paths: callPaths(tool, input, cwd),
+		paths: callPaths(tool, input, actionCwd),
 		cwd,
 		agentDir,
 	};
@@ -420,7 +422,7 @@ export function evaluatePermissions(
 	// this is the reviewer-independent backstop. Both the spelled and the resolved
 	// directory are compared, so a symlinked `.pi` or a canonical alias of it is
 	// still the workspace's policy directory.
-	const projectPolicyDirs = pathSpellings(join(resolve(cwd), ".pi"));
+	const projectPolicyDirs = [...new Set([cwd, actionCwd].flatMap(root => pathSpellings(join(resolve(root), ".pi"))))];
 	const reachesProjectPolicyDir = (path: string) =>
 		projectPolicyDirs.some((directory) => isWithinDirectory(directory, path));
 	if ((call.tool === "write" || call.tool === "edit") && call.paths.some(reachesProjectPolicyDir)) {

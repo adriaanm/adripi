@@ -1,4 +1,4 @@
-import { decideSandboxException, type SandboxSurface } from "./broker.ts";
+import { decideSandboxException, getGuardianBroker, type SandboxSurface } from "./broker.ts";
 import type { HumanChannel, HumanRequest } from "./human-channel.ts";
 import { parseHostCommand } from "./host-command.ts";
 import { authorizePathAction, type PathAuthorization } from "./path-authorizer.ts";
@@ -33,7 +33,7 @@ export interface ChildIdentityEvidence {
   runId: string;
 }
 
-export type ChildActionSurface = "read" | "write" | "network" | "command";
+export type ChildActionSurface = "read" | "write" | "network" | "command" | "tool";
 
 export interface ChildAction {
   readonly surface: ChildActionSurface;
@@ -47,6 +47,7 @@ export type ChildActionOutcome = "allow" | "deny" | "unavailable" | "cancelled";
 export interface ChildActionDecision {
   readonly outcome: ChildActionOutcome;
   readonly rationale?: string;
+  readonly terminate?: boolean;
 }
 
 /** The parent baseline a decision is made against; re-read for every request. */
@@ -213,6 +214,8 @@ function pathDecision(result: PathAuthorization): ChildActionDecision {
 }
 
 export interface ChildActionContext {
+  /** Required for exact-tool review; only the actual prepared provider binds this audience. */
+  parentSessionId?: string;
   /** The host-bound child that asked. */
   identity: ChildIdentityEvidence;
   /** The child's assigned workspace: relative action targets resolve here. */
@@ -251,6 +254,29 @@ export async function decideChildAction(
       return decideChildNetworkAction(action, context);
     case "command":
       return decideChildCommandAction(action, context);
+    case "tool":
+      return decideChildToolAction(action, context);
+  }
+}
+
+async function decideChildToolAction(action: ChildAction, context: ChildActionContext): Promise<ChildActionDecision> {
+  const broker = getGuardianBroker();
+  if (!context.parentSessionId || !broker?.reviewTool) return decision("unavailable", "No parent exact-tool review authority is available; nothing was granted");
+  try {
+    const result = await broker.reviewTool({
+      identity: { ...context.identity, parentSessionId: context.parentSessionId, cwd: context.childCwd },
+      action: action.target,
+      signal: context.signal,
+    });
+    if (context.signal?.aborted) return decision("cancelled", "The child tool review was cancelled before consumption");
+    if (!result || !["allow", "deny", "unavailable", "cancelled"].includes(result.outcome) ||
+        (result.rationale !== undefined && (typeof result.rationale !== "string" || result.rationale.includes("\0"))) ||
+        (result.terminate !== undefined && typeof result.terminate !== "boolean") || (result.outcome === "allow" && result.terminate === true)) {
+      return decision("unavailable", "The parent returned a malformed exact-tool verdict; nothing was granted");
+    }
+    return Object.freeze({ ...decision(result.outcome, result.rationale ?? "The parent decided this exact tool action"), ...(result.terminate ? { terminate: true } : {}) });
+  } catch {
+    return decision(context.signal?.aborted ? "cancelled" : "unavailable", "The parent exact-tool review failed; nothing was granted");
   }
 }
 

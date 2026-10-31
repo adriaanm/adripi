@@ -72,7 +72,7 @@ async function main(): Promise<void> {
 		} else {
 			const envelope: Record<string, unknown> = {
 				kind: "child-authority:request",
-				version: 1,
+				version: 2,
 				sessionId: grant.sessionId,
 				runId: grant.runId,
 				leaseId: grant.leaseId,

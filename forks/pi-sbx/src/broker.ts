@@ -41,6 +41,12 @@ export type SandboxExceptionDecision =
 
 export interface SandboxBrokerService {
 	review(request: SandboxExceptionRequest): Promise<SandboxExceptionDecision>;
+	/** Mirrored host-only exact-tool service; a verdict grants NO sandbox exception. */
+	reviewTool?(request: {
+		identity: { parentSessionId: string; runId: string; agent: string; index: number; cwd: string };
+		action: string;
+		signal?: AbortSignal;
+	}): Promise<{ outcome: "allow" | "deny" | "unavailable" | "cancelled"; rationale?: string; terminate?: boolean }>;
 }
 
 export function getGuardianBroker(): SandboxBrokerService | undefined {

@@ -289,6 +289,12 @@ provider derives narrowed held policy and uses the existing parent Guardian/huma
 route. Unsupported placements refuse before mutation; failure/off cannot silently
 become bare launch. Real-process and actual-graph fixtures cover carriage and
 shared state, including composed controlled-consumer parent/human decisions.
+Provider/wire **2** now carries bounded exact tool arguments/nesting to the SAME
+parent Guardian broker's fixed/semantic engine; its audit/writer/evidence/cost
+paths are shared with ordinary review. This does not itself grant any sandbox
+exception or consume the parent cursor. Old protocol versions fail closed.
+The [production consumer contract](round-2-production-consumers.md) records
+current verification and still-required static runtime policy projection.
 **Production child policy/Guardian consumers remain unimplemented** and cannot
 acknowledge readiness: no first model prompt is permitted merely because the
 extension files loaded. This is not child containment or installed-runtime proof.

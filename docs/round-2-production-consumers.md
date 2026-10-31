@@ -7,7 +7,61 @@ No worker is active. The parent is the sole sequential writer in main; no
 concurrent component writers, deployment, live-policy/toggle changes or runtime
 replacement are authorized by this plan.
 
-## Source-proven gaps before implementation
+## Protocol / parent-service phase: implemented and source-verified
+
+The SAME public API now uses provider/wire **2**. Guard/ALS/runner-latch Symbol
+keys intentionally retain their `.v1` names so old hosts observe intent and fail
+closed rather than launch bare. The policy payload now says `version: 2`; network/
+environment/host-ceiling projection is still staged and consumers still cannot
+ack. There is no parallel v1 approval implementation or new permission store.
+
+- `tool` targets carry exact GuardianAction JSON, capped at **64,000 UTF-16
+  characters / 256KiB UTF-8**; ordinary target/reason and **policy** bounds do
+  not expand. The launcher stays opaque; Guardian strictly validates exact
+  input/nesting, unknown fields, depth/size, host audience and child cwd. The
+  parent's configured action budget can further tighten this limit. Parent
+  batch `terminate` is typed metadata and cannot accompany an allow.
+- `SandboxBrokerService.reviewTool` runs the actual parent fixed/semantic engine,
+  full directives and host-bound requester evidence, same durable reviewer/
+  accounting/denial consumption and stale-evidence validator. Relative arguments
+  use child cwd; rule/maintenance anchoring remains the real parent. Exact child
+  action/audience is audited. Parent transcript cursor is not consumed. A
+  semantic allow does not grant filesystem, command or host authority.
+- **Additional reproduced ceiling defect:** replacing the admitted workspace by
+  a sibling symlink, or repointing a writable read-carveout alias into a denied
+  tree, returned `allow` without review in the pre-fix source. Evidence:
+  `.local/goal-consumers/anchor-drift-probe.log` (both tests failed on the allow).
+  New `anchor.paths` contains bounded, immutable spelled/canonical associations
+  for every policy's non-glob prefix, original parent cwd, workspace/Git roots
+  and aliases. Drift revokes before/after decisions, with another check after
+  broker review **before human admission**. Consumers must enforce these same
+  pins even for locally held native/Bash actions. Ordinary creation at a stable
+  prefix is not drift. Literal glob-bearing workspace/Git roots cannot be
+  represented safely by this matcher/runtime contract and refuse instead of
+  admitting a sibling glob or losing mandatory metadata exclusions. This is
+  between-action snapshot consistency, **not** hostile same-user race immunity.
+
+Verification on Node **v26.6.0**, current ignored evidence `.local/goal-consumers/`:
+
+| Gate | Evidence / result |
+|---|---|
+| pi-sbx full suite and types | **222 tests / 22 files**, typecheck pass, including exact-tool service failure/revocation and alias-drift regressions. |
+| Guardian full `npm test` / types | **178 total / 177 pass / one known Node26 HTTP-headless native assertion**; typecheck pass. Thirteen new delegated parsing/registered-engine/real-IPC/stale tests pass, including full content, directives, nesting, cost attribution, denial/warning/generation/parent/shutdown/cancellation and queued sibling rejection. |
+| Subagents focused authority / types | **79 pass**, typecheck pass. Large Unicode exact-tool round trip; old provider/wire refusal; typed termination/replay/cancellation negatives. |
+| Subagents full unit | **4,219 pass / 17 skip / 0 fail** (4,236 tests). Sandbox failed on process/socket fixtures; the exact command passed after reviewed host approval. |
+| Affected async integration | **234 pass** after exact reviewed host rerun for loopback/process fixture restrictions. |
+| Fresh build, verifier, actual bundle/compiled graph | **3 graph tests pass**, **383 inputs / 17 exports / 329 compiled modules / 18 module-URL targets / 765 artifacts**; artifact prefix `c4e4ea8c6b475776`. |
+| Root/source checks | `just check` passes, including **69 deployment fixtures**; `git diff --check` and a final build verifier pass. |
+
+The real Node IPC integration uses the actual pi-sbx provider, real launcher
+registration/controller/client, registered parent Guardian and a credential-free
+sidecar verdict fixture. Its child acknowledgments are **protocol-test code**,
+not production consumers or SRT enforcement. No first production child model
+prompt is authorized by these results. Full compatible-runtime HTTP, actual
+child OS/Git containment and live usage/latency remain open. No deployment,
+restart, runtime/dependency installation, live-policy/toggle edit or push.
+
+## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the
    current runner must refuse the first model prompt. Do not add an acknowledgment
@@ -25,7 +79,7 @@ replacement are authorized by this plan.
    settings must not be reloaded as a substitute, nor can fresh child config mint
    grants. Resolve this projection explicitly before a production consumer acks.
 
-## Parent architectural decision for the next source change
+## Binding architectural decisions (protocol phase above; consumers remaining)
 
 Use one updated protocol/provider version, with fail-closed version mismatch;
 no parallel v1/v2 approval path. Keep the **existing provider Symbol key** so old
@@ -73,7 +127,10 @@ missing/incompatible helpers must refuse, not relax. Socket namespaces and any
 weaker-isolation/interprocess features need explicit narrowing, not copying broad
 parent temp/maintenance capability. No unsupported option may silently weaken the
 child. The old v1 payload in the #22 handoff is historical once this amendment is
-implemented; document the actual new schema before consumer acceptance.
+implemented; document the actual new schema before consumer acceptance. Keep
+`anchor.paths` complete and validate them before locally held actions as well
+as across asynchronous exception decisions; immutable strings alone did not
+freeze filesystem alias resolution.
 
 ## Sequential file ownership / gates
 

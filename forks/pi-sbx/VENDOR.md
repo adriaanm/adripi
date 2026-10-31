@@ -95,7 +95,17 @@ routes in Git history are retired, not additional supported APIs.
     revocation/caller signals. Shared broker/human adapter preserves ordinary
     Bash/network defaults, source attribution and pre-human rule snapshots.
     Outside-ceiling path actions require explicit human one-action admission,
-    never standing child scope. No production child consumer is implemented yet.
+    never standing child scope. Protocol/provider **2** keeps the existing guard
+    Symbol key and routes an exact `tool` action to the SAME parent Guardian
+    broker's `reviewTool` method, with host-bound audience/cwd and cancellation.
+    A semantic verdict does not grant a path/host exception; missing/legacy/
+    malformed service and late approval after revocation refuse. No production
+    child consumer is implemented yet. Prepared `anchor.paths` pins all policy
+    literal prefixes, workspace/Git roots and aliases. Retargeting a workspace
+    or writable read-carveout alias reproduced an unreviewed allow; now it
+    revokes before/after decisions and after broker review before human UI.
+    Ordinary file creation remains valid. Literal glob-bearing workspace/Git
+    metadata roots refuse rather than widen a scope or weaken exclusions.
 15. **Tests:** registered bash dispatch with mocked execution/runtime, concurrent
     scoped versus plain/native-file actions, partial approval, queue cancellation,
     prompt cancellation, setting serialization, partial refresh/rollback failure,
@@ -104,7 +114,7 @@ routes in Git history are retired, not additional supported APIs.
     registered native-gate grant/deny/headless/cancellation/isolation coverage,
     helper/config/lifecycle and actual registered provider coverage, plus composed
     native-launch/real-IPC/controlled-consumer/broker/human tests. Current source:
-    **212 tests / 22 files**, typecheck/root checks pass. These are not production
+    **222 tests / 22 files**, typecheck/root checks pass. These are not production
     child consumers or live nested OS-sandbox tests. See the
     [wiring acceptance/handoff](../../docs/round-2-wiring-acceptance.md).
 

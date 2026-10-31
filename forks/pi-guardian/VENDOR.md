@@ -206,6 +206,24 @@ deltas are listed below; nothing else is modified.
     **27** managed/accounting tests against installed SDK1.4 pass. See the
     [cost record](../../docs/guardian-costs.md) for limits and commands.
 
+18. `src/delegated-tool.ts`, index/permissions and the SAME sandbox broker —
+    exact parent-owned child tool review, not another permission service. Strict
+    bounded JSON retains write/edit content, unknown tool arguments and full
+    nested parent calls. Host-bound parent/run/child cwd is validated; fixed
+    rules retain the parent anchor while relative arguments use child cwd.
+    Both parent/child own-policy directories stay fixed-denied. Ordinary and
+    delegated reviews share consumption/denial/audit, semantic assessment,
+    queued durable writer, stale-evidence checks and Guardian-only costs.
+    Exact delegated action/audience is audited without advancing the parent's
+    transcript cursor. Typed batch termination cannot be an allow. Real Node
+    IPC → real pi-sbx provider → registered parent Guardian service is tested,
+    with full directives/content, cost attribution and late restriction/
+    generation/parent/shutdown/cancellation, new denial/tool-warning and queued
+    sibling negatives. **177 tests pass**, only the known Node26 HTTP-headless
+    native failure remains (178 total); typecheck passes.
+    Production child consumers/SRT enforcement remain unimplemented. See the
+    [consumer integration record](../../docs/round-2-production-consumers.md).
+
 Upstream 0.2.0 already covers the rest of what the 0.1.0 fork needed: the
 deterministic `permissions.allow` / `permissions.deny` rule family (evaluated
 before any reviewer call), `tool_search` exemption, and the durable assessment

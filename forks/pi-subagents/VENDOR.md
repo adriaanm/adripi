@@ -89,12 +89,34 @@ Ignored evidence: `.local/round-2-subagents/parent-{ipc-tests,check,unit-host}.l
   of unreachable child discovery. These are guard-contract changes, not broader
   capability-ceiling or external-runner permission changes.
 
-Current parent verification: **76** focused authority tests; full unit suite
+Guarded launch (#22) parent verification: **76** focused authority tests; full unit suite
 **4,216 pass / 17 skip / 0 fail**; affected async integration **234 pass**;
 subagents typecheck/build/verifier and **3** actual-graph tests pass. Full unit
 and affected integration commands needed reviewed host reruns after sandbox
 ps/socket/watcher failures; no OS-containment claim. Graph: **383 inputs / 17
 exports / 329 compiled modules / 18 module-URL targets / 765 artifacts**.
+
+### Exact-tool protocol prerequisite for production consumers
+
+Provider and wire protocol **2** reuse the existing guard Symbol and ALS registry;
+old providers/envelopes refuse without reopening bare launch. A new opaque `tool`
+action carries exact GuardianAction JSON (64,000 UTF-16 characters / 256KiB UTF-8
+maximum); ordinary targets remain 2KiB, reasons 512B and policy payloads 32KiB.
+No safety evidence is truncated. Parent `terminate` metadata is typed, bounded
+and forbidden on an allow; it cannot mint a grant. Unicode large-action, old-wire,
+strict identity and real-process round-trip negatives/positives are added. The
+upstream builder, dependency versions, public export count and single graph are
+unchanged; no alternate protocol/store is retained.
+
+Current source verification: **79** focused authority tests; **4,219 pass / 17
+skip / 0 fail** full unit (4,236 tests); affected async integration **234 pass**;
+types/build/verifier and **3** actual graph tests pass. Full unit/integration
+commands passed via exact reviewed host reruns after sandbox process/socket
+failures, not as containment evidence. Graph remains **383 inputs / 17 exports /
+329 compiled modules / 18 module-URL targets / 765 artifacts**. Evidence:
+`.local/goal-consumers/`. Real parent semantic service is separately verified
+cross-fork; production acknowledgments are still forbidden until enforcement.
+See the [consumer contract/record](../../docs/round-2-production-consumers.md).
 
 pi-sbx now has the actual registered parent publisher, narrowing policy and shared
 Guardian/human adapter. **Production child consumers are not implemented**: real

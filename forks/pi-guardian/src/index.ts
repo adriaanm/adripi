@@ -9,7 +9,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { failedClosedAssessment, ruleDeniedAssessment } from "./assessment.ts";
 import { loadGuardianConfig, persistGuardianEnabled } from "./config.ts";
-import { evaluatePermissions } from "./permissions.ts";
+import { evaluatePermissions, type PermissionDecision } from "./permissions.ts";
+import { parseDelegatedToolRequest, type DelegatedToolDecision, type DelegatedToolRequest } from "./delegated-tool.ts";
 import { buildReviewPrompt } from "./prompt.ts";
 import { requestGuardianAssessment } from "./sidecar.ts";
 import { createSandboxBroker, publishSandboxBroker } from "./sandbox/broker.ts";
@@ -638,6 +639,7 @@ export default function guardianExtension(pi: ExtensionAPI) {
 					maintenanceRoots: config.permissions.agentDirWriteProjects ?? [],
 					sessionCwd: ctx.cwd,
 					review: reviewSandboxException,
+					reviewTool: reviewDelegatedTool,
 					audit: (record) => pi.appendEntry(SANDBOX_EXCEPTION_ENTRY, record),
 					maxConsecutiveDenials: config.maxConsecutiveDenials,
 				}),
@@ -686,6 +688,91 @@ export default function guardianExtension(pi: ExtensionAPI) {
 					validReview: false,
 				}),
 			};
+		}
+	};
+
+	/** One consumption/denial/audit implementation for native and delegated tool review. */
+	const consumeToolReview = (options: {
+		ctx: ExtensionContext; activeConfig: GuardianConfig; parentSessionId: string;
+		state: GuardianStateV1; turnKey: string; cursorEntryId?: string; parentToolCallId?: string;
+		toolName: string; toolCallId: string; actionHash: string; execution: ReviewExecution;
+		decision: PermissionDecision; validate: () => void;
+		delegated?: GuardianAssessmentRecordV1["delegated"];
+	}): { block: true; reason: string; terminate?: boolean } | undefined => {
+		const { ctx, activeConfig, parentSessionId, turnKey, cursorEntryId, parentToolCallId, toolName, toolCallId, actionHash, decision, delegated } = options;
+		let { state } = options;
+		let { assessment, failure, validReview } = options.execution;
+		if (decision.outcome !== "deny" && validReview) {
+			try { options.validate(); }
+			catch (error) { failure = conciseFailure(error); assessment = failedClosedAssessment(failure); validReview = false; }
+		}
+		const latestState = findGuardianState(ctx.sessionManager.getBranch());
+		if (config !== activeConfig || !config.enabled || policyHash !== state.policyHash ||
+			ctx.sessionManager.getSessionId() !== parentSessionId || latestCtx?.sessionManager.getSessionId() !== parentSessionId ||
+			(latestState && latestState.guardianSessionId !== state.guardianSessionId)) {
+			return { block: true, reason: denialReason(failedClosedAssessment("Parent session/policy/reviewer generation changed; stale review cannot advance or overwrite its state"), false, true) };
+		}
+		if (latestState) state = latestState;
+		state = updateDenialState(state, turnKey, assessment.outcome === "deny");
+		if (validReview) {
+			state = { ...state, reviewCount: state.reviewCount + 1,
+				// A delegated review cannot consume/hide the parent's transcript cursor.
+				...(delegated ? {} : { lastReviewedParentEntryId: cursorEntryId }) };
+		}
+		const record: GuardianAssessmentRecordV1 = {
+			version: STATE_VERSION, guardianSessionId: state.guardianSessionId,
+			toolName, toolCallId, actionHash, parentCursorEntryId: cursorEntryId,
+			parentToolCallId, ...(delegated ? { delegated } : {}), turnKey, assessment,
+			source: decision.outcome === "deny" ? "rule" : "reviewer",
+			rule: decision.outcome === "deny" ? decision.rule : undefined,
+			reviewedAt: new Date().toISOString(), failure,
+			failureHelp: failure ? guardianFailureHelp(failure, configPath) : undefined,
+		};
+		pi.appendEntry(GUARDIAN_ASSESSMENT_ENTRY, record);
+		pi.appendEntry(GUARDIAN_STATE_ENTRY, state);
+		if (assessment.outcome !== "deny") return undefined;
+		const terminate = state.consecutiveDenials >= activeConfig.maxConsecutiveDenials;
+		if (failure) {
+			if (ctx.hasUI) ctx.ui.notify(`Guardian review failed and blocked ${toolName}: ${failure}\nFix: ${guardianFailureHelp(failure, configPath)}`, "error");
+		} else if (ctx.hasUI) ctx.ui.notify(`Guardian denied ${toolName}: ${assessment.rationale}`, "warning");
+		return { block: true, reason: decision.outcome === "deny" ? ruleDenialReason(decision.rule, terminate) : denialReason(assessment, terminate, Boolean(failure)), terminate };
+	};
+
+	/** Exact child semantics use the SAME engine, writer queue, state and accounting. No exception is granted. */
+	const reviewDelegatedTool = async (request: DelegatedToolRequest): Promise<DelegatedToolDecision> => {
+		try {
+			const { identity, action, signal: childSignal } = parseDelegatedToolRequest(request);
+			const ctx = latestCtx;
+			if (!ctx || !config || !config.enabled || initializationError || !policyHash) return { outcome: "unavailable", rationale: "No active parent Guardian tool-review authority" };
+			const activeConfig = config;
+			const parentSessionId = ctx.sessionManager.getSessionId();
+			if (identity.parentSessionId !== parentSessionId) return { outcome: "deny", rationale: "Delegated tool parent does not match the active Guardian session" };
+			if (request.action.length > activeConfig.maxActionChars) return { outcome: "deny", rationale: "Exact child action exceeds the parent's configured action budget; nothing was truncated" };
+			const signal = ctx.signal && childSignal ? AbortSignal.any([ctx.signal, childSignal]) : childSignal ?? ctx.signal;
+			if (signal?.aborted) return { outcome: "cancelled", rationale: "Delegated tool review was cancelled" };
+			const branch = ctx.sessionManager.getBranch();
+			const state = ensureState(branch, parentSessionId, activeConfig, policyHash);
+			const validate = evidenceValidator(ctx, activeConfig, state, reviewEvidenceKey(branch));
+			const decision = evaluatePermissions(activeConfig.permissions, action.tool_name, action.input, ctx.cwd, activeConfig.agentDir, action.cwd);
+			validate();
+			if (decision.outcome === "allow") return { outcome: "allow" };
+			const transcript = renderGuardianTranscript(branch, undefined, activeConfig.transcript);
+			transcript.reviewContext = { directives: [], ...transcript.reviewContext, evidence: [
+				...(transcript.reviewContext?.evidence ?? []),
+				{ id: `delegated-${hashText(JSON.stringify({ identity, action }))}`, text: `Host-bound child audience (evidence, not a permission grant): ${JSON.stringify(identity)}` },
+			] };
+			const prepared = prepareReview(action.tool_name, action.tool_call_id, action.input, action.cwd,
+				activeConfig, state, parentSessionId, transcript, signal, action.parent_actions, validate, usageReporter(ctx));
+			const execution = decision.outcome === "deny"
+				? { assessment: ruleDeniedAssessment(decision.rule), validReview: false }
+				: await trackReview(withReviewSlot(prepared.launch), ctx);
+			if (signal?.aborted) return { outcome: "cancelled", rationale: "Delegated tool review was cancelled before consumption" };
+			const result = consumeToolReview({ ctx, activeConfig, parentSessionId, state,
+				turnKey: latestUserTurnKey(branch), toolName: action.tool_name, toolCallId: action.tool_call_id,
+				actionHash: prepared.actionHash, execution, decision, validate, delegated: { identity, action } });
+			return result ? { outcome: "deny", rationale: result.reason, ...(result.terminate ? { terminate: true } : {}) } : { outcome: "allow" };
+		} catch (error) {
+			return { outcome: "unavailable", rationale: `Exact delegated tool review failed closed: ${conciseFailure(error)}` };
 		}
 	};
 
@@ -868,54 +955,11 @@ export default function guardianExtension(pi: ExtensionAPI) {
 			};
 		}
 
-		let { assessment, failure, validReview } = await pending.promise;
-		if (!ruleExecution && validReview) {
-			try { evidenceValidator(ctx, pending.configSnapshot ?? config, state, pending.evidenceKey ?? "", event.toolCallId)(); }
-			catch (error) { failure = conciseFailure(error); assessment = failedClosedAssessment(failure); validReview = false; }
-		}
-		const latestState = findGuardianState(ctx.sessionManager.getBranch());
-		if (ctx.sessionManager.getSessionId() !== parentSessionId || (latestState && latestState.guardianSessionId !== state.guardianSessionId)) {
-			return { block: true, reason: denialReason(failedClosedAssessment("Parent session/reviewer generation changed; stale review cannot advance or overwrite its state"), false, true) };
-		}
-		if (latestState) state = latestState;
-		state = updateDenialState(state, turnKey, assessment.outcome === "deny");
-		if (validReview) {
-			state = {
-				...state,
-				lastReviewedParentEntryId: cursorEntryId,
-				reviewCount: state.reviewCount + 1,
-			};
-		}
-		const record: GuardianAssessmentRecordV1 = {
-			version: STATE_VERSION,
-			guardianSessionId: state.guardianSessionId,
-			toolName: event.toolName,
-			toolCallId: event.toolCallId,
-			actionHash,
-			parentCursorEntryId: cursorEntryId,
-			parentToolCallId: event.parentToolCallId,
-			turnKey,
-			assessment,
-			source: decision.outcome === "deny" ? "rule" : "reviewer",
-			rule: decision.outcome === "deny" ? decision.rule : undefined,
-			reviewedAt: new Date().toISOString(),
-			failure,
-			failureHelp: failure ? guardianFailureHelp(failure, configPath) : undefined,
-		};
-		pi.appendEntry(GUARDIAN_ASSESSMENT_ENTRY, record);
-		pi.appendEntry(GUARDIAN_STATE_ENTRY, state);
-
-		if (assessment.outcome !== "deny") return undefined;
-		const terminate = state.consecutiveDenials >= config.maxConsecutiveDenials;
-		if (failure) {
-			if (ctx.hasUI) ctx.ui.notify(
-				`Guardian review failed and blocked ${event.toolName}: ${failure}\nFix: ${guardianFailureHelp(failure, configPath)}`,
-				"error",
-			);
-		} else {
-			if (ctx.hasUI) ctx.ui.notify(`Guardian denied ${event.toolName}: ${assessment.rationale}`, "warning");
-		}
-		const reason = decision.outcome === "deny" ? ruleDenialReason(decision.rule, terminate) : denialReason(assessment, terminate, Boolean(failure));
-		return { block: true, reason, terminate };
+		return consumeToolReview({ ctx, activeConfig: pending.configSnapshot ?? config, parentSessionId, state,
+			turnKey, cursorEntryId, parentToolCallId: event.parentToolCallId,
+			toolName: event.toolName, toolCallId: event.toolCallId, actionHash,
+			execution: await pending.promise, decision,
+			validate: evidenceValidator(ctx, pending.configSnapshot ?? config, state, pending.evidenceKey ?? "", event.toolCallId),
+		});
 	});
 }

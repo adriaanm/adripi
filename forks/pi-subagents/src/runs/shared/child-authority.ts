@@ -17,7 +17,7 @@ import {
  * from a malformed service, not the process from arbitrary privileged code that already runs beside it.
  */
 export const CHILD_AUTHORITY_PROVIDER_KEY = Symbol.for("pi-sbx.session-authority.v1");
-export const CHILD_AUTHORITY_PROVIDER_VERSION = 1;
+export const CHILD_AUTHORITY_PROVIDER_VERSION = 2;
 /**
  * Process-wide `AsyncLocalStorage` slot for code-only child consumption. It lives on `globalThis` under a
  * `Symbol.for` key so a bundled copy and a compiled copy of this module share one storage instead of each
@@ -33,6 +33,9 @@ export const CHILD_AUTHORITY_MAX_PAYLOAD_ITEMS = 256;
 export const CHILD_AUTHORITY_MAX_PAYLOAD_STRING_BYTES = 8 * 1024;
 export const CHILD_AUTHORITY_MAX_ACTION_TARGET_BYTES = 2048;
 export const CHILD_AUTHORITY_MAX_ACTION_REASON_BYTES = 512;
+/** Exact Guardian tool JSON has a separate budget; policy/path/hostname bounds do not expand. */
+export const CHILD_AUTHORITY_MAX_TOOL_ACTION_CHARS = 64_000;
+export const CHILD_AUTHORITY_MAX_TOOL_ACTION_BYTES = 256 * 1024;
 export const CHILD_AUTHORITY_MAX_RATIONALE_BYTES = 512;
 export const CHILD_AUTHORITY_MAX_CONSUMERS = 32;
 export const CHILD_AUTHORITY_MAX_ID_BYTES = 128;
@@ -42,7 +45,7 @@ export const CHILD_AUTHORITY_MAX_INFLIGHT_REQUESTS = 16;
 export const CHILD_AUTHORITY_MAX_DECIDED_REQUEST_IDS = 256;
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
-const SURFACES: ReadonlySet<string> = new Set(["read", "write", "network", "command"]);
+const SURFACES: ReadonlySet<string> = new Set(["read", "write", "network", "command", "tool"]);
 /** Terminal outcomes only: a deferred ask stays with the parent's reviewer/human completion. */
 const OUTCOMES: ReadonlySet<string> = new Set(["allow", "deny", "unavailable", "cancelled"]);
 
@@ -74,7 +77,7 @@ export class ChildAuthorityError extends Error {
 	}
 }
 
-export type ChildAuthoritySurface = "read" | "write" | "network" | "command";
+export type ChildAuthoritySurface = "read" | "write" | "network" | "command" | "tool";
 
 /** Child-declared part of the audience: only these fields may come from the child process. */
 export interface ChildAuthorityPrepareIdentity {
@@ -105,6 +108,8 @@ const CANCEL_REASONS: ReadonlySet<string> = new Set(["cancelled", "timeout", "di
 export interface ChildAuthorityDecision {
 	readonly outcome: ChildAuthorityOutcome;
 	readonly rationale?: string;
+	/** Parent-owned tool-batch circuit-breaker evidence; never inferred from prose. */
+	readonly terminate?: boolean;
 }
 
 export type ChildAuthorityJsonValue =
@@ -245,10 +250,12 @@ export function parseChildAuthorityAction(value: unknown): ChildAuthorityAction 
 	requireKeys(value, ["surface", "target", "reason"], "Child authority action", "invalid-action");
 	const record = value as { surface?: unknown; target?: unknown; reason?: unknown };
 	const surface = record.surface;
-	if (typeof surface !== "string" || !SURFACES.has(surface)) throw new ChildAuthorityError("invalid-action", "Child authority action surface must be read, write, network, or command.");
+	if (typeof surface !== "string" || !SURFACES.has(surface)) throw new ChildAuthorityError("invalid-action", "Child authority action surface must be read, write, network, command, or tool.");
+	const target = requireActionText(record.target, "Child authority action target", surface === "tool" ? CHILD_AUTHORITY_MAX_TOOL_ACTION_BYTES : CHILD_AUTHORITY_MAX_ACTION_TARGET_BYTES);
+	if (surface === "tool" && target.length > CHILD_AUTHORITY_MAX_TOOL_ACTION_CHARS) throw new ChildAuthorityError("invalid-action", `Exact tool actions must be at most ${CHILD_AUTHORITY_MAX_TOOL_ACTION_CHARS} characters; nothing was truncated.`);
 	return Object.freeze({
 		surface: surface as ChildAuthoritySurface,
-		target: requireActionText(record.target, "Child authority action target", CHILD_AUTHORITY_MAX_ACTION_TARGET_BYTES),
+		target,
 		reason: requireActionText(record.reason, "Child authority action reason", CHILD_AUTHORITY_MAX_ACTION_REASON_BYTES),
 	});
 }
@@ -307,17 +314,20 @@ function abortFault(signal: AbortSignal): ChildAuthorityError {
  */
 export function parseChildAuthorityDecision(value: unknown): ChildAuthorityDecision {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new ChildAuthorityError("invalid-decision", "Child authority decision requires an object with a typed outcome.");
-	requireKeys(value, ["outcome", "rationale"], "Child authority decision", "invalid-decision");
-	const record = value as { outcome?: unknown; rationale?: unknown };
+	requireKeys(value, ["outcome", "rationale", "terminate"], "Child authority decision", "invalid-decision");
+	const record = value as { outcome?: unknown; rationale?: unknown; terminate?: unknown };
 	const outcome = record.outcome;
 	if (typeof outcome !== "string" || !OUTCOMES.has(outcome)) {
 		throw new ChildAuthorityError("invalid-decision", "Child authority decision outcome must be exactly allow, deny, unavailable, or cancelled.");
 	}
 	const typed = outcome as ChildAuthorityOutcome;
-	if (record.rationale === undefined) return Object.freeze({ outcome: typed });
+	if (record.terminate !== undefined && typeof record.terminate !== "boolean") throw new ChildAuthorityError("invalid-decision", "Child authority termination must be a boolean.");
+	if (typed === "allow" && record.terminate === true) throw new ChildAuthorityError("invalid-decision", "An allow cannot terminate a tool batch.");
+	const termination = record.terminate === true ? { terminate: true } : {};
+	if (record.rationale === undefined) return Object.freeze({ outcome: typed, ...termination });
 	if (typeof record.rationale !== "string" || record.rationale.includes("\0")) throw new ChildAuthorityError("invalid-decision", "Child authority decision rationale must be a string without NUL.");
 	const rationale = truncateUtf8(record.rationale, CHILD_AUTHORITY_MAX_RATIONALE_BYTES).trim();
-	return Object.freeze(rationale ? { outcome: typed, rationale } : { outcome: typed });
+	return Object.freeze(rationale ? { outcome: typed, rationale, ...termination } : { outcome: typed, ...termination });
 }
 
 function assertJsonPayloadValue(value: unknown, depth: number): void {

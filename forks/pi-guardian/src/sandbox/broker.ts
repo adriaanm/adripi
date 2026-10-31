@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+import type { DelegatedToolDecision, DelegatedToolRequest } from "../delegated-tool.ts";
 import { resolveMaintenanceAuthority } from "../maintenance.ts";
 import { evaluateLayeredSandboxRules, sandboxTargetProblem } from "./rules.ts";
 import type {
@@ -49,6 +50,8 @@ export interface SandboxBrokerOptions {
 	/** Trusted publishing session's cwd, bound before any request is accepted. */
 	sessionCwd?: string;
 	review: SandboxReviewFn;
+	/** The publishing Guardian's ordinary fixed/semantic engine, with live parent binding. */
+	reviewTool?: (request: DelegatedToolRequest) => Promise<DelegatedToolDecision>;
 	audit?: (record: SandboxAuditRecord) => void;
 	now?: () => Date;
 	/** Consecutive denials after which further asks are refused without review. */
@@ -109,6 +112,7 @@ export function createSandboxBroker(options: SandboxBrokerOptions): SandboxBroke
 	};
 
 	return {
+		reviewTool: options.reviewTool ?? (async () => ({ outcome: "unavailable", rationale: "This Guardian broker does not support exact delegated tool review" })),
 		async review(request: SandboxExceptionRequest): Promise<SandboxExceptionDecision> {
 			const invalid = validateRequest(request);
 			if (invalid) return deny(request, invalid, `Invalid sandbox exception request: ${invalid}`, "rule");

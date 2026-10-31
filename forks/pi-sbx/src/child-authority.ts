@@ -10,7 +10,7 @@ import {
 import { decideSandboxException } from "./broker.ts";
 import type { HumanChannel } from "./human-channel.ts";
 import { mandatoryWriteBlock } from "./path-authorizer.ts";
-import { canWrite, canonicalizeTarget, isWithin, resolveTarget, type FilePolicy } from "./path-policy.ts";
+import { canWrite, canonicalizeTarget, capturePolicyPathAnchor, isWithin, policyPathAnchorsUnchanged, resolveTarget, type FilePolicy } from "./path-policy.ts";
 
 /**
  * The parent half of trusted child delegation.
@@ -44,7 +44,7 @@ import { canWrite, canonicalizeTarget, isWithin, resolveTarget, type FilePolicy 
 
 export const CHILD_AUTHORITY_PROVIDER_KEY = Symbol.for("pi-sbx.session-authority.v1");
 /** The provider contract version; a mismatch is refused, never adapted. */
-export const CHILD_AUTHORITY_PROVIDER_VERSION = 1;
+export const CHILD_AUTHORITY_PROVIDER_VERSION = 2;
 /** Extension ids that must load and acknowledge before a child may prompt at all. */
 export const CHILD_AUTHORITY_REQUIRED_CONSUMERS = ["pi-sbx", "pi-guardian"] as const;
 
@@ -147,7 +147,7 @@ export class ChildAuthorityLauncherMissingError extends Error {
 export interface ChildAuthorityPolicyPayload extends ChildAuthorityPayload {
   readonly version: typeof CHILD_AUTHORITY_PROVIDER_VERSION;
   readonly kind: "pi-sbx.child-policy";
-  readonly anchor: { readonly cwd: string };
+  readonly anchor: { readonly cwd: string; readonly paths: readonly { readonly spelled: string; readonly canonical: string }[] };
   readonly workspace: { readonly spelled: string; readonly canonical: string };
   readonly read: {
     readonly policy: "deny-based";
@@ -384,6 +384,11 @@ export function deriveChildPolicy(input: DeriveChildPolicyInput): DerivedChildPo
   const spelled = resolveTarget(input.identity.cwd, baseline.cwd);
   const workspace = canonicalizeTarget(input.identity.cwd, baseline.cwd);
   const aliases = spelled === workspace ? [] : [spelled];
+  // This matcher/runtime contract cannot represent literal glob characters as
+  // exact allow roots. Never turn one assigned directory into a sibling glob.
+  if ([workspace, ...aliases].some(path => /[*?[]/.test(path))) {
+    throw new Error("the child workspace contains glob characters and cannot be expressed as an exact delegated root");
+  }
   const locked = mandatoryWriteBlock(workspace, aliases, baseline.cwd, baseline.policy);
   if (locked) {
     throw new Error(
@@ -414,6 +419,9 @@ export function deriveChildPolicy(input: DeriveChildPolicyInput): DerivedChildPo
   }
 
   const discoveredGit = gitMetadataCandidates(workspace);
+  if (discoveredGit.some(candidate => [candidate.root, ...candidate.aliases].some(path => /[*?[]/.test(path)))) {
+    throw new Error("verified Git metadata contains glob characters; required exclusions cannot be expressed exactly");
+  }
   const git = discoveredGit
     .filter((candidate) => !mandatoryWriteBlock(candidate.root, candidate.aliases, baseline.cwd, baseline.policy))
     .filter((candidate) => [candidate.root, ...candidate.aliases].every((path) => canWrite(path, baseline.cwd, baseline.policy)));
@@ -421,7 +429,7 @@ export function deriveChildPolicy(input: DeriveChildPolicyInput): DerivedChildPo
   const payload: ChildAuthorityPolicyPayload = {
     version: CHILD_AUTHORITY_PROVIDER_VERSION,
     kind: "pi-sbx.child-policy",
-    anchor: { cwd: baseline.cwd },
+    anchor: { cwd: baseline.cwd, paths: [] },
     workspace: { spelled: input.identity.cwd, canonical: workspace },
     read: {
       policy: "deny-based",
@@ -443,7 +451,16 @@ export function deriveChildPolicy(input: DeriveChildPolicyInput): DerivedChildPo
     network: { policy: "parent-decision" },
     command: { policy: "parent-decision" },
   };
-  return { payload: boundedPayload(payload) as ChildAuthorityPolicyPayload, workspace };
+  const paths = [baseline.cwd, spelled, workspace,
+    ...payload.read.deny, ...payload.read.allow, ...payload.read.mandatoryDeny,
+    ...payload.write.allow, ...payload.write.deny, ...payload.write.mandatoryDeny,
+    ...git.flatMap(candidate => [candidate.root, ...candidate.aliases])];
+  const anchors = [...new Map(paths.map(path => {
+    const anchor = capturePolicyPathAnchor(path, baseline.cwd);
+    return [anchor.spelled, anchor] as const;
+  })).values()];
+  const anchored = { ...payload, anchor: { ...payload.anchor, paths: anchors } };
+  return { payload: boundedPayload(anchored) as ChildAuthorityPolicyPayload, workspace };
 }
 
 /**
@@ -728,15 +745,37 @@ export function publishChildAuthority(options: ChildAuthorityPublishOptions): Ch
           rationale: "the parent sandbox policy is no longer authoritative, so the request was not decided",
         };
       }
-      return decideChildAction(action, {
+      if (!policyPathAnchorsUnchanged(derived.payload.anchor.paths, derived.payload.anchor.cwd)) {
+        disposeLease();
+        return { outcome: "cancelled", rationale: "a prepared policy path was retargeted; child authority was revoked instead of following fresh scope" };
+      }
+      const result = await decideChildAction(action, {
         identity: { agent: bound.agent, index: bound.index, runId: bound.runId },
+        parentSessionId: bound.parentSessionId,
         childCwd: bound.cwd,
         baseline: current,
         ceiling: childPolicyCeiling(derived.payload),
         human: options.getHuman(),
         signal: AbortSignal.any([entry.controller.signal, decisionSignal]),
-        decide: options.decide,
+        decide: async request => {
+          if (!policyPathAnchorsUnchanged(derived.payload.anchor.paths, derived.payload.anchor.cwd)) {
+            disposeLease();
+            return { kind: "deny", reason: "prepared policy path changed before review", review: { source: "rule", rationale: "the child lease was revoked" } };
+          }
+          const reviewed = await (options.decide ?? decideSandboxException)(request);
+          if (!policyPathAnchorsUnchanged(derived.payload.anchor.paths, derived.payload.anchor.cwd)) {
+            disposeLease();
+            return { kind: "deny", reason: "prepared policy path changed during review", review: { source: "rule", rationale: "the child lease was revoked before human admission" } };
+          }
+          return reviewed;
+        },
       });
+      if (entry.disposed || decisionSignal.aborted) return { outcome: "cancelled", rationale: "child authority was revoked before decision consumption" };
+      if (!policyPathAnchorsUnchanged(derived.payload.anchor.paths, derived.payload.anchor.cwd)) {
+        disposeLease();
+        return { outcome: "cancelled", rationale: "a prepared policy path changed during review; late authority was revoked" };
+      }
+      return result;
     };
     return Object.freeze({
       payload: derived.payload,

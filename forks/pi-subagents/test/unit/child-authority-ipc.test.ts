@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
 	CHILD_AUTHORITY_MAX_DECIDED_REQUEST_IDS,
+	CHILD_AUTHORITY_PROVIDER_VERSION,
+	CHILD_AUTHORITY_ENVELOPE_VERSION,
 	ChildAuthorityError,
 	createChildAuthorityController,
 	createChildAuthorityRunnerClient,
@@ -162,7 +164,7 @@ function publishFakeProvider(options: FakeProviderOptions = {}): { provider: Chi
 		cancelService: () => serviceAbort.abort(),
 	} as ProviderLedger;
 	const provider: ChildAuthorityProvider = {
-		version: 1,
+		version: CHILD_AUTHORITY_PROVIDER_VERSION,
 		sessionId: SESSION_ID,
 		requiredExtensions: REQUIRED_EXTENSIONS,
 		prepare: async (identity: ChildAuthorityIdentity, signal: AbortSignal) => {
@@ -236,7 +238,7 @@ async function expectRejectedWithCode(operation: () => Promise<unknown>, code: s
 function grantOf(prepared: { leaseId: string; identity: ChildAuthorityIdentity; payload: unknown; requiredConsumers: readonly string[] }): Record<string, unknown> {
 	return {
 		kind: "child-authority:lease",
-		version: 1,
+		version: CHILD_AUTHORITY_ENVELOPE_VERSION,
 		sessionId: SESSION_ID,
 		runId: RUN_ID,
 		leaseId: prepared.leaseId,
@@ -465,6 +467,20 @@ describe("child authority over real process IPC", () => {
 		assert.deepEqual(result.revokes, [prepared.leaseId], "the lease is revoked on exhaustion");
 	});
 
+	it("transports exact large tool arguments and parent termination metadata without a second channel", async () => {
+		const target = JSON.stringify({ tool_name: "write", tool_call_id: "nested", cwd: CWD,
+			input: { path: "file", content: "界🌍".repeat(2000) },
+			parent_actions: [{ tool_name: "codemode", tool_call_id: "script", input: { code: "await tools.write(runtimeArgs)" } }] });
+		const action = { surface: "tool", target, reason: "review exact runtime tool arguments" };
+		const { fixture, controller, ledger } = attach({ config: { ...REQUEST_CONFIG, requests: [action] },
+			provider: { decide: async () => ({ outcome: "deny", rationale: "parent semantic denial", terminate: true }) } });
+		await controller.prepare({ agent: "worker", index: 0, cwd: CWD });
+		const { result, code, stderr } = await fixture.outcome;
+		assert.equal(code, 0, stderr);
+		assert.deepEqual(ledger.decisions[0]?.action, action);
+		assert.deepEqual(decisionsOf(result)[0]?.decision, { outcome: "deny", rationale: "parent semantic denial", terminate: true });
+	});
+
 	it("denies malformed or oversized actions, ignores protocol noise, and keeps serving", async () => {
 		const { fixture, controller, ledger } = attach({
 			fixture: "raw-peer",
@@ -472,7 +488,8 @@ describe("child authority over real process IPC", () => {
 				waitMs: 500,
 				steps: [
 					{ raw: "not-an-envelope" },
-					{ raw: { kind: "child-authority:request", version: 1, leaseId: "x" } },
+					{ requestId: "old-wire", overrides: { version: 1 }, waitForDecision: false },
+					{ raw: { kind: "child-authority:request", version: CHILD_AUTHORITY_ENVELOPE_VERSION, leaseId: "x" } },
 					{ requestId: "identity-override", action: { surface: "write", target: "/etc/passwd", reason: "escape the workspace", cwd: "/etc" } },
 					{ requestId: "bad-surface", action: { surface: "escalate", target: "/etc/passwd", reason: "escalate the sandbox" } },
 					{ requestId: "oversized-target", action: { surface: "write", target: "x".repeat(3_000), reason: "oversized target" } },
@@ -656,7 +673,7 @@ describe("child authority over real process IPC", () => {
 	it("ignores a revoke that matches the lease id but not the audience", async () => {
 		const { fixture, controller } = attach({ config: { waitForRevokeMs: 300 } });
 		const prepared = await controller.prepare({ agent: "worker", index: 0, cwd: CWD });
-		fixture.child.send({ kind: "child-authority:revoke", version: 1, sessionId: "session-other", runId: RUN_ID, leaseId: prepared.leaseId });
+		fixture.child.send({ kind: "child-authority:revoke", version: CHILD_AUTHORITY_ENVELOPE_VERSION, sessionId: "session-other", runId: RUN_ID, leaseId: prepared.leaseId });
 		const { result } = await fixture.outcome;
 		assert.equal(result.signalAborted, false, "another session's revoke does not revoke this lease");
 		assert.deepEqual(result.leaseAfterRevoke, { outcome: "returned", leaseId: prepared.leaseId, aborted: false });
@@ -695,7 +712,7 @@ describe("child authority over real process IPC", () => {
 	it("fails closed on a grant envelope this build cannot read", async () => {
 		const fixture = startFixture("runner-client", { leaseTimeoutMs: 5_000 });
 		cleanups.push(() => fixture.child.kill("SIGKILL"));
-		fixture.child.send({ kind: "child-authority:lease", version: 2, sessionId: SESSION_ID, runId: RUN_ID, leaseId: "lease-from-the-future" });
+		fixture.child.send({ kind: "child-authority:lease", version: 1, sessionId: SESSION_ID, runId: RUN_ID, leaseId: "lease-from-the-old-protocol" });
 		const { result } = await fixture.outcome;
 		assert.equal(errorsOf(result)[0]?.step, "awaitLease");
 		assert.equal(errorsOf(result)[0]?.code, "version-mismatch", "an unreadable grant never becomes authority");

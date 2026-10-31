@@ -176,7 +176,8 @@ test("published extension APIs use supported package entrypoints", async () => {
 	assert.equal(typeof childToolPlan.resolvePiLaunchToolPlan, "function");
 	assert.deepEqual(Object.keys(childToolPlan).sort(), ["resolvePiLaunchToolPlan"]);
 	const childAuthority = await import("pi-subagents/child-authority");
-	assert.equal(childAuthority.CHILD_AUTHORITY_PROVIDER_VERSION, 1);
+	assert.equal(childAuthority.CHILD_AUTHORITY_PROVIDER_VERSION, 2);
+	assert.equal(childAuthority.CHILD_AUTHORITY_MAX_TOOL_ACTION_CHARS, 64_000);
 	assert.equal(typeof childAuthority.createChildAuthorityController, "function");
 	assert.equal(typeof childAuthority.claimChildAuthority, "function");
 	const sharedTypes = await import("pi-subagents/shared-types");

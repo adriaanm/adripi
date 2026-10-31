@@ -39,7 +39,7 @@ for (const [producer, consumer] of [[bundled, compiled], [compiled, bundled]]) {
 test("bundle and compiled APIs read the very same live provider slot", () => {
 	const key = Symbol.for("pi-sbx.session-authority.v1");
 	assert.equal(globalThis[key], undefined, "fixture must not replace an active publisher");
-	const provider = { version: 1, sessionId: "built-session", requiredExtensions: [], prepare: async () => { throw new Error("unused"); } };
+	const provider = { version: 2, sessionId: "built-session", requiredExtensions: [], prepare: async () => { throw new Error("unused"); } };
 	globalThis[key] = provider;
 	try {
 		assert.equal(bundled.readChildAuthorityProvider().sessionId, compiled.readChildAuthorityProvider().sessionId);

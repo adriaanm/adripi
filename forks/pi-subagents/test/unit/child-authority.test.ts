@@ -6,6 +6,7 @@ import {
 	CHILD_AUTHORITY_MAX_INFLIGHT_REQUESTS,
 	CHILD_AUTHORITY_MAX_RATIONALE_BYTES,
 	CHILD_AUTHORITY_PROVIDER_KEY,
+	CHILD_AUTHORITY_PROVIDER_VERSION,
 	ChildAuthorityError,
 	acknowledgeChildAuthority,
 	bindChildAuthorityIdentity,
@@ -65,7 +66,7 @@ function fakeProvider(lease: ChildAuthorityProviderLease, extensions = REQUIRED_
 	const prepared: ChildAuthorityIdentity[] = [];
 	return {
 		provider: {
-			version: 1,
+			version: CHILD_AUTHORITY_PROVIDER_VERSION,
 			sessionId: SESSION_ID,
 			requiredExtensions: extensions,
 			prepare: async (identityValue) => {
@@ -84,7 +85,7 @@ function pendingProvider(): { provider: ChildAuthorityProvider; resolve: (lease:
 		settle = resolve;
 	});
 	return {
-		provider: { version: 1, sessionId: SESSION_ID, requiredExtensions: REQUIRED_EXTENSIONS, prepare: () => pending },
+		provider: { version: CHILD_AUTHORITY_PROVIDER_VERSION, sessionId: SESSION_ID, requiredExtensions: REQUIRED_EXTENSIONS, prepare: () => pending },
 		resolve: (lease) => settle?.(lease),
 	};
 }
@@ -174,15 +175,15 @@ describe("child authority provider slot", () => {
 
 	it("reports a missing, foreign-version, or foreign-session service explicitly", () => {
 		expectCode(() => readChildAuthorityProvider(), "service-missing");
-		installProvider({ version: 2, sessionId: SESSION_ID, requiredExtensions: [], prepare: async () => fakeServiceLease().lease } as unknown as ChildAuthorityProvider);
+		installProvider({ version: 1, sessionId: SESSION_ID, requiredExtensions: [], prepare: async () => fakeServiceLease().lease } as unknown as ChildAuthorityProvider);
 		expectCode(() => readChildAuthorityProvider(), "version-mismatch");
-		installProvider({ version: 1, sessionId: SESSION_ID, requiredExtensions: REQUIRED_EXTENSIONS, prepare: async () => fakeServiceLease().lease });
+		installProvider({ version: CHILD_AUTHORITY_PROVIDER_VERSION, sessionId: SESSION_ID, requiredExtensions: REQUIRED_EXTENSIONS, prepare: async () => fakeServiceLease().lease });
 		const provider = readChildAuthorityProvider(SESSION_ID);
 		assert.equal(provider.sessionId, SESSION_ID);
 		assert.deepEqual(provider.requiredExtensions.map((extension) => extension.id), ["pi-sbx", "guardian"]);
 		assert.ok(Object.isFrozen(provider));
 		expectCode(() => readChildAuthorityProvider("another-session"), "session-mismatch");
-		installProvider({ version: 1, sessionId: SESSION_ID, requiredExtensions: [{ id: "pi-sbx", path: "relative/path.ts" }], prepare: async () => fakeServiceLease().lease });
+		installProvider({ version: CHILD_AUTHORITY_PROVIDER_VERSION, sessionId: SESSION_ID, requiredExtensions: [{ id: "pi-sbx", path: "relative/path.ts" }], prepare: async () => fakeServiceLease().lease });
 		expectCode(() => readChildAuthorityProvider(), "service-malformed");
 	});
 
@@ -268,7 +269,7 @@ describe("child authority provider slot", () => {
 
 	it("turns a synchronous provider prepare throw into a bounded preparation failure", async () => {
 		const provider: ChildAuthorityProvider = {
-			version: 1,
+			version: CHILD_AUTHORITY_PROVIDER_VERSION,
 			sessionId: SESSION_ID,
 			requiredExtensions: REQUIRED_EXTENSIONS,
 			prepare: () => {
@@ -305,6 +306,24 @@ describe("child authority identity, action, and decision bounds", () => {
 		]) {
 			expectCode(() => parseChildAuthorityAction(invalid), "invalid-action");
 		}
+	});
+
+	it("carries full Unicode tool JSON under a separate budget without enlarging ordinary actions or policy", () => {
+		const tool = { surface: "tool", target: JSON.stringify({ tool_name: "write", input: { content: "界".repeat(21000) } }), reason: "review exact content" };
+		assert.ok(Buffer.byteLength(tool.target) > 32 * 1024);
+		assert.deepEqual(parseChildAuthorityAction(tool), tool);
+		expectCode(() => parseChildAuthorityAction({ ...tool, surface: "write" }), "invalid-action");
+		expectCode(() => parseChildAuthorityPayload({ value: tool.target }), "invalid-payload");
+		expectCode(() => parseChildAuthorityAction({ ...tool, target: "x".repeat(64001) }), "invalid-action");
+		expectCode(() => parseChildAuthorityAction({ ...tool, reason: "x".repeat(513) }), "invalid-action");
+		expectCode(() => parseChildAuthorityAction({ ...tool, identity: { parentSessionId: "forged" } }), "invalid-action");
+	});
+
+	it("forwards a typed parent batch termination only on a non-allow verdict", () => {
+		assert.deepEqual(parseChildAuthorityDecision({ outcome: "deny", terminate: true }), { outcome: "deny", terminate: true });
+		assert.deepEqual(parseChildAuthorityDecision({ outcome: "allow", terminate: false }), { outcome: "allow" });
+		expectCode(() => parseChildAuthorityDecision({ outcome: "allow", terminate: true }), "invalid-decision");
+		expectCode(() => parseChildAuthorityDecision({ outcome: "deny", terminate: "true" }), "invalid-decision");
 	});
 
 	it("accepts only the four terminal outcomes and bounds the rationale", () => {
@@ -501,10 +520,10 @@ describe("child authority public surface", () => {
 		assert.equal(api.readChildAuthorityProvider, readChildAuthorityProvider);
 		assert.equal(CHILD_AUTHORITY_PROVIDER_KEY, Symbol.for("pi-sbx.session-authority.v1"), "the provider slot mirrors pi-sbx and is only read here");
 		assert.equal(CHILD_AUTHORITY_LEASE_SLOT_KEY, Symbol.for("pi-subagents.child-authority-lease.v1"));
-		assert.equal(api.CHILD_AUTHORITY_PROVIDER_VERSION, 1);
+		assert.equal(api.CHILD_AUTHORITY_PROVIDER_VERSION, 2);
 		assert.equal(typeof api.createChildAuthorityController, "function");
 		assert.equal(typeof api.createChildAuthorityRunnerClient, "function");
-		assert.equal(api.CHILD_AUTHORITY_ENVELOPE_VERSION, 1);
+		assert.equal(api.CHILD_AUTHORITY_ENVELOPE_VERSION, 2);
 		assert.equal(api.CHILD_AUTHORITY_DEFAULT_PREPARE_TIMEOUT_MS, 30_000);
 		assert.equal(api.CHILD_AUTHORITY_DEFAULT_DECISION_TIMEOUT_MS, 600_000);
 		assert.equal(api.CHILD_AUTHORITY_DEFAULT_REQUEST_TIMEOUT_MS, 605_000);

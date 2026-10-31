@@ -48,10 +48,20 @@ push was performed.
   cancellation rejects late results and prevents subsequent human admission,
   but does not claim to cancel an already-running Guardian review internally.
 
-## Frozen policy handoff for downstream consumers
+## Frozen policy handoff at #22 (historical version 1)
 
-The opaque launcher does not interpret this internal pi-sbx payload. Its JSON
-shape is `version: 1`, `kind: "pi-sbx.child-policy"`, with:
+**Protocol amendment:** [production consumer integration](round-2-production-consumers.md)
+now implements provider/wire **2**, with exact tool semantics on the SAME broker.
+The guard/ALS Symbol keys intentionally stay unchanged; old versions refuse.
+Current pi-sbx emits payload `version: 2` with the fields below plus pinned
+`anchor.paths` (literal-prefix spelled/canonical associations). Workspace/Git/
+carve-out retargeting revokes instead of following fresh scope. Still staged:
+static network/env/host-ceiling projection and production consumers remain open.
+The following is the original #22 handoff, not certification of a final consumer
+runtime schema; use the amendment's current verification/limits.
+
+The opaque launcher does not interpret this internal pi-sbx payload. Its #22 JSON
+shape was `version: 1`, `kind: "pi-sbx.child-policy"`, with:
 
 | Field | Meaning / consumer obligation |
 |---|---|

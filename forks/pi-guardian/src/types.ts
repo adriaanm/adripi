@@ -42,6 +42,8 @@ export interface GuardianAssessmentRecordV1 {
 	actionHash: string;
 	parentCursorEntryId?: string;
 	parentToolCallId?: string;
+	/** Exact child action evidence, not a grant. The parent's cursor is not advanced. */
+	delegated?: { identity: import("./delegated-tool.ts").DelegatedToolIdentity; action: GuardianAction };
 	turnKey: string;
 	assessment: GuardianAssessment;
 	source: "rule" | "reviewer";

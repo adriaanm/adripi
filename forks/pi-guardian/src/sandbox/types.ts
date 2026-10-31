@@ -6,6 +6,8 @@
  * same discipline `pi-auto-review` uses, minus the dependency.
  */
 
+import type { DelegatedToolDecision, DelegatedToolRequest } from "../delegated-tool.ts";
+
 export type SandboxSurface = "command" | "network" | "read" | "write";
 
 export type SandboxScope = "once" | "session";
@@ -41,6 +43,8 @@ export type SandboxExceptionDecision =
 
 export interface SandboxBrokerService {
 	review(request: SandboxExceptionRequest): Promise<SandboxExceptionDecision>;
+	/** Host-only exact semantic review on the SAME broker; not an exception/grant. */
+	reviewTool?(request: DelegatedToolRequest): Promise<DelegatedToolDecision>;
 }
 
 export interface SandboxExceptionRules {

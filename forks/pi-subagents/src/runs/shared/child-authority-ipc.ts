@@ -7,6 +7,7 @@ import {
 import {
 	CHILD_AUTHORITY_MAX_DECIDED_REQUEST_IDS,
 	CHILD_AUTHORITY_MAX_INFLIGHT_REQUESTS,
+	CHILD_AUTHORITY_PROVIDER_VERSION,
 	ChildAuthorityError,
 	awaitWithinBound,
 	bindChildAuthorityIdentity,
@@ -32,7 +33,7 @@ import {
 	type ChildAuthorityProviderLease,
 } from "./child-authority.ts";
 
-export const CHILD_AUTHORITY_ENVELOPE_VERSION = 1;
+export const CHILD_AUTHORITY_ENVELOPE_VERSION = 2;
 /**
  * Parent review bound. It hosts one real reviewer + human decision: a shorter bound would turn an interactive
  * approval into `unavailable`.
@@ -199,7 +200,7 @@ class IpcChildAuthorityController implements ChildAuthorityController {
 			throw new ChildAuthorityError("transport-unavailable", "Child authority requires the actual spawned ChildProcess with an IPC channel.");
 		}
 		if (!provider || typeof provider !== "object") throw new ChildAuthorityError("service-missing", "Child authority requires a published provider.");
-		if (provider.version !== 1) throw new ChildAuthorityError("version-mismatch", `Child authority service version ${String(provider.version)} is unsupported; this package requires version 1.`);
+		if (provider.version !== CHILD_AUTHORITY_PROVIDER_VERSION) throw new ChildAuthorityError("version-mismatch", `Child authority service version ${String(provider.version)} is unsupported; this package requires version ${CHILD_AUTHORITY_PROVIDER_VERSION}.`);
 		if (typeof provider.prepare !== "function") throw new ChildAuthorityError("service-malformed", "The published child authority service requires prepare().");
 		if (provider.sessionId !== input.sessionId) {
 			throw new ChildAuthorityError("session-mismatch", `Child authority service belongs to session '${String(provider.sessionId)}', not '${String(input.sessionId)}'.`);

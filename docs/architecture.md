@@ -27,6 +27,8 @@ Pi host (trusted process and extensions)
   |     validate/exact-target admission -> deny/defer/allow rules -> reviewer
   |     defer -> one serialized human UI adapter; no headless channel -> stop
   |     allow -> one execution or one network connection
+  |     reviewTool -> SAME parent fixed/semantic engine for exact delegated tool
+  |                   (full arguments/nesting; no sandbox exception or cursor grant)
   |
   +-- pi-review + pi-subagents: separate advisory diff-review workflow
 ```
@@ -82,9 +84,18 @@ Detailed provenance and update records:
   Guardian/human route at the parent's actual cwd. Provider presence or mandatory
   registration requires guarded launch; startup failure/disablement never opens
   bare fallback. Reinitialization/tightening revoke leases, shutdown retains
-  intent through teardown. This is source carriage/provider acceptance, **not**
-  child policy/Guardian/OS enforcement. See the
-  [payload handoff and verification](round-2-wiring-acceptance.md).
+  intent through teardown. Prepared literal-prefix anchors revoke workspace/Git/
+  read-carveout retargeting before/after decisions, including before human UI;
+  glob-bearing literal roots refuse instead of becoming sibling scope. This is
+  source carriage/provider acceptance, **not**
+  child policy/Guardian/OS enforcement. Provider/wire protocol **2** adds bounded
+  exact-tool semantic review through the SAME parent broker, sharing the ordinary
+  engine, writer, denial/audit consumption and costs. Old versions fail closed;
+  registry keys stay stable to preserve guard intent. Exact child action/audience
+  is evidence, not a filesystem/host grant; parent cursor is not consumed. Static
+  runtime projection and actual production consumers are still required before
+  readiness. See the [consumer contract/verification](round-2-production-consumers.md)
+  and historical [#22 payload handoff](round-2-wiring-acceptance.md).
 - **Accounting:** nonce/UUID-bound reviewer usage snapshots and parent custom
   records report Guardian-only tokens/known USD estimates, separately from native
   parent/subagent totals. Full-tree deduplication spans branches/generations;

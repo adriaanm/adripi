@@ -275,7 +275,7 @@ describe("registered session lifecycle publishing", () => {
     const session = await startSession();
     const active = provider();
     expect(active).toBeDefined();
-    expect(active!.version).toBe(1);
+    expect(active!.version).toBe(2);
     expect(active!.sessionId).toBe("session-1");
     expect(active!.requiredExtensions.map((entry) => entry.id)).toEqual(["pi-sbx", "pi-guardian"]);
     const guardianEntry = realpathSync(join(session.agentDir, "npm", "node_modules", "pi-guardian", "src", "index.ts"));
@@ -286,7 +286,7 @@ describe("registered session lifecycle publishing", () => {
     const lease = await prepare(active!, session.sessionId, child.spelled);
     expect(lease.requiredConsumers).toEqual(["pi-sbx", "pi-guardian"]);
     expect(lease.payload).toMatchObject({
-      version: 1,
+      version: 2,
       kind: "pi-sbx.child-policy",
       anchor: { cwd: session.root },
       workspace: { spelled: child.spelled, canonical: child.canonical },
