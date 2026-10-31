@@ -13,6 +13,7 @@ import { pathToFileURL } from "node:url";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext, ToolCallEvent, ToolCallEventResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { CHILD_COMMAND_TOOL, createChildCommandRuntime } from "./child-commands.ts";
+import { hasChildAuthorityContext } from "./child-authority.ts";
 import { supervisorChannelDir } from "./child-tool-plan.ts";
 import { pinChildCacheRetention } from "../../shared/child-cache-retention.ts";
 import { getAgentDir, PI_CODING_AGENT_PACKAGE_ROOT_ENV } from "../../shared/utils.ts";
@@ -339,7 +340,7 @@ function missingBuiltinMcpTools(session: { getAllTools(): Array<{ name: string }
 	return names.filter((name) => !active.has(name) || !direct.has(name));
 }
 
-function flushQueuedProviderRegistrations(loader: InstanceType<PiCodingAgentModule["DefaultResourceLoader"]>, modelRuntime: ModelRuntimeInstance, onError: ((error: ChildSessionExtensionError) => void) | undefined, requiredPaths: ReadonlySet<string>): { claimedProviderIds: Set<string>; registered: boolean } {
+function flushQueuedProviderRegistrations(loader: InstanceType<PiCodingAgentModule["DefaultResourceLoader"]>, modelRuntime: ModelRuntimeInstance, onError: ((error: ChildSessionExtensionError) => void) | undefined, requiredPaths: ReadonlySet<string>, guarded = false): { claimedProviderIds: Set<string>; registered: boolean } {
 	const claimedProviderIds = new Set<string>();
 	if (!("getExtensions" in loader) || typeof loader.getExtensions !== "function") return { claimedProviderIds, registered: false };
 	const { runtime } = loader.getExtensions();
@@ -351,7 +352,7 @@ function flushQueuedProviderRegistrations(loader: InstanceType<PiCodingAgentModu
 			registered = true;
 		} catch (error) {
 			onError?.({ extensionPath, event: "register_provider", error });
-			if (requiredPaths.has(extensionPath)) throw new Error(`Required child extension provider registration failed for '${extensionPath}': ${error instanceof Error ? error.message : String(error)}`);
+			if (guarded || requiredPaths.has(extensionPath)) throw new Error(`${guarded ? "Guarded child" : "Required child extension"} provider registration failed for '${extensionPath}': ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
 	if (Array.isArray(runtime.pendingProviderRegistrations)) runtime.pendingProviderRegistrations = [];
@@ -362,7 +363,7 @@ function flushQueuedProviderRegistrations(loader: InstanceType<PiCodingAgentModu
 			registered = true;
 		} catch (error) {
 			onError?.({ extensionPath, event: "register_provider", error });
-			if (requiredPaths.has(extensionPath)) throw new Error(`Required child extension provider registration failed for '${extensionPath}': ${error instanceof Error ? error.message : String(error)}`);
+			if (guarded || requiredPaths.has(extensionPath)) throw new Error(`${guarded ? "Guarded child" : "Required child extension"} provider registration failed for '${extensionPath}': ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
 	if (Array.isArray(runtime.pendingNativeProviderRegistrations)) runtime.pendingNativeProviderRegistrations = [];
@@ -381,7 +382,7 @@ function flushQueuedProviderRegistrations(loader: InstanceType<PiCodingAgentModu
 			registered = true;
 		} catch (error) {
 			onError?.({ extensionPath, event: "register_virtual_model", error });
-			if (requiredPaths.has(extensionPath)) throw new Error(`Required child extension virtual model registration failed for '${extensionPath}': ${error instanceof Error ? error.message : String(error)}`);
+			if (guarded || requiredPaths.has(extensionPath)) throw new Error(`${guarded ? "Guarded child" : "Required child extension"} virtual model registration failed for '${extensionPath}': ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
 	if (Array.isArray(virtualModelQueue.pendingVirtualModelRegistrations)) virtualModelQueue.pendingVirtualModelRegistrations = [];
@@ -429,6 +430,14 @@ function isUnknownRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function requireGuardedModelReference(value: string | undefined): string {
+	const reference = value?.replace(/:(off|minimal|low|medium|high|xhigh|max)$/, "");
+	if (!reference || reference !== reference.trim() || /[\x00-\x1f\x7f]/.test(reference) || !/^[^/\s]+\/.+$/.test(reference)) {
+		throw new Error("Guarded child startup requires an explicit fully qualified provider/model; SDK defaults and fuzzy fallback cannot select the provider.");
+	}
+	return reference;
+}
+
 /**
  * Default factory: detached/background sessions retain the existing shared
  * runtime; each parent-bound foreground launch gets an isolated runtime.
@@ -452,12 +461,16 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 	};
 	return {
 		async create(launch) {
+			// Routing intent is not a claim/ack: real consumers still install their
+			// authority adapters before the runner admits a first prompt.
+			const guarded = hasChildAuthorityContext();
+			const requestedModel = guarded ? requireGuardedModelReference(launch.model) : undefined;
 			const disposalsAtStart = disposals;
 			const pi = await loadPiCodingAgent();
 			const builtinMcpTools = launch.builtinMcpTools ?? [];
 			let readinessTool: ToolDefinition | undefined;
 			const builtinMcp = builtinMcpTools.length ? selectedBuiltinMcpExtension(pi, builtinMcpTools, () => readinessTool) : undefined;
-			const modelRuntime = launch.parentProviderRegistry
+			const modelRuntime = guarded || launch.parentProviderRegistry
 				? await pi.ModelRuntime.create()
 				: await sharedRuntime(pi);
 			const agentDir = getAgentDir();
@@ -466,7 +479,12 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 				&& !launch.excludeTools?.includes("bash") && !launch.excludeTools?.includes(CHILD_COMMAND_TOOL)
 				&& typeof pi.createBashTool === "function"
 				? createChildCommandRuntime(supervisorChannelDir(launch.runtime.runId, launch.runtime.agent, launch.runtime.childIndex)) : undefined;
-			const settingsManager = pi.SettingsManager.create(launch.cwd, agentDir, { projectTrusted: launch.projectTrusted });
+			// A parent's boolean is not a trust decision for this child's cwd.
+			// Keep global user/provider resources, not child .pi configuration.
+			const settingsManager = pi.SettingsManager.create(launch.cwd, agentDir, { projectTrusted: guarded ? false : launch.projectTrusted });
+			if (guarded && (typeof settingsManager.isProjectTrusted !== "function" || settingsManager.isProjectTrusted() !== false)) {
+				throw new Error("Guarded child startup requires an SDK with explicit untrusted-project settings support.");
+			}
 			// Foreground children share Pi's global theme with the parent, so reinitializing it
 			// would overwrite the parent's active light/dark appearance. Detached runners have
 			// no initialized theme and must initialize one for headless extension renderers.
@@ -534,10 +552,10 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 				applyProcessEnv(launch.processEnv);
 				if (!resetExtensionCacheOnReload(loader) && (launch.ambientExtensions || launch.extensionPaths.length)) launch.onExtensionError?.({ extensionPath: "<loader>", event: "load", error: new Error("pi's extension cache reset is unavailable; extensions loaded into this child share module state with other sessions in this process.") });
 				await loader.reload();
-				const loadErrors = requiredPaths.size > 0
+				const loadErrors = guarded ? loader.getExtensions().errors : requiredPaths.size > 0
 					? loader.getExtensions().errors.filter(({ path }) => requiredPaths.has(path)) : [];
-				if (loadErrors.length > 0) throw new Error(`Required child extension failed to load: ${loadErrors.map(({ path, error }) => `${path}: ${error}`).join("; ")}`);
-				const queued = flushQueuedProviderRegistrations(loader, modelRuntime, launch.onExtensionError, requiredPaths);
+				if (loadErrors.length > 0) throw new Error(`${guarded ? "Guarded child" : "Required child"} extension failed to load: ${loadErrors.map(({ path, error }) => `${path}: ${error}`).join("; ")}`);
+				const queued = flushQueuedProviderRegistrations(loader, modelRuntime, launch.onExtensionError, requiredPaths, guarded);
 				if (launch.parentProviderRegistry) inheritedProviders = inheritParentProviders(modelRuntime, launch.parentProviderRegistry, queued.claimedProviderIds, launch.onExtensionError);
 				if (queued.registered || inheritedProviders.size > 0) {
 					try {
@@ -564,6 +582,9 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 					? pi.resolveCliModel({ cliModel: launch.model, modelRuntime })
 					: undefined;
 				if (resolvedModel?.error) throw new Error(resolvedModel.error);
+				if (guarded && (resolvedModel?.warning || !resolvedModel?.model || `${resolvedModel.model.provider}/${resolvedModel.model.id}` !== requestedModel)) {
+					throw new Error(`Guarded child model must resolve exactly to '${requestedModel}' without fallback${resolvedModel?.warning ? `: ${resolvedModel.warning}` : "."}`);
+				}
 				const { session } = await pi.createAgentSession({
 					cwd: launch.cwd,
 					agentDir,
@@ -585,7 +606,7 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 					await session.bindExtensions({
 						mode: "print",
 						onError: (error) => {
-							if (binding && requiredPaths.has(error.extensionPath)) requiredStartupErrors.push(`${error.extensionPath} (${error.event}): ${error.error}`);
+							if (binding && (guarded || requiredPaths.has(error.extensionPath))) requiredStartupErrors.push(`${error.extensionPath} (${error.event}): ${error.error}`);
 							launch.onExtensionError?.({ extensionPath: error.extensionPath, event: error.event, error: error.error });
 						},
 					});
@@ -598,7 +619,11 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 				if (requiredStartupErrors.length > 0) {
 					// Binding finished, so the other extensions' session_start handlers ran and may hold resources.
 					await shutdownSession(session);
-					throw new Error(`Required child extension failed during startup: ${requiredStartupErrors.join("; ")}`);
+					throw new Error(`${guarded ? "Guarded child" : "Required child"} extension failed during startup: ${requiredStartupErrors.join("; ")}`);
+				}
+				if (guarded && (!session.model || `${session.model.provider}/${session.model.id}` !== requestedModel)) {
+					await shutdownSession(session);
+					throw new Error(`Guarded child model changed during SDK startup; expected '${requestedModel}'.`);
 				}
 				return session;
 			};

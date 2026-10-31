@@ -146,6 +146,34 @@ fresh verifier and all four graph tests passed again. Durable ignored output:
 Historical failed-run evidence remains `.local/goal-consumers/open-*` and the
 command/denial transcript. No deployment, restart or live-policy change.
 
+### Guarded SDK resource/model startup (source prerequisite)
+
+The actual default SDK factory now selects guarded behavior through the SAME
+public context detector. Guarded child settings always use `projectTrusted:false`,
+regardless of the parent's launch boolean; unsupported SDK trust semantics refuse.
+This excludes child `.pi` settings/packages/auto extensions/SYSTEM and gives the
+real built-in MCP startup an untrusted context, while retaining explicitly
+selected code and trusted global user/provider resources. It does not create a
+parallel loader or copy grants from child-local configuration.
+
+Guarded launches require an explicit fully qualified provider/model before SDK
+loading and own a fresh ModelRuntime. SDK resolution must return that exact tuple
+without fallback warnings, and `session_start` cannot silently change the selected
+model. Reported extension import/startup and provider/native/virtual registration
+failures are fatal even for non-required extensions, rather than leaving a
+built-in/default provider in charge. Partial initialized sessions are disposed.
+Ordinary unguarded factory behavior is unchanged. This is selection fidelity,
+not a model-derived permission or a consumer claim/acknowledgment.
+
+Fourteen new regressions include real resource discovery, trusted global provider
+retention, actual SDK/faux-provider `session_start` and real built-in MCP refusing
+a child-project server. The readiness assertion remains unsatisfied in the SDK
+fixture: no production enforcement/first-prompt acknowledgment is claimed. Nine
+initial regression cases failed against the prior factory, including executed
+child-project override code and accepted model/startup substitution. See the
+[consumer integration record](../../docs/round-2-production-consumers.md) for
+current verification and remaining production/runtime gates.
+
 pi-sbx now has the actual registered parent publisher, narrowing policy and shared
 Guardian/human adapter. **Production child consumers are not implemented**: real
 required extensions cannot acknowledge and therefore must not reach a first

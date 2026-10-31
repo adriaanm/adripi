@@ -167,12 +167,12 @@ this already-passing source suite. Output is retained under
 `.local/goal-output-capture/subagents-full-unit.log`. No host exception, runtime
 switch, broker/toggle change, deployment or restart was performed.
 
-Still needed before readiness: audit/fix guarded SDK settings/resource loading so
-another cwd cannot borrow parent project trust or load child-local code/config as
-authority; preserve the explicitly configured provider/model without fallback.
-Then implement and compose the real pi-sbx/Guardian consumers under SDK + IPC,
-including strict policy decoding, active narrowed SRT/native adapters, exact
-parent review, action/scratch pins, freshness and fail-closed teardown.
+The guarded SDK resource/model follow-up below now addresses borrowed project
+trust and SDK model fallback. Still needed before readiness: implement and compose
+the real pi-sbx/Guardian consumers under SDK + IPC, including strict policy
+decoding, active narrowed SRT/native adapters, exact parent review, action/scratch
+pins, freshness and fail-closed teardown. Factory setup alone cannot acknowledge
+those consumers or authorize a first prompt.
 
 ## Post-capture verification iteration (still no consumer acceptance)
 
@@ -212,6 +212,44 @@ host acceptance; #15 production OS/Git; #24 live accounting; #25 measured
 context/latency/total cost. Source/fixture success cannot substitute for those.
 The VM authorization did not authorize live config/session/toggle edits,
 credential/audit-content reads, host runtime replacement, deployment or push.
+
+## Guarded SDK resource/model follow-up (source prerequisite)
+
+The real default factory uses the same public child-context detector and always
+creates guarded settings with `projectTrusted:false`; a parent's boolean is not
+trust for another cwd. Unsupported SDK trust semantics refuse. Existing trusted
+global user/provider resources and explicit host-selected extensions remain;
+child `.pi` settings/packages/auto extensions/SYSTEM and project MCP servers do
+not become startup authority. No parallel resource loader or ambient child
+permission store is introduced.
+
+A guarded launch needs an explicit fully qualified provider/model before SDK
+loading. It owns a fresh ModelRuntime; SDK resolution must return that exact
+provider/id without fallback warnings, and actual SDK startup cannot substitute
+another model. Reported extension import/startup and provider/native/virtual
+registration failures are fatal even for non-required extensions, rather than
+silently retaining a built-in/default provider. Partially initialized sessions
+are disposed. Unguarded factory behavior is unchanged.
+
+Fourteen regressions cover real settings/resource discovery, global provider
+retention versus a child override, unsupported trust APIs, reported provider/load/
+startup failures, exact model/warning/default negatives, and startup model drift.
+Actual SDK/faux-provider `session_start` observes false project trust and the
+selected tuple; a real built-in MCP startup cannot connect a child-project trap
+server. No model request is sent and the live lease's readiness assertion still
+fails: this does **not** stand in for production consumers, SRT enforcement or
+first-prompt composition. All nine initial cases failed against the old factory.
+Verification: all **4,254 unit tests / 442 suites**, **4,237 pass / 17 skip /
+0 fail**, with bounded Node test concurrency 4 (141.61s); **61 focused factory
+tests**, types, fresh build/verifier, **4 actual graph tests**, root **69**
+fixtures and diff checks pass. Graph remains **383 inputs / 17 exports / 329
+compiled modules / 18 module-URL targets / 765 artifacts**, artifact prefix
+`f8de079a155088c5`. Logs: `.local/goal-wiring-sdk/`. A prior default-concurrency
+full run passed the new cases but hit the unrelated owned-npm timeout fixture's
+500ms PID-file deadline; all seven npm-root cases pass in isolation and the
+entire suite passes at concurrency 4. No production timeout, dependency, model,
+installed runtime, policy or Guardian toggle was changed to obtain that result.
+The remaining acceptance boundaries above are unchanged.
 
 ## Source-proven gaps at the initial baseline
 
