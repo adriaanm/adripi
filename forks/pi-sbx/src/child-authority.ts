@@ -426,6 +426,10 @@ export function deriveChildPolicy(input: DeriveChildPolicyInput): DerivedChildPo
     throw new Error("verified Git metadata contains glob characters; required exclusions cannot be expressed exactly");
   }
   const git = discoveredGit
+    // Already-held is necessary, not sufficient: a Git pointer/commondir must
+    // never launder the parent's maintenance or private-scratch capability.
+    .filter(candidate => [candidate.root, ...candidate.aliases].every(path =>
+      !excluded.some(root => isWithin(path, root) || isWithin(root, path))))
     .filter((candidate) => !mandatoryWriteBlock(candidate.root, candidate.aliases, baseline.cwd, baseline.policy))
     .filter((candidate) => [candidate.root, ...candidate.aliases].every((path) => canWrite(path, baseline.cwd, baseline.policy)));
 

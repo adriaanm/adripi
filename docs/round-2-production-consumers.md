@@ -1,7 +1,7 @@
 # Production child consumers: integration commission
 
 Current source baseline: launch/provider `cd15ee4`, Guardian accounting `8f7551c`.
-Todo #14 is active; #15 remains the separate OS/external-worktree/Git acceptance.
+Todo #14 remains unfinished; #15 is the separate OS/external-worktree/Git acceptance.
 This record is an implementation contract/plan, **not** consumer acceptance.
 No worker is active. The parent is the sole sequential writer in main; no
 concurrent component writers, deployment, live-policy/toggle changes or runtime
@@ -129,6 +129,21 @@ subagents **79 focused tests**
 and fresh unchanged build verifier; root **69 deployment fixtures**/checks. These
 are source tests, not production consumers or nested/host OS containment. No new
 full Guardian HTTP/runtime clearance or live cost/latency measurement is claimed.
+
+## Reserved Git metadata follow-up: source fix, not consumer acceptance
+
+A writable workspace could name the already-held parent agent directory or
+private scratch through its Git pointer and receive that root in `write.allow`.
+Both new private-fixture regressions failed before the fix
+(`.local/goal-consumers/git-reserved-before.log`); no real credential/audit file
+was accessed. Git metadata admission now excludes canonical roots and aliases
+that overlap either reserved namespace in either direction, just as workspace
+admission does. An already-held parent capability is not automatically delegable.
+
+Current pi-sbx verification: **256 tests / 24 files** and types pass; root checks,
+including **69 deployment fixtures**, and `git diff --check` pass. This repairs
+provider scope derivation only; production consumers, SDK resource isolation and
+actual OS/Git containment remain unfinished. No deployment/live change occurred.
 
 ## Source-proven gaps at the initial baseline
 

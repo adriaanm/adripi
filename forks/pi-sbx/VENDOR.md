@@ -90,7 +90,11 @@ routes in Git history are retired, not additional supported APIs.
     deny-based reads and current-parent/prepared-ceiling intersection. Symlinked
     Git roots cannot manufacture canonical held scope; known Git config/hooks
     remain excluded even for unheld metadata. AgentDir/private parent scratch
-    cannot be delegated. Baseline changes revoke synchronously; shutdown keeps
+    cannot be delegated, including when a workspace Git pointer/commondir names
+    one of them as already-held metadata. Both canonical roots and aliases are
+    excluded on overlap in either direction; two private-directory regressions
+    reproduced the pre-fix write-scope leak without accessing credentials/audit.
+    Baseline changes revoke synchronously; shutdown keeps
     guard intent through teardown; direct prepared decisions also combine lease
     revocation/caller signals. Shared broker/human adapter preserves ordinary
     Bash/network defaults, source attribution and pre-human rule snapshots.
@@ -130,7 +134,7 @@ routes in Git history are retired, not additional supported APIs.
     registered native-gate grant/deny/headless/cancellation/isolation coverage,
     helper/config/lifecycle and actual registered provider coverage, plus composed
     native-launch/real-IPC/controlled-consumer/broker/human tests. Current source:
-    **254 tests / 24 files**, typecheck/root checks pass. These are not production
+    **256 tests / 24 files**, typecheck/root checks pass. These are not production
     child consumers or live nested OS-sandbox tests. See the
     [wiring acceptance/handoff](../../docs/round-2-wiring-acceptance.md).
 

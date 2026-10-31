@@ -677,6 +677,20 @@ describe("prepared runtime and asynchronous baseline consistency", () => {
   }
 });
 
+describe("Git metadata cannot launder a parent-only capability", () => {
+  for (const [name, root] of [["agent directory", AGENT_DIR], ["parent scratch", PARENT_SCRATCH]] as const) {
+    it(`does not delegate the ${name} when a writable workspace points its Git metadata there`, async () => {
+      const workspace = join(ROOT, `git-reserved-${name.replaceAll(" ", "-")}`); mkdirSync(workspace);
+      // These are private fixture directories, never a real credential/audit file.
+      writeFileSync(join(root, "HEAD"), "ref: refs/heads/main\n");
+      writeFileSync(join(workspace, ".git"), `gitdir: ${root}\n`);
+      const lease = await leaseFor(publication(() => grantedBaseline()), workspace);
+      expect(lease.payload.write.allow).not.toContain(root);
+      expect(lease.payload.write.allow).toEqual([realpathSync(workspace)]);
+    });
+  }
+});
+
 describe("the child's own policy and metadata stay final", () => {
   it("denies a write to the child's own policy file and Git config through the live lease", async () => {
     publishBroker();
