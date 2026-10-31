@@ -156,10 +156,15 @@ consumer. Real extension startup has not yet been wired to this prerequisite.
 
 Verification: **83 focused authority tests**, types, fresh build/verifier and
 **4 actual bundle/compiled graph tests** pass; root **69 deployment fixtures**
-pass. Artifact prefix `e687d77d2d57b6eb`. The full subagents unit suite hit sandbox
-process/socket restrictions; a host rerun was refused because no Guardian sandbox
-broker is published, so full-suite verification of this revision remains open.
-No fallback, broker/toggle change, deployment or restart was performed.
+pass. Artifact prefix `e687d77d2d57b6eb`. Initially the full subagents suite hit
+sandbox process/socket restrictions and the host retry was refused for a missing
+Guardian broker. The subsequent operator-requested plain default-Bash run now
+passes: **4,240 total / 4,223 pass / 17 skip / zero failures**, **441 suites**,
+92.13s. Types, fresh verifier and four graph tests pass again. Todo #26 is closed;
+loaded Guardian broker availability remains unverified, not a prerequisite for
+this already-passing source suite. Output is retained under
+`.local/goal-output-capture/subagents-full-unit.log`. No host exception, runtime
+switch, broker/toggle change, deployment or restart was performed.
 
 Still needed before readiness: audit/fix guarded SDK settings/resource loading so
 another cwd cannot borrow parent project trust or load child-local code/config as
@@ -167,6 +172,30 @@ authority; preserve the explicitly configured provider/model without fallback.
 Then implement and compose the real pi-sbx/Guardian consumers under SDK + IPC,
 including strict policy decoding, active narrowed SRT/native adapters, exact
 parent review, action/scratch pins, freshness and fail-closed teardown.
+
+## Post-capture verification iteration (still no consumer acceptance)
+
+Native Bash `output_file` source is implemented in `a65229d`; the fork README and
+VENDOR describe its exact-write gate, backend capture, partial/error semantics and
+retention limits. Full pi-sbx **278 tests / 25 files**, types, **5 installed-SDK1.4
+backend probes**, root **69 deployment fixtures** and diff checks pass. The probes
+use real local SDK processes/output, not nested SRT or production consumers. A
+global-temp scratch fixture race was repaired by recording its own allocation.
+
+Guardian **177 non-headless tests** and types passed again. The separate actual
+HTTP-headless gate #4 is NOT cleared: current Node is **26.6.0**, the known native
+assertion is unchanged, and bounded Homebrew/nvm/mise/fnm/Volta/common-path
+inspection found no compatible alternate executable. This is not an exhaustive
+machine search. #30 requests an operator-provided compatible runtime or explicit
+provisioning authorization, including consistent parent/child CLI runtime choice.
+No pointless re-crash, install or silent runtime selection was performed.
+
+Remaining order/dependencies: #14 real consumers; #4/#30 runtime gate; #29
+separately authorized deployment/restart and loaded identities; #28 actual broker
+availability before host acceptance; #15 production OS/Git; #24 live accounting;
+#25 measured context/latency/total cost. Source/fixture success cannot substitute
+for any of those. Nothing here authorizes live config/session/toggle edits,
+credential/audit-content reads, runtime replacement, deployment or push.
 
 ## Source-proven gaps at the initial baseline
 

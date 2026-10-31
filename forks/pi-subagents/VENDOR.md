@@ -133,13 +133,18 @@ Verification: **83** focused authority tests and typecheck pass; fresh build and
 verifier plus **4 actual bundle/compiled graph tests** pass (including cross-graph
 context/latch checks). Graph remains **383 inputs / 17 exports / 329 compiled
 modules / 18 module-URL targets / 765 artifacts**, artifact prefix
-`e687d77d2d57b6eb`; root **69 deployment fixtures** pass. The full unit command was
-attempted inside the sandbox and hit process-inspection/socket restrictions
-(including `spawnSync ps EPERM`). Its host rerun did **not** execute: the current
-Guardian broker is unavailable. Full-suite verification of this revision remains
-open; the earlier 4,219-pass host result above belongs to the earlier source.
-Evidence: `.local/goal-consumers/open-*` plus the command/denial transcript; no
-new full-suite or containment claim, deployment, restart or live-policy change.
+`e687d77d2d57b6eb`; root **69 deployment fixtures** pass. Initially the full unit
+command hit sandbox process/socket restrictions and its host rerun did not execute
+because the Guardian broker was unavailable. A later operator-requested ordinary
+`npm --prefix forks/pi-subagents run test:unit` now passes on the current source:
+**4,240 total / 4,223 pass / 17 skip / 0 fail**, **441 suites**, 92.13s. No host
+exception, runtime change or Guardian toggle was used for that successful run;
+this closes todo #26, not OS containment or loaded-broker acceptance. Types,
+fresh verifier and all four graph tests passed again. Durable ignored output:
+`.local/goal-output-capture/subagents-full-unit.log`; original tool artifact:
+`/var/folders/wv/sk29c9qn6xnd_rvynqrkx3pm0000gn/T/pi-bash-99c5c06b62d08e8b.log`.
+Historical failed-run evidence remains `.local/goal-consumers/open-*` and the
+command/denial transcript. No deployment, restart or live-policy change.
 
 pi-sbx now has the actual registered parent publisher, narrowing policy and shared
 Guardian/human adapter. **Production child consumers are not implemented**: real
