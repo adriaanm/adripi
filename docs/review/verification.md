@@ -4,6 +4,12 @@ Baseline: `2e86f45` (`sandbox: persist a proposed prefix_rule as a project
 permission`). This review changes documentation/evidence only. It does not deploy,
 restart Pi, change policy, make network Git calls, or repair the findings.
 
+This is a **historical baseline**. Later explicitly authorized Linux/arm64
+Node24.22.2 VM verification passes all **178 current Guardian tests**, including
+real CLI/HTTP headless with zero skips; see
+[the compatible-runtime record](../guardian-container-verification.md). That does
+not retroactively make the Node26 baseline green or certify deployed behavior.
+
 ## Method and scope
 
 - Read the installer, package pins, templates, architecture/design records,

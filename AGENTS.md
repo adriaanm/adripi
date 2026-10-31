@@ -212,9 +212,14 @@ authority. See `docs/guardian-costs.md`; estimates are not provider invoices.
 - `just check` — shell syntax plus the config templates.
 - `cd forks/pi-sbx && npx vitest run && npx tsc --noEmit`
 - `cd forks/pi-guardian && npm test && npm run check` (`node --test`).
-  `test/headless.test.ts` crashes node 26 with an assertion in libuv
-  (`env_->execution_async_id()`); it fails identically on a clean `HEAD`, so do
-  not chase it.
+  `test/headless.test.ts` crashes macOS Node26 with an assertion in libuv
+  (`env_->execution_async_id()`), also reproduced on a clean `HEAD`. The full
+  **178-test suite including HTTP headless passes on Linux/arm64 Node24.22.2**
+  in an explicitly authorized `container` VM; see
+  `docs/guardian-container-verification.md` and `scripts/verify-guardian-vm.mjs`.
+  That is not a host Node26 fix, deployed acceptance or standing VM permission.
+  Fresh Guardian/pi-sbx verification uses their existing frozen pnpm locks;
+  pi-sbx's secondary npm lock is stale (#31), not permission to upgrade deps.
 - When the sandbox is active you cannot nest `srt`/`sandbox-exec` to test a
   profile from inside a session; verify policy logic with the exported helpers
   (`loadConfig`, `createFilePolicy`/`canRead`/`canWrite`, `evaluatePermissions`)

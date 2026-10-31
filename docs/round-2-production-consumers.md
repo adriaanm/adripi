@@ -57,9 +57,10 @@ The real Node IPC integration uses the actual pi-sbx provider, real launcher
 registration/controller/client, registered parent Guardian and a credential-free
 sidecar verdict fixture. Its child acknowledgments are **protocol-test code**,
 not production consumers or SRT enforcement. No first production child model
-prompt is authorized by these results. Full compatible-runtime HTTP, actual
-child OS/Git containment and live usage/latency remain open. No deployment,
-restart, runtime/dependency installation, live-policy/toggle edit or push.
+prompt is authorized by these results. At that milestone compatible-runtime
+HTTP, actual child OS/Git containment and live usage/latency remained open;
+the later Node24 VM follow-up below clears only the first. No deployment,
+restart, host runtime/dependency installation, live-policy/toggle edit or push.
 
 ## Runtime-authority phase: parent projection and decisions (source only)
 
@@ -182,20 +183,35 @@ backend probes**, root **69 deployment fixtures** and diff checks pass. The prob
 use real local SDK processes/output, not nested SRT or production consumers. A
 global-temp scratch fixture race was repaired by recording its own allocation.
 
-Guardian **177 non-headless tests** and types passed again. The separate actual
-HTTP-headless gate #4 is NOT cleared: current Node is **26.6.0**, the known native
-assertion is unchanged, and bounded Homebrew/nvm/mise/fnm/Volta/common-path
-inspection found no compatible alternate executable. This is not an exhaustive
-machine search. #30 requests an operator-provided compatible runtime or explicit
-provisioning authorization, including consistent parent/child CLI runtime choice.
-No pointless re-crash, install or silent runtime selection was performed.
+Guardian **177 non-headless tests** and types passed again on host Node26.6.0.
+At that point bounded Homebrew/nvm/mise/fnm/Volta/common-path inspection found no
+compatible executable; #30 requested operator-provided/authorized infrastructure.
+No pointless re-crash or silent live-runtime selection was performed.
 
-Remaining order/dependencies: #14 real consumers; #4/#30 runtime gate; #29
-separately authorized deployment/restart and loaded identities; #28 actual broker
-availability before host acceptance; #15 production OS/Git; #24 live accounting;
-#25 measured context/latency/total cost. Source/fixture success cannot substitute
-for any of those. Nothing here authorizes live config/session/toggle edits,
-credential/audit-content reads, runtime replacement, deployment or push.
+## Compatible-runtime VM follow-up: HTTP source gate closed
+
+The operator subsequently authorized `container` CLI use. Official pinned
+Node24.22.2 on Linux/arm64 passes **all 178 Guardian tests**, zero failures/skips,
+including the actual Pi1.0 CLI/HTTP JSON no-session status/nested-review/rule-deny
+test, also run standalone. Guardian and pi-sbx types pass. Parent and child Node
+executables/version are checked and child PATH pinned. SDK versions remain
+Guardian1.0 / pi-sbx0.84.4 / subagents1.2, with existing frozen Guardian/pi-sbx
+pnpm locks and subagents npm ci; manifest/lock hashes are unchanged. A synthetic
+HOME and only a read-only tracked-source archive avoid host credential/audit/
+config mounts. All task-owned VMs were removed after logs were copied.
+
+Todos **#4/#30 are closed**, not bypassed or certified by skipped tests. This
+Linux result does not fix host Node26's native assertion. See
+[the evidence and bounded reproduction recipe](guardian-container-verification.md).
+The initial provisioning failure exposed a stale secondary pi-sbx npm lock;
+separate #31 tracks it, without changing dependency versions for verification.
+
+Remaining order/dependencies: #14 real consumers; #29 separately authorized
+deployment/restart and loaded identities; #28 actual broker availability before
+host acceptance; #15 production OS/Git; #24 live accounting; #25 measured
+context/latency/total cost. Source/fixture success cannot substitute for those.
+The VM authorization did not authorize live config/session/toggle edits,
+credential/audit-content reads, host runtime replacement, deployment or push.
 
 ## Source-proven gaps at the initial baseline
 
@@ -288,6 +304,7 @@ Unit/mocked SRT projection and credential-free SDK/IPC integration are source
 acceptance, not OS containment. #15 must separately exercise the production child
 under the actual runtime and prove external-worktree edit/test/review/integration,
 required common Git metadata authority, sibling/mandatory-deny negatives and
-dirty-preserving cleanup. A compatible-runtime HTTP headless run and live context
-latency/cost acceptance (#4/#24/#25) remain open; the known Node26 native assertion
-is not permission to replace the runtime or bypass an approval refusal.
+dirty-preserving cleanup. Compatible-runtime HTTP source gate #4 now passes in
+the explicitly authorized Node24 Linux VM above; live context latency/cost
+acceptance (#24/#25) remains open. That result neither fixes host Node26's native
+assertion nor permits live-runtime replacement or bypassing an approval refusal.

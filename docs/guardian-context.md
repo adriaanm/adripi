@@ -186,8 +186,11 @@ actions.
 - Full `npm test` was run: **150 pass, one existing HTTP headless test fails by
   Node26's native libuv assertion** `env_->execution_async_id() == 0`. Evidence:
   `.local/guardian-context/full-test.log`. No alternate runtime was installed or
-  silently selected. Todo #4 remains the compatible-runtime gate; full runtime
-  acceptance is not claimed.
+  silently selected at that milestone. Later operator-authorized Linux/arm64
+  Node24.22.2 VM verification passes **all 178 current Guardian tests**, including
+  the actual CLI/HTTP test with zero skips, and types. Todo #4 is now closed; see
+  [the bounded VM recipe and evidence](guardian-container-verification.md).
+  No host runtime/deployment change or live performance acceptance is claimed.
 
 The earlier mechanism probes remain in
 `docs/review/guardian-pruning-probes.test.mjs`. The implementation tests live in

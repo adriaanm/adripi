@@ -95,7 +95,13 @@ Accounting does not authorize tools, mutate review cursors or add standing grant
 - `just check` and `git diff --check` pass. Current ignored evidence is under
   `.local/goal-costs/`.
 
+The above records the initial Node26 milestone. Subsequent explicitly authorized
+Linux/arm64 **Node24.22.2 VM** verification passes the standalone real CLI/HTTP
+test and **all 178 current Guardian tests**, zero failures/skips, plus types.
+See [the VM evidence/recipe](guardian-container-verification.md). Compatible-runtime
+source gate #4 is closed; the host Node26 assertion is not fixed by that result.
+
 This is source/credential-free integration acceptance, not live deployed billing,
-provider invoice reconciliation or a latency/cost-savings benchmark. Deployment,
-compatible-runtime full HTTP headless and live performance acceptance remain
-separate gates.
+provider invoice reconciliation or a latency/cost-savings benchmark. Deployment
+and live accounting/performance acceptance (#29/#24/#25) remain separate gates;
+the VM results do not measure paid-provider spending or savings.

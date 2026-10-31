@@ -186,8 +186,9 @@ deltas are listed below; nothing else is modified.
     text. Context, directive, output and legacy-migration failures deny. Tests
     exercise real SDK projection/summarization/retry and an actual CLI bootstrap
     with a credential-free local provider, plus transport serialization and
-    fail-closed negatives. Full HTTP headless remains blocked by Node26's known
-    native assertion; no deployment or live-provider latency claim. See
+    fail-closed negatives. Initial HTTP headless verification hit Node26's native
+    assertion; later full Node24 Linux VM verification passes (record below).
+    No deployment or live-provider latency claim. See
     [the context record](../../docs/guardian-context.md).
 
 17. `src/usage.ts`, managed reviewer/sidecar/index/TUI — Guardian-only accounting.
@@ -201,8 +202,8 @@ deltas are listed below; nothing else is modified.
     a parent switch; missing final telemetry remains an explicit gap, not zero.
     Widget plus `/guardian costs` report tokens/known USD estimates separately;
     zero/absent tariffs are unpriced and missing usage unreported. No toggle,
-    config, model or live session migration. Source verification: **164 tests
-    pass** with only the known Node26 HTTP headless native failure; typecheck and
+    config, model or live session migration. Initial source verification: **164
+    tests pass** with only the known Node26 HTTP headless native failure; typecheck and
     **27** managed/accounting tests against installed SDK1.4 pass. See the
     [cost record](../../docs/guardian-costs.md) for limits and commands.
 
@@ -219,8 +220,8 @@ deltas are listed below; nothing else is modified.
     IPC → real pi-sbx provider → registered parent Guardian service is tested,
     with full directives/content, cost attribution and late restriction/
     generation/parent/shutdown/cancellation, new denial/tool-warning and queued
-    sibling negatives. **177 tests pass**, only the known Node26 HTTP-headless
-    native failure remains (178 total); typecheck passes.
+    sibling negatives. At this milestone **177 tests pass**, with the known
+    Node26 HTTP-headless native failure (178 total); typecheck passes.
     The real-IPC fixture now supplies explicit baseline SRT/environment data for
     the staged v2 runtime-policy contract; all **13 delegated tests** and types
     pass after that amendment. This does not add an acknowledgment consumer.
@@ -232,6 +233,18 @@ deterministic `permissions.allow` / `permissions.deny` rule family (evaluated
 before any reviewer call), `tool_search` exemption, and the durable assessment
 record fields (`source`, `rule`). The fork no longer patches anything those
 replace.
+
+## Compatible-runtime verification follow-up
+
+On the same source graph (`b81bd66`), an explicitly operator-authorized Apple
+`container` Linux/arm64 VM with official pinned **Node24.22.2** passes **all 178
+Guardian tests, zero failures/skips**, including actual CLI/HTTP headless, plus
+Guardian/pi-sbx types. Parent/child Node selection is checked; SDKs and existing
+frozen locks are preserved. No host credentials, live configs or audit contents
+are mounted; no deployment, host-runtime replacement or toggle change. This
+closes compatible-runtime source gate #4, not actual production child consumers,
+OS containment, live accounting/performance or the host Node26 crash. See
+[the VM evidence and recipe](../../docs/guardian-container-verification.md).
 
 ## Deploy
 
