@@ -77,7 +77,16 @@ bash({
 })
 ```
 
-`command` and optional `timeout` remain the ordinary bash inputs.
+`command` and optional `timeout` remain the ordinary bash inputs. Optional
+`output_file` captures full combined backend output to one new, independently
+path-authorized file without adding shell redirection to `command`. It does not
+lend the command any filesystem scope. Parent directories must exist; overwrite,
+append and existing symlink/hardlink destinations refuse. Creation begins at the
+admitted operations seam, with mode 0600 and alias/inode checks. SDK previews and
+native error flags/throws remain intact; capture status records bytes, exit code
+and incomplete cancellation/timeout/I/O failures. Partial files persist. Logs are
+unredacted, unbounded on disk and operator-retained (scratch follows scratch
+cleanup); they are not a tamper-proof audit. See the [fork README](../forks/pi-sbx/README.md#native-output-capture).
 `sandbox_permissions` defaults to `use_default`. Nondefault modes require a
 justification; stray escalation fields, unknown keys and malformed combinations
 are rejected. `additional_permissions` supports only filesystem read/write

@@ -4,6 +4,7 @@ import type { AgentToolResult, BashToolDetails, ExtensionAPI, ExtensionContext }
 import {
   CONFIG_DIR_NAME,
   createBashToolDefinition,
+  createLocalBashOperations,
   getAgentDir,
   hasTrustRequiringProjectResources,
 } from "@earendil-works/pi-coding-agent";
@@ -37,6 +38,7 @@ import {
 } from "./broker.ts";
 import { ExecutionQueue } from "./execution-queue.ts";
 import { planInlineEscalation, type InlineEscalationPlan } from "./inline-escalation.ts";
+import { OutputCapture, validateOutputFile } from "./output-capture.ts";
 import { sandboxGuidance } from "./guidance.ts";
 import { HumanChannel } from "./human-channel.ts";
 import { registerFileGate } from "./file-gate.ts";
@@ -52,6 +54,7 @@ import { resultText, withTrapHint } from "./trap-hints.ts";
 const bashSchema = Type.Object({
   command: Type.String({ description: "Bash command to execute" }),
   timeout: Type.Optional(Type.Number({ description: "Timeout in seconds" })),
+  output_file: Type.Optional(Type.String({ description: "Capture full combined stdout/stderr to this new file without changing the command. Relative to cwd; parent directory must exist. Independently path-authorized, never overwrites. Partial logs survive failure/cancellation; ordinary output preview stays bounded." })),
   // Codex-shaped inline escalation: the request travels with the command, so the
   // model asks and runs in one call instead of requesting, waiting, and re-running.
   sandbox_permissions: Type.Optional(Type.Union([
@@ -72,6 +75,7 @@ const bashSchema = Type.Object({
 type BashParams = {
   command: string;
   timeout?: number;
+  output_file?: string;
   sandbox_permissions?: "use_default" | "require_escalated" | "with_additional_permissions";
   justification?: string;
   prefix_rule?: string[];
@@ -88,6 +92,7 @@ type BashParams = {
 const CANONICAL_BASH_PARAMS = new Set([
   "command",
   "timeout",
+  "output_file",
   "sandbox_permissions",
   "justification",
   "prefix_rule",
@@ -391,14 +396,15 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     ));
   };
 
-  function localTool(cwd: string) {
-    return createBashToolDefinition(cwd);
+  function localTool(cwd: string, capture?: OutputCapture) {
+    return createBashToolDefinition(cwd, capture ? { operations: capture.wrap(createLocalBashOperations()) } : undefined);
   }
 
-  function sandboxedTool(cwd: string) {
+  function sandboxedTool(cwd: string, capture?: OutputCapture) {
+    const operations = createSandboxedBashOperations();
     return createBashToolDefinition(cwd, {
       exposeSessionEnvironment: false,
-      operations: createSandboxedBashOperations(),
+      operations: capture ? capture.wrap(operations) : operations,
       // Tell sandboxed commands where they may write without an exception.
       spawnHook: (context) => ({
         ...context,
@@ -426,9 +432,10 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     signal: AbortSignal | undefined,
     onUpdate: Parameters<typeof baseBash.execute>[3],
     ctx: ExtensionContext,
+    capture?: OutputCapture,
   ): Promise<ToolResult> => {
     const input = { command: params.command, timeout: params.timeout };
-    const result = await sandboxedTool(ctx.cwd).execute(id, input, signal, onUpdate, ctx);
+    const result = await sandboxedTool(ctx.cwd, capture).execute(id, input, signal, onUpdate, ctx);
     // A denied command names the exact path; tell the model how to ask for it.
     return withTrapHint(result, resultText(result), { cwd: ctx.cwd, scratchDir: scratchpad?.dir });
   };
@@ -446,6 +453,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     onUpdate: Parameters<typeof baseBash.execute>[3],
     ctx: ExtensionContext,
     activeConfig: EffectiveSandboxConfig,
+    capture?: OutputCapture,
   ): Promise<ToolResult> => {
     if (!activeConfig.allowUnsandboxedCommands) {
       return refusal("unsandboxed commands are disabled by sandbox policy (allowUnsandboxedCommands is false)");
@@ -481,7 +489,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
 
     // Run the reviewed string, not a differently-spaced spelling of it.
     const input = { command: plan.command.command, timeout: params.timeout };
-    return localTool(ctx.cwd).execute(id, input, signal, onUpdate, ctx);
+    return localTool(ctx.cwd, capture).execute(id, input, signal, onUpdate, ctx);
   };
 
   const restoreBaseline = async (baseline: EffectiveSandboxConfig): Promise<void> => {
@@ -510,6 +518,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     onUpdate: Parameters<typeof baseBash.execute>[3],
     ctx: ExtensionContext,
     activeConfig: EffectiveSandboxConfig,
+    capture?: OutputCapture,
   ): Promise<ToolResult> => {
     if (!controller.canRunSandboxed()) {
       return refusal("the sandbox is unavailable, so a command-scoped path permission cannot be applied");
@@ -549,7 +558,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       return refusal(`the sandbox runtime rejected the scoped path: ${error instanceof Error ? error.message : String(error)}`);
     }
     try {
-      return await runSandboxed(id, params, signal, onUpdate, ctx);
+      return await runSandboxed(id, params, signal, onUpdate, ctx, capture);
     } finally {
       await restoreBaseline(activeConfig);
     }
@@ -580,37 +589,54 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     if (signal?.aborted) return refusal("the command was cancelled before it started");
     const plan = planInlineEscalation(params);
     if (plan.kind === "invalid") return refusal(plan.reason);
-    if (Boolean(pi.getFlag("no-sandbox"))) {
-      const input = { command: params.command, timeout: params.timeout };
-      return localTool(ctx.cwd).execute(id, input, signal, onUpdate, ctx);
+    let capture: OutputCapture | undefined;
+    if (params.output_file !== undefined) {
+      try { validateOutputFile(params.output_file); }
+      catch (error) { return refusal(error instanceof Error ? error.message : String(error)); }
+      if (configError || !config) return refusal("output capture requires a valid initialized baseline file policy");
+      capture = new OutputCapture(params.output_file, ctx.cwd);
+      const authorization = await authorizePathAction({
+        surface: "write", target: capture.target, aliases: [capture.alias],
+        reason: "Capture this command's full output to one new file; this does not widen the command's sandbox",
+        origin: "tool", command: params.command,
+      }, { cwd: ctx.cwd, policy: filePolicyFor(config), human: humanChannel, signal });
+      if (authorization.kind === "deferred") return deferred(authorization.reason);
+      if (authorization.kind !== "allow") return refusal(`output_file was not authorized: ${authorization.reason}`);
     }
-    if (configError) throw new Error(`Sandbox configuration is invalid: ${configError}`);
-    if (!config) throw new Error("Sandbox is not initialized yet; retry after session start");
-    const activeConfig = config;
-    if (!sessionEnabled) {
-      const input = { command: params.command, timeout: params.timeout };
-      return localTool(ctx.cwd).execute(id, input, signal, onUpdate, ctx);
-    }
+    const execute = async (): Promise<ToolResult> => {
+      if (Boolean(pi.getFlag("no-sandbox"))) {
+        const input = { command: params.command, timeout: params.timeout };
+        return localTool(ctx.cwd, capture).execute(id, input, signal, onUpdate, ctx);
+      }
+      if (configError) throw new Error(`Sandbox configuration is invalid: ${configError}`);
+      if (!config) throw new Error("Sandbox is not initialized yet; retry after session start");
+      const activeConfig = config;
+      if (!sessionEnabled) {
+        const input = { command: params.command, timeout: params.timeout };
+        return localTool(ctx.cwd, capture).execute(id, input, signal, onUpdate, ctx);
+      }
 
-    if (plan.kind === "host") return runOnHost(id, plan, params, signal, onUpdate, ctx, activeConfig);
-    if (plan.kind === "scoped") return runScoped(id, plan, params, signal, onUpdate, ctx, activeConfig);
+      if (plan.kind === "host") return runOnHost(id, plan, params, signal, onUpdate, ctx, activeConfig, capture);
+      if (plan.kind === "scoped") return runScoped(id, plan, params, signal, onUpdate, ctx, activeConfig, capture);
 
-    if (controller.canRunSandboxed()) return runSandboxed(id, params, signal, onUpdate, ctx);
-    if (activeConfig.failIfUnavailable) {
-      throw new Error(`Sandbox required but unavailable: ${controller.getError() ?? "not initialized"}`);
-    }
-    if (!activeConfig.allowUnsandboxedCommands) {
-      throw new Error("Sandbox unavailable and unsandboxed commands are disabled by sandbox policy");
-    }
-    // Availability fallback is not an admission bypass: use the same host
-    // planner, gate and review as an explicit require_escalated request.
-    const fallback = planInlineEscalation({
-      command: params.command,
-      sandbox_permissions: "require_escalated",
-      justification: `The configured sandbox is unavailable: ${controller.getError() ?? "not initialized"}`,
-    });
-    if (fallback.kind !== "host") return refusal(fallback.kind === "invalid" ? fallback.reason : "host fallback is not eligible");
-    return runOnHost(id, fallback, params, signal, onUpdate, ctx, activeConfig);
+      if (controller.canRunSandboxed()) return runSandboxed(id, params, signal, onUpdate, ctx, capture);
+      if (activeConfig.failIfUnavailable) {
+        throw new Error(`Sandbox required but unavailable: ${controller.getError() ?? "not initialized"}`);
+      }
+      if (!activeConfig.allowUnsandboxedCommands) {
+        throw new Error("Sandbox unavailable and unsandboxed commands are disabled by sandbox policy");
+      }
+      // Availability fallback is not an admission bypass: use the same host
+      // planner, gate and review as an explicit require_escalated request.
+      const fallback = planInlineEscalation({
+        command: params.command,
+        sandbox_permissions: "require_escalated",
+        justification: `The configured sandbox is unavailable: ${controller.getError() ?? "not initialized"}`,
+      });
+      if (fallback.kind !== "host") return refusal(fallback.kind === "invalid" ? fallback.reason : "host fallback is not eligible");
+      return runOnHost(id, fallback, params, signal, onUpdate, ctx, activeConfig, capture);
+    };
+    return capture ? capture.run(execute) : execute();
   };
 
   pi.registerTool({
@@ -620,6 +646,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     promptGuidelines: [
       ...(baseBash.promptGuidelines ?? []),
       "Run bash commands inside the sandbox by default.",
+      "For durable full stdout/stderr capture, use output_file with a new path whose parent directory exists. It does not change the reviewed command, overwrite a file, or widen the command's sandbox. Logs retain partial output on failure/cancellation; use the returned capture status/path. Do not add shell redirection to a host-command request merely to save its output.",
       scratchpad
         ? `Write temporary files under ${scratchpad.dir} (also ${SCRATCH_ENV}); it is writable inside the sandbox and removed when the session ends.`
         : "Write temporary files inside the project; paths outside it may need an exception.",

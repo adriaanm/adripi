@@ -171,6 +171,18 @@ Keep it short and behavioural —
 it is the only place a model learns this harness's conventions, so a new rule
 belongs there as well as in this file.
 
+## Native Bash output capture
+
+`output_file` captures the combined backend stream without modifying `command`,
+so a plain host request stays plain. The log path uses baseline exact-write
+validation separately from execution approval and never widens SRT. New file
+only, existing parent directory, mode 0600; no overwrite/append or final symlinks.
+Open only at admitted operations exec; preserve native SDK error semantics and
+partial logs with exit/cancellation/completeness metadata. Disk errors abort and
+fail rather than claim full output. Do not use capture to write denied policy,
+credential or audit paths. Logs are unredacted and have no quota/automatic expiry;
+project logs persist and scratch logs follow scratch cleanup. See the fork README.
+
 ## Guardian reviewer context
 
 `forks/pi-guardian/src/managed-reviewer.ts` owns the durable SDK reviewer;

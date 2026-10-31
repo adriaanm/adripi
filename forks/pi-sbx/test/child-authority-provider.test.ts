@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +17,16 @@ import { publishGuardianBrokerForTest, type SandboxExceptionRequest } from "../s
  * revoke it when the session or the policy stops being authoritative.
  */
 
-const state = vi.hoisted(() => ({ agentDir: "", sandboxAvailable: true }));
+const state = vi.hoisted(() => ({ agentDir: "", sandboxAvailable: true, sessionScratch: "" }));
+
+vi.mock("../src/scratch.ts", async importOriginal => {
+  const actual = await importOriginal<typeof import("../src/scratch.ts")>();
+  return { ...actual, createScratchpad: async () => {
+    const scratch = await actual.createScratchpad();
+    state.sessionScratch = scratch.dir;
+    return scratch;
+  } };
+});
 
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
@@ -231,16 +240,6 @@ async function startSession(options: SessionOptions = {}) {
 
 function provider(): ChildAuthorityProvider | undefined {
   return (globalThis as Record<PropertyKey, unknown>)[CHILD_AUTHORITY_PROVIDER_KEY] as ChildAuthorityProvider | undefined;
-}
-
-/** Every live pi-sbx scratchpad on this host; a test diffs around its own start. */
-function scratchpads(): string[] {
-  return readdirSync(tmpdir())
-    .filter((name) => name.startsWith("pi-sbx-scratch-"))
-    .map((name) => join(tmpdir(), name))
-    .filter((path) => {
-      try { return statSync(path).isDirectory(); } catch { return false; }
-    });
 }
 
 function childWorkspace(root: string, name = "child"): { spelled: string; canonical: string } {
@@ -664,7 +663,6 @@ describe("derived child policy from the parent baseline", () => {
   });
 
   it("refuses a proposed workspace inside the granted agent dir or the parent scratchpad", async () => {
-    const before = new Set(scratchpads());
     const session = await startSession({
       // The granted shape this repo installs: the agent dir is an allow root.
       config: (root) => ({ filesystem: { allowWrite: ["."] }, agentDirWriteProjects: [root] }),
@@ -675,9 +673,10 @@ describe("derived child policy from the parent baseline", () => {
       .rejects.toThrow(/agent directory or the parent's private scratchpad/);
 
     // The scratchpad exists only after startup and is read live.
-    const created = scratchpads().filter((path) => !before.has(path));
-    expect(created).toHaveLength(1);
-    const scratchRoot = created[0]!;
+    // Bind the actual session's allocation, never diff global temp directories:
+    // other parallel test workers may allocate scratch during this startup.
+    const scratchRoot = state.sessionScratch;
+    expect(scratchRoot).toBeTruthy();
     const scratchChild = join(scratchRoot, "child");
     mkdirSync(scratchChild, { recursive: true });
     await expect(prepare(provider()!, session.sessionId, scratchChild))

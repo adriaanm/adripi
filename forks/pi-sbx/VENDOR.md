@@ -126,7 +126,22 @@ routes in Git history are retired, not additional supported APIs.
     stamps revoke stale runtime before semantic tool review and cancel baseline
     changes during broker/human waits before consuming late permission. Actual
     child profile construction/consumers and OS containment remain unfinished.
-15. **Tests:** registered bash dispatch with mocked execution/runtime, concurrent
+15. **Native output capture** (`src/output-capture.ts`, dispatcher/schema): optional
+    `output_file` saves full combined backend stdout/stderr without modifying the
+    reviewed command. The shared baseline path authorizer admits the exact log
+    write independently of host/scoped-command consent; it never widens SRT.
+    Exclusive mode-0600 creation starts only at admitted operations exec: no
+    overwrite/append, existing symlink/hardlink targets or implicit mkdir. Alias
+    re-resolution and final inode/path checks refuse drift/replacement, not
+    hostile same-user races. Bounded synchronous regular-file writes avoid an
+    unbounded queue behind the SDK's synchronous onData interface. Status/bytes/
+    exit/completeness survive normal, nonzero, cancelled/timed-out and capture-I/O
+    failures; native SDK throw/structured-error semantics and bounded previews
+    remain intact. No permission store or silent sidecar/retention/redaction.
+    Opt-in logs can fill disk and persist until the operator cleans them up;
+    scratch logs retain scratch lifetime. Five credential-free actual installed
+    SDK1.4 backend probes also pass; no nested SRT or production OS claim.
+16. **Tests:** registered bash dispatch with mocked execution/runtime, concurrent
     scoped versus plain/native-file actions, partial approval, queue cancellation,
     prompt cancellation, setting serialization, partial refresh/rollback failure,
     host admission/fallback, per-connection decisions, policy prepare-before-prompt,
@@ -134,7 +149,10 @@ routes in Git history are retired, not additional supported APIs.
     registered native-gate grant/deny/headless/cancellation/isolation coverage,
     helper/config/lifecycle and actual registered provider coverage, plus composed
     native-launch/real-IPC/controlled-consumer/broker/human tests. Current source:
-    **256 tests / 24 files**, typecheck/root checks pass. These are not production
+    **278 tests / 25 files**, typecheck/root checks pass, including 22 capture
+    regressions. The scratch-exclusion fixture now records its actual allocation
+    rather than racing other workers by diffing global temp directories.
+    These are not production
     child consumers or live nested OS-sandbox tests. See the
     [wiring acceptance/handoff](../../docs/round-2-wiring-acceptance.md).
 

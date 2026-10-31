@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { BashOperations, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   PROJECT_POLICY_KEY,
   publishGuardianBrokerForTest,
@@ -16,6 +16,7 @@ type Deferred = { promise: Promise<void>; resolve: () => void };
 
 const state = vi.hoisted(() => ({
   agentDir: "",
+  realSdkTools: false,
   localCalls: [] as Recorded[],
   sandboxCalls: [] as Recorded[],
   runtimeCurrent: undefined as unknown,
@@ -55,12 +56,20 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
     ...actual,
     getAgentDir: () => state.agentDir,
     hasTrustRequiringProjectResources: () => false,
-    createBashToolDefinition: (_cwd: string, options?: { operations?: unknown }) => fakeTool(Boolean(options?.operations)),
+    createBashToolDefinition: (cwd: string, options?: Parameters<typeof actual.createBashToolDefinition>[1]) => state.realSdkTools
+      ? actual.createBashToolDefinition(cwd, options) : fakeTool(Boolean(options?.operations)),
   };
 });
 
 vi.mock("../src/bash-operations.ts", () => ({
-  createSandboxedBashOperations: () => ({ exec: async () => ({ exitCode: 0 }) }),
+  createSandboxedBashOperations: () => ({ exec: async (...args: Parameters<BashOperations["exec"]>) => {
+    if (!state.realSdkTools) return { exitCode: 0 };
+    // Actual SDK process/output backend; the OS sandbox is deliberately mocked,
+    // not nested inside the test harness. This is dispatch/capture evidence.
+    const sdk = await vi.importActual<typeof import("@earendil-works/pi-coding-agent")>("@earendil-works/pi-coding-agent");
+    state.sandboxCalls.push({ command: args[0], runtime: state.runtimeCurrent });
+    return sdk.createLocalBashOperations().exec(...args);
+  } }),
 }));
 
 vi.mock("../src/manager.ts", () => {
@@ -178,6 +187,7 @@ function context(options: { hasUI?: boolean; select?: unknown; confirm?: unknown
     hasUI: options.hasUI ?? true,
     isProjectTrusted: () => false,
     executeTool: vi.fn(),
+    sessionManager: { getSessionId: () => "capture-fixture", getSessionFile: () => undefined },
     ui: {
       select: options.select ?? vi.fn(async () => undefined),
       confirm: options.confirm ?? vi.fn(async () => false),
@@ -266,6 +276,7 @@ const escalateHost = (command: string, extra: Record<string, unknown> = {}) => (
 });
 
 beforeEach(() => {
+  state.realSdkTools = false;
   state.localCalls.length = 0;
   state.sandboxCalls.length = 0;
   state.runtimeCurrent = undefined;
@@ -281,6 +292,132 @@ afterEach(async () => {
   while (disposers.length > 0) disposers.pop()!();
 });
 
+describe("registered native output capture with the actual SDK backend (mocked OS sandbox)", () => {
+  beforeEach(() => { state.realSdkTools = true; });
+
+  it("captures exact combined output to a private new file without changing the command", async () => {
+    const { tool, ctx } = await start();
+    const command = "printf stdout; printf stderr >&2";
+    const result = await invoke(tool, ctx, "capture", { command, output_file: "capture.log" });
+    expect(readFileSync(join(projectRoot, "capture.log"), "utf8")).toContain("stdout");
+    expect(readFileSync(join(projectRoot, "capture.log"), "utf8")).toContain("stderr");
+    expect(statSync(join(projectRoot, "capture.log")).mode & 0o777).toBe(0o600);
+    expect(state.sandboxCalls[0].command).toBe(command);
+    expect(details(result).outputCapture).toMatchObject({ created: true, bytes: 12, exitCode: 0, status: "exited", complete: true });
+  });
+
+  it("keeps host review a plain exact command while capturing output independently", async () => {
+    const broker = publishBroker();
+    const { tool, ctx } = await start();
+    const command = "printf host-native";
+    const result = await invoke(tool, ctx, "capture-host", escalateHost(command, { output_file: "host.log" }));
+    expect(broker.requests).toHaveLength(1);
+    expect(broker.requests[0]).toMatchObject({ surface: "command", target: command, command });
+    expect(readFileSync(join(projectRoot, "host.log"), "utf8")).toBe("host-native");
+    expect(details(result).outputCapture).toMatchObject({ exitCode: 0, complete: true });
+  });
+
+  it("captures scoped commands and restores baseline without lending the capture destination to the process", async () => {
+    const broker = publishBroker();
+    const { tool, ctx } = await start();
+    const baseline = state.runtimeCurrent;
+    const outside = mkdtempSync(join(tmpdir(), "pi-sbx-scoped-capture-"));
+    const result = await invoke(tool, ctx, "capture-scoped", {
+      command: "printf scoped-native", output_file: "scoped.log", sandbox_permissions: "with_additional_permissions",
+      justification: "one scoped test path", additional_permissions: { file_system: { write: [outside] } },
+    });
+    expect(readFileSync(join(projectRoot, "scoped.log"), "utf8")).toBe("scoped-native");
+    expect(details(result).outputCapture).toMatchObject({ complete: true });
+    expect(state.runtimeCurrent).toEqual(baseline);
+    expect(broker.requests.some(request => request.surface === "write" && request.target === realpathSync(outside))).toBe(true);
+  });
+
+  it("authorizes an outside log without widening the command's runtime", async () => {
+    const broker = publishBroker();
+    const { tool, ctx } = await start();
+    const baseline = state.runtimeCurrent;
+    const refreshes = state.runtimeHistory.length;
+    const output = join(mkdtempSync(join(tmpdir(), "pi-sbx-outside-log-")), "result.log");
+    await invoke(tool, ctx, "capture-outside", { command: "printf outside-log", output_file: output });
+    expect(broker.requests).toHaveLength(1);
+    expect(broker.requests[0]).toMatchObject({ surface: "write", target: realpathSync(output) });
+    expect(readFileSync(output, "utf8")).toBe("outside-log");
+    expect(state.runtimeHistory).toHaveLength(refreshes);
+    expect(state.sandboxCalls[0].runtime).toEqual(baseline);
+  });
+
+  it("refuses mandatory and denied log targets before reviewing or running the host command", async () => {
+    const broker = publishBroker(async () => ({ kind: "deny", reason: "capture refused", review: { source: "rule", rationale: "capture refused" } }));
+    const { tool, ctx } = await start();
+    const outside = join(mkdtempSync(join(tmpdir(), "pi-sbx-denied-log-")), "result.log");
+    for (const output of [join(projectRoot, ".pi", "guardian.json"), join(state.agentDir, "auth.json"), join(state.agentDir, "guardian-sessions", "log"), outside]) {
+      const result = await invoke(tool, ctx, "capture-deny", escalateHost("printf forbidden", { output_file: output }));
+      expect(contentText(result)).toContain("output_file was not authorized");
+      expect(existsSync(output)).toBe(false);
+    }
+    expect(broker.requests).toHaveLength(1);
+    expect(broker.requests[0].surface).toBe("write");
+    expect(state.sandboxCalls).toHaveLength(0);
+  });
+
+  it("does not create a log when command admission is refused", async () => {
+    publishBroker(async () => ({ kind: "deny", reason: "host refused", review: { source: "rule", rationale: "host refused" } }));
+    const { tool, ctx } = await start();
+    const result = await invoke(tool, ctx, "capture-host-deny", escalateHost("printf forbidden", { output_file: "not-created.log" }));
+    expect(existsSync(join(projectRoot, "not-created.log"))).toBe(false);
+    expect(details(result).outputCapture).toMatchObject({ created: false, status: "not_started", complete: false });
+  });
+
+  it("refuses an alias retargeted during host admission before opening or executing", async () => {
+    const broker = publishBroker(async () => {
+      unlinkSync(join(projectRoot, "alias"));
+      symlinkSync(join(projectRoot, "second"), join(projectRoot, "alias"));
+      return { kind: "allow", scope: "once", review: { source: "rule", rationale: "fixture allow" } };
+    });
+    const { tool, ctx } = await start();
+    mkdirSync(join(projectRoot, "first")); mkdirSync(join(projectRoot, "second"));
+    symlinkSync(join(projectRoot, "first"), join(projectRoot, "alias"));
+    await expect(invoke(tool, ctx, "capture-drift", escalateHost("printf forbidden", { output_file: "alias/log" }))).rejects.toThrow("changed after authorization");
+    expect(broker.requests).toHaveLength(1);
+    expect(existsSync(join(projectRoot, "first", "log"))).toBe(false);
+    expect(existsSync(join(projectRoot, "second", "log"))).toBe(false);
+  });
+
+  it("never overwrites an existing file and preserves nonzero command failures and their logs", async () => {
+    const { tool, ctx } = await start();
+    writeFileSync(join(projectRoot, "old.log"), "keep");
+    await expect(invoke(tool, ctx, "capture-exists", { command: "printf overwrite", output_file: "old.log" })).rejects.toThrow("EEXIST");
+    expect(readFileSync(join(projectRoot, "old.log"), "utf8")).toBe("keep");
+    expect(state.sandboxCalls).toHaveLength(0);
+    await expect(invoke(tool, ctx, "capture-exit", { command: "printf partial; exit 7", output_file: "failure.log" })).rejects.toThrow(/Command exited with code 7[\s\S]*"exitCode":7[\s\S]*"complete":true/);
+    expect(readFileSync(join(projectRoot, "failure.log"), "utf8")).toBe("partial");
+  });
+
+  it("retains partial output and cancellation status using the SDK's error path", async () => {
+    const { tool, ctx } = await start();
+    const abort = new AbortController();
+    await expect(tool.execute("capture-abort", { command: "printf partial; sleep 5", output_file: "abort.log" }, abort.signal,
+      (update: unknown) => { if (contentText(update).includes("partial")) abort.abort(); }, ctx)).rejects.toThrow(/Command aborted[\s\S]*"status":"cancelled"/);
+    expect(readFileSync(join(projectRoot, "abort.log"), "utf8")).toBe("partial");
+  });
+
+  it("retains timed-out output without reporting completion", async () => {
+    const { tool, ctx } = await start();
+    await expect(invoke(tool, ctx, "capture-timeout", { command: "printf partial; sleep 5", timeout: 0.1, output_file: "timeout.log" })).rejects.toThrow(/timed out[\s\S]*"status":"timed_out"[\s\S]*"complete":false/);
+    expect(readFileSync(join(projectRoot, "timeout.log"), "utf8")).toBe("partial");
+  });
+
+  it("rejects malformed capture paths before spending a review", async () => {
+    const broker = publishBroker();
+    const { tool, ctx } = await start();
+    for (const output_file of [null, false, {}, "", "a\nlog", "a".repeat(4097)]) {
+      const result = await invoke(tool, ctx, "bad-capture", escalateHost("printf forbidden", { output_file }));
+      expect(contentText(result)).toContain("output_file must be");
+    }
+    expect(broker.requests).toHaveLength(0);
+  });
+});
+
 describe("registered bash tool as one execution seam", () => {
   it("registers one canonical API and rejects legacy parameters instead of ignoring them", async () => {
     const broker = publishBroker();
@@ -293,6 +430,7 @@ describe("registered bash tool as one execution seam", () => {
       "additional_permissions",
       "command",
       "justification",
+      "output_file",
       "prefix_rule",
       "sandbox_permissions",
       "timeout",

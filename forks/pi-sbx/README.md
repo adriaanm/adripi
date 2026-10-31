@@ -139,6 +139,46 @@ configuration closed with migration instructions. Use trusted Guardian
 `command:<prefix>:*` rules instead; plain bash remains sandboxed.
 `allowUnsandboxedCommands: false` disables model host execution.
 
+## Native output capture
+
+Use `output_file` to keep a full log without adding shell redirection to the
+reviewed command (especially a host request):
+
+```ts
+{ command: "npm test", output_file: "test-run.log" }
+
+{ command: "npm test", output_file: "host-test-run.log",
+  sandbox_permissions: "require_escalated", justification: "Run the requested host-only fixtures?" }
+```
+
+- The destination is independently authorized through the same baseline path
+  gate as native writes. Host or scoped-command approval does not authorize the
+  log path, and log approval never widens the command's runtime profile.
+- Paths are relative to the call's cwd (or absolute), bounded to 4096 UTF-8 bytes,
+  with no control characters. Parent directories must already exist. Files are
+  exclusively created with mode `0600`: no overwrite/append, existing hardlink or
+  final-component symlink targets, or implicit directory creation. Opening occurs
+  only at the admitted execution seam, not for a refused command. Aliases are
+  rechecked after approval; moved/replaced artifacts are reported as capture
+  failures. This is not a hostile same-user race/tamper-proof audit facility.
+- Logs contain raw combined stdout/stderr as delivered by the backend (including
+  runtime diagnostics); stream identities and a cross-stream causal ordering are
+  not reconstructed. The SDK still provides its ordinary bounded preview/spill
+  behaviour; capture does not buffer the full output in memory.
+- Success details include `outputCapture` with path, created flag, bytes written,
+  exit code, status and completeness. Failures retain the native SDK's error
+  semantics (`isError` results on newer hosts, throws on older hosts); capture
+  metadata appears in the result or appended error text respectively. Nonzero exits retain
+  their logs; cancellation/timeout/unknown signal-only exit are incomplete. A
+  disk failure requests execution cancellation; disk/close failures fail capture
+  rather than report a complete log. Partial logs remain in place. No sidecar metadata file is silently written.
+- Capture is opt-in, unredacted, and has no size quota or automatic expiry. Choose
+  project files for persistent logs; scratch destinations follow scratch cleanup.
+  Do not deliberately print secrets. Retention and cleanup are the operator's
+  responsibility; capture is not credential filtering or invoice/audit storage.
+
+Source/API verification is separate from deployment and actual OS containment.
+
 ## Commands and flags
 
 - `/sandbox` — open the interactive tabbed settings for sandbox mode, network, filesystem, denied environment variables, advanced options/raw JSON, and the complete effective config (show effective status outside TUI mode). Press `S` to choose session, global, or project scope before editing; mandatory hardening rules are read-only.
