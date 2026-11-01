@@ -472,3 +472,13 @@ in isolation; no weakened assertions/timeouts. Sourcecfd3726816ece325/artifact
 bfceb9573fdad484, graph384/17/330/18/768. Exact evidence/remaining boundaries:
 docs/round-2-production-consumers.md. No live install/restart/policy/config/toggle/
 protected-content/runtime replacement/paid-provider operation/push.
+
+## Timeout termination evidence raced the fixture's own startup
+
+The global-npm-root timeout test still intermittently missed its PID marker even
+with sh/concurrency1: the real subprocess could be killed before its first script
+instruction. Observe the actual ChildProcess through Node's existing public
+`child_process` diagnostics channel and await that exact process's native close/
+SIGTERM. No mocked/replaced execFile/backend, PID polling, new production API or
+weakened500ms timeout. Seven focused tests pass; no runtime/permission change.
+Evidence: .local/goal-consumers/provider-fidelity-npm-observation.log.

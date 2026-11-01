@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { ChildProcess } from "node:child_process";
+import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { afterEach, describe, it } from "node:test";
 import { resolveGlobalNpmRoot } from "../../src/agents/global-npm-root.ts";
 
@@ -82,19 +84,24 @@ describe("resolveGlobalNpmRoot", () => {
 
 	it("terminates the owned npm process on timeout", async () => {
 		if (process.platform === "win32") return; // Windows npm.cmd needs a shell.
-		const { dir, env } = fixture("exit 1");
-		const pidFile = path.join(dir, "npm.pid");
-		const executable = path.join(dir, "bin", "npm");
-		// sh records its pid at once, where a Node fixture could still be booting when the timeout kills it;
-		// exec keeps that pid, so the check below still targets the owned process, not a wrapper.
-		fs.writeFileSync(executable, `#!/bin/sh\necho $$ > '${pidFile}'\nexec sleep 30\n`, { mode: 0o755 });
-		assert.equal(await resolveGlobalNpmRoot({ env, timeoutMs: 500 }), null);
-		const pid = Number(fs.readFileSync(pidFile, "utf8"));
-		for (let waited = 0; waited < 5_000; waited += 20) {
-			try { process.kill(pid, 0); } catch { break; }
-			await new Promise<void>((resolve) => setTimeout(resolve, 20));
-		}
-		assert.throws(() => process.kill(pid, 0), { code: "ESRCH" }, "timed-out npm must exit");
+		const { env } = fixture("exec sleep 30");
+		// Public, passive Node spawn observation: no backend replacement or
+		// fixture-startup/PID-file deadline. Native close belongs to this exact
+		// process even when the timeout kills it before its script can execute.
+		const observed: Array<{ child: ChildProcess; closed: Promise<NodeJS.Signals | null> }> = [];
+		const observe = (message: unknown) => {
+			const child = (message as { process: ChildProcess }).process;
+			const closed = new Promise<NodeJS.Signals | null>(resolve => child.once("close", (_code, signal) => resolve(signal)));
+			observed.push({ child, closed });
+		};
+		subscribe("child_process", observe);
+		try {
+			assert.equal(await resolveGlobalNpmRoot({ env, timeoutMs: 500 }), null);
+			assert.equal(observed.length, 1);
+			const { child, closed } = observed[0]!;
+			assert.ok(child.pid); assert.deepEqual(child.spawnargs, ["npm", "root", "-g"]);
+			assert.equal(await closed, "SIGTERM", "the real owned npm must terminate, not just time out its caller");
+		} finally { unsubscribe("child_process", observe); }
 	});
 
 	it("returns immediately to the event loop while a slow npm command runs", async () => {
