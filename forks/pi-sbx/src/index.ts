@@ -8,7 +8,7 @@ import {
   getAgentDir,
   hasTrustRequiringProjectResources,
 } from "@earendil-works/pi-coding-agent";
-import type { NetworkHostPattern } from "@anthropic-ai/sandbox-runtime";
+import { SandboxRuntimeConfigSchema, type NetworkHostPattern } from "@anthropic-ai/sandbox-runtime";
 import { decideWithParentRoute } from "./action-authorizer.ts";
 import { createSandboxedBashOperations } from "./bash-operations.ts";
 import {
@@ -524,11 +524,17 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       return refusal("the sandbox is unavailable, so a command-scoped path permission cannot be applied");
     }
     const policy = filePolicyFor(activeConfig);
-    for (const requested of plan.targets) {
+    // Freeze every operation target before any asynchronous decision. A later
+    // target's approval must not silently retarget an earlier admitted alias.
+    const preparedTargets = plan.targets.map(requested => ({
+      ...requested,
+      resolved: resolveTarget(requested.target, ctx.cwd),
+      canonical: canonicalizeTarget(requested.target, ctx.cwd),
+    }));
+    for (const requested of preparedTargets) {
       // Decide the path the operation will actually address; the lexical spelling
       // is still checked for mandatory locks.
-      const resolved = resolveTarget(requested.target, ctx.cwd);
-      const canonical = canonicalizeTarget(requested.target, ctx.cwd);
+      const { resolved, canonical } = requested;
       const authorization = await authorizePathAction({
         surface: requested.surface,
         target: canonical,
@@ -545,9 +551,19 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     }
     if (signal?.aborted) return refusal("the command was cancelled before it started");
 
+    if (preparedTargets.some(requested => canonicalizeTarget(requested.target, ctx.cwd) !== requested.canonical)) {
+      return refusal("a scoped path target changed while authorization was pending; nothing was granted for the new target");
+    }
     let scopedConfig: EffectiveSandboxConfig;
     try {
-      scopedConfig = buildConfig(ctx, withScopedPaths(sessionConfig, plan.targets));
+      // Install canonical targets, never the original alias that SRT could
+      // resolve to a different object after the final local consistency check.
+      const admitted = preparedTargets.map(({ surface, canonical }) => ({ surface, target: canonical }));
+      // Use the already-authoritative baseline, not fresh ambient profile/Git
+      // discovery while an action is pending. This same data-only installation
+      // works for delegated configs without reintroducing a root loader.
+      const runtime = SandboxRuntimeConfigSchema.parse(withScopedPaths(activeConfig.runtime as unknown as JsonObject, admitted));
+      scopedConfig = { ...activeConfig, runtime };
     } catch (error) {
       return refusal(`the sandbox runtime rejected the scoped path: ${error instanceof Error ? error.message : String(error)}`);
     }

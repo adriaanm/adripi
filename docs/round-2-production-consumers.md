@@ -375,6 +375,32 @@ activate SRT, allocate scratch or acknowledge a consumer. #14, actual SDK/IPC
 composition, startup generation/lifetime model/provider fidelity, supported-tool
 ownership, and all deployed/OS/live-cost gates remain open.
 
+## Shared scoped dispatcher: canonical admission and baseline isolation
+
+Three new registered-Bash regressions failed against the prior dispatcher: an
+alias repointed during its approval still returned `sandbox:build`; repointing
+an earlier target during a later approval also executed; a stable alias was
+installed as its original spelling, not the canonical target actually admitted.
+Evidence: `.local/goal-child-runtime/scoped-alias-before.log`. This was the real
+shared dispatch/authorizer with a mocked OS backend, not an actual containment
+probe or an independent child exception implementation.
+
+The same dispatcher now captures every target before awaiting decisions, rechecks
+all aliases after all approvals, and adds **canonical targets** to one temporary
+runtime. It uses the already-authoritative baseline plus the existing
+`withScopedPaths` and shipped SRT schema, not root `loadConfig`/Git discovery at
+execution time. Thus delegated runtime integration can use this same seam without
+reintroducing root profiles/maintenance. Runtime rollback and native-file baseline
+isolation remain unchanged; tests now assert canonical admission **and** canonical
+absence after restore. A fourth regression poisons the ambient profile during
+approval and proves that it cannot replace the action's in-memory baseline.
+
+**360 pi-sbx tests / 28 files**, types, **213 non-headless Guardian tests** and types
+pass; the fresh subagents graph/root checks remain required. This verifies snapshot
+and asynchronous alias consistency, not hostile same-user atomic inode immunity,
+child consumer acknowledgment or actual OS containment. #14 runtime integration
+and the remaining composition/deployment/OS/live-accounting gates are still open.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

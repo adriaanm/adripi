@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -140,6 +140,7 @@ vi.mock("../src/manager.ts", () => {
 });
 
 import sandboxExtension from "../src/index.ts";
+import { canonicalizeTarget } from "../src/path-policy.ts";
 
 const disposers: Array<() => void> = [];
 const shutdowns: Array<() => Promise<void>> = [];
@@ -578,7 +579,7 @@ describe("registered bash tool as one execution seam", () => {
     await started.promise;
 
     const scopedRuntime = state.sandboxCalls[0]!.runtime as { filesystem: { allowWrite: string[] } };
-    expect(scopedRuntime.filesystem.allowWrite).toContain(scopedPath);
+    expect(scopedRuntime.filesystem.allowWrite).toContain(canonicalizeTarget(scopedPath, ctx.cwd));
 
     // A native write to the path the scoped command may write is still decided
     // against the baseline, not against the temporary OS widening.
@@ -599,9 +600,9 @@ describe("registered bash tool as one execution seam", () => {
     await expect(second).resolves.toBeTruthy();
     expect(state.sandboxCalls).toHaveLength(2);
     const secondRuntime = state.sandboxCalls[1]!.runtime as { filesystem: { allowWrite: string[] } };
-    expect(secondRuntime.filesystem.allowWrite).not.toContain(scopedPath);
+    expect(secondRuntime.filesystem.allowWrite).not.toContain(canonicalizeTarget(scopedPath, ctx.cwd));
     const restored = state.runtimeCurrent as { filesystem: { allowWrite: string[] } };
-    expect(restored.filesystem.allowWrite).not.toContain(scopedPath);
+    expect(restored.filesystem.allowWrite).not.toContain(canonicalizeTarget(scopedPath, ctx.cwd));
   });
 
   it("routes one native path action through the same broker and fails closed when headless", async () => {
@@ -640,6 +641,76 @@ describe("registered bash tool as one execution seam", () => {
     expect(state.localCalls).toHaveLength(0);
   });
 
+  it("refuses a scoped alias retargeted during approval before touching the runtime", async () => {
+    const { tool, ctx } = await start();
+    const fixture = mkdtempSync(join(tmpdir(), "sbx-scoped-alias-"));
+    const first = join(fixture, "first"), second = join(fixture, "second"), alias = join(fixture, "alias");
+    mkdirSync(first); mkdirSync(second); symlinkSync(first, alias);
+    const refreshes = state.runtimeHistory.length;
+    publishBroker(async () => {
+      unlinkSync(alias); symlinkSync(second, alias);
+      return { kind: "allow", scope: "once", review: { source: "reviewer", rationale: "first target only" } };
+    });
+    try {
+      const result = await invoke(tool, ctx, "alias", { command: "build", sandbox_permissions: "with_additional_permissions", justification: "one exact directory",
+        additional_permissions: { file_system: { write: [alias] } } });
+      expect(contentText(result)).toMatch(/path.*changed|target.*changed/i);
+      expect(state.sandboxCalls).toHaveLength(0); expect(state.localCalls).toHaveLength(0);
+      expect(state.runtimeHistory).toHaveLength(refreshes);
+    } finally { rmSync(fixture, { recursive: true, force: true }); }
+  });
+
+  it("installs only an admitted canonical scope, never an alias the runtime could reinterpret", async () => {
+    const { tool, ctx } = await start();
+    const fixture = mkdtempSync(join(tmpdir(), "sbx-scoped-stable-"));
+    const target = join(fixture, "target"), alias = join(fixture, "alias");
+    mkdirSync(target); symlinkSync(target, alias);
+    const baseline = state.runtimeCurrent;
+    publishBroker();
+    try {
+      await invoke(tool, ctx, "canonical", { command: "build", sandbox_permissions: "with_additional_permissions", justification: "one exact directory",
+        additional_permissions: { file_system: { write: [alias] } } });
+      const runtime = state.sandboxCalls[0].runtime as { filesystem: { allowWrite: string[] } };
+      expect(runtime.filesystem.allowWrite).toContain(realpathSync(target));
+      expect(runtime.filesystem.allowWrite).not.toContain(alias);
+      expect(state.runtimeCurrent).toEqual(baseline);
+    } finally { rmSync(fixture, { recursive: true, force: true }); }
+  });
+
+  it("rechecks earlier scoped aliases after later target approvals", async () => {
+    const { tool, ctx } = await start();
+    const fixture = mkdtempSync(join(tmpdir(), "sbx-scoped-many-"));
+    const first = join(fixture, "first"), replacement = join(fixture, "replacement"), last = join(fixture, "last"), alias = join(fixture, "alias");
+    for (const dir of [first, replacement, last]) mkdirSync(dir);
+    symlinkSync(first, alias);
+    let reviews = 0;
+    publishBroker(async () => {
+      if (++reviews === 2) { unlinkSync(alias); symlinkSync(replacement, alias); }
+      return { kind: "allow", scope: "once", review: { source: "reviewer", rationale: "one target" } };
+    });
+    try {
+      const result = await invoke(tool, ctx, "many", { command: "build", sandbox_permissions: "with_additional_permissions", justification: "two exact directories",
+        additional_permissions: { file_system: { write: [alias, last] } } });
+      expect(reviews).toBe(2); expect(contentText(result)).toMatch(/path.*changed|target.*changed/i);
+      expect(state.sandboxCalls).toHaveLength(0); expect(state.localCalls).toHaveLength(0);
+    } finally { rmSync(fixture, { recursive: true, force: true }); }
+  });
+
+  it("builds a scoped profile from its authoritative baseline rather than newly read ambient files", async () => {
+    const { tool, ctx } = await start();
+    const baseline = state.runtimeCurrent;
+    publishBroker(async () => {
+      writeFileSync(join(state.agentDir, "extensions/sandbox.json"), "not a new authority source while an action is pending");
+      return { kind: "allow", scope: "once", review: { source: "reviewer", rationale: "one exact target" } };
+    });
+    const target = join(tmpdir(), `sbx-baseline-scope-${process.pid}`);
+    await invoke(tool, ctx, "baseline", { command: "build", sandbox_permissions: "with_additional_permissions", justification: "one exact target",
+      additional_permissions: { file_system: { write: [target] } } });
+    expect(state.sandboxCalls).toHaveLength(1);
+    expect((state.sandboxCalls[0].runtime as { filesystem: { allowWrite: string[] } }).filesystem.allowWrite).toContain(canonicalizeTarget(target, ctx.cwd));
+    expect(state.runtimeCurrent).toEqual(baseline);
+  });
+
   it("reviews scoped reads, installs their carve-out once and restores baseline", async () => {
     const broker = publishBroker();
     const deniedRoot = join(tmpdir(), `pi-sbx-readable-${process.pid}`);
@@ -651,8 +722,8 @@ describe("registered bash tool as one execution seam", () => {
       additional_permissions: { file_system: { read: [target] } },
     });
     expect(broker.requests).toEqual([expect.objectContaining({ surface: "read", command: "build" })]);
-    expect((state.sandboxCalls[0]!.runtime as { filesystem: { allowRead: string[] } }).filesystem.allowRead).toContain(target);
-    expect((state.runtimeCurrent as { filesystem: { allowRead: string[] } }).filesystem.allowRead).not.toContain(target);
+    expect((state.sandboxCalls[0]!.runtime as { filesystem: { allowRead: string[] } }).filesystem.allowRead).toContain(canonicalizeTarget(target, ctx.cwd));
+    expect((state.runtimeCurrent as { filesystem: { allowRead: string[] } }).filesystem.allowRead).not.toContain(canonicalizeTarget(target, ctx.cwd));
     const history = state.runtimeHistory.length;
     const credential = await invoke(tool, ctx, "auth", {
       command: "build", sandbox_permissions: "with_additional_permissions", justification: "not allowed",
