@@ -874,10 +874,65 @@ Evidence `tool-fidelity-bench.{mjs,log}` in the same directory. No native file t
 model provider, SRT or paid call executes in that benchmark. Representative total
 cost/latency remains #24/#25's separate live acceptance requirement.
 
-This strengthens selected-tool lifetime fidelity; public-parent dispatch and the
-remaining executable/dependency/provider/effective-auth/resource/deployed/OS/Git/
-live-cost gates remain open. No install/restart/live policy/config/toggle/protected-
-content/runtime replacement or push occurred.
+This strengthened selected-tool lifetime fidelity. The follow-up below covers
+public-parent dispatch and SDK-native startup registration; executable/dependency/
+provider/effective-auth/resource/deployed/OS/Git/live-cost gates remain open.
+
+## Actual public parent SDK dispatch and startup discovery
+
+Two tests now invoke the **actual parent SDK's `subagent` tool**, rather than
+calling `executeAsyncSingle` directly. Both real parent pi-sbx/Guardian entries
+load alongside the complete built subagents bundle. The parent pi-sbx entry owns
+publication, baseline policy and required-extension registration: this test creates
+no provider/registration/claim/ack. Normal public dispatch reaches the compiled
+Node bootstrap, actual child SDK, both actual child consumers and registered parent
+Guardian. Parent/child controller initialization records distinct actual PIDs.
+Synthetic native Unicode Write completes; observed process finalization, session,
+launch digest and parent tool-call identity agree; runtime/scratch cleanup occurs.
+The actual parent SDK branch retains its reviewed cursor, carries the exact actual
+user directive, and projects two Guardian review calls (parent delegation + child
+tool), not an extra review for held mechanical admission. Accounting amounts and
+reviewer verdicts are fixtures, not paid evidence.
+
+This exposed a genuine startup conflict: the existing native supervisor helper
+registers during `session_start`, after the initial definition snapshot. Moving
+registration earlier is **not** the repair: the SDK cannot yet reliably enumerate
+other extensions' pending tools, so a pre-existing trusted supervisor declaration
+then conflicts. Tests cover both absent and pre-existing supervisor tools.
+
+Instead, the same generation guard has a **single internal startup seal**, called
+by the existing factory after extension binding and native MCP readiness, before
+returning a promptable child. No generation/classification/image/native route may
+run before that seal, **even after both consumers acknowledge**. Existing tool
+API/definition/schema/source/code identities remain pinned during startup, and
+pre-existing active/callable selections cannot widen. SDK-owned discovery may add
+tools; the final bounded snapshot/ceilings then remain immutable except narrowing.
+A seal cannot repeat, adopt drift, or complete after cancellation/revocation. This
+is lifecycle/data provenance, not another role acknowledgement, permission decision,
+registry, approval transport, resource loader, tool implementation or provider.
+Upstream supervisor registration stays in its supported phase.
+
+A real SDK negative observes both actual consumer acknowledgements, then attempts
+startup generation: zero provider calls, exact startup refusal recorded before
+lifetime teardown, no review/mutation/scratch leak. Existing post-startup schema/
+owner negatives still dispatch zero calls. Fifteen additional unit cases cover
+startup dispatch, additions, immutable existing definitions/APIs/selections,
+narrowing, one-shot seal and revocation.
+
+Fresh verification: **4,336 total /4,319 pass /17 skip /zero fail /443 suites**;
+types; **29/29 composition on each genuine SDK1.2.0 and1.4.0**, zero skips/failures;
+four graph tests. Source `70c8dc45739f2f51`, artifact `02d417062d9ace54`, unchanged
+graph counts384/17/330/18/768. Evidence `.local/goal-consumers/public-parent-final-
+{full,composition,sdk14}.log`; earlier diagnostic logs retain the late-registration
+and duplicate-registration failures. Fixture installation now includes real Guardian
+prompt assets and real shipped SRT schema/matcher helpers; only OS backend/violation
+telemetry, provider, reviewer/usage and human channels are explicit doubles. The
+public tasks explicitly use `async:true, acceptance:false` and seven native tools;
+this does not prove default acceptance/control-tool workflows or actual OS isolation.
+No live install/restart/policy/config/toggle/protected-content/runtime replacement,
+paid-provider operation or push occurred. Production-consumer acceptance remains
+false; remaining provenance, default/control workflows, lifecycle, deployment,
+loaded-broker, OS/Git and live accounting/total-latency gates remain open.
 
 ## Source-proven gaps at the initial baseline
 

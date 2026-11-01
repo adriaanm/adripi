@@ -662,6 +662,9 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 				mcpWaits.set(cancel, ready);
 				try { await ready; } finally { mcpWaits.delete(cancel); }
 			}
+			// Session startup and native MCP registration are the SDK-owned discovery
+			// phase. Seal once before returning a promptable child, never on a request.
+			try { generation?.completeStartup(); } catch (error) { await shutdown(); throw error; }
 			const child: ChildSession = {
 				subscribe: (listener) => session.subscribe((event) => listener(event as unknown as ChildSessionEvent)),
 				prompt: (text) => session.prompt(text),

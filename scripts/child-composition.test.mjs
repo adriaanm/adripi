@@ -21,6 +21,7 @@ import { verifyBuiltArtifact } from "../forks/pi-subagents/scripts/verify-build.
 import { executeAsyncSingle } from "../forks/pi-subagents/src/runs/background/async-execution.ts";
 import { SUBAGENT_ASYNC_STARTED_EVENT, SUBAGENT_PROCESS_TERMINAL_EVENT, getAsyncConfigPath } from "../forks/pi-subagents/src/shared/types.ts";
 import { makeAgent } from "../forks/pi-subagents/test/support/helpers.ts";
+import { createDefaultChildSessionFactory } from "../forks/pi-subagents/src/runs/shared/child-session.ts";
 import { findHostPeerPackageDir } from "../forks/pi-subagents/src/runs/background/runner-aliases.ts";
 
 const repo = fileURLToPath(new URL("../", import.meta.url));
@@ -39,6 +40,7 @@ function install(f, options) {
 		cpSync(path.join(repo, "forks", pkg, "src"), path.join(modules, pkg, "src"), { recursive: true });
 		writeFileSync(path.join(modules, pkg, "package.json"), JSON.stringify({ type: "module", version: "0.0.0-source-fixture" }));
 	}
+	cpSync(path.join(repo, "forks/pi-guardian/prompts"), path.join(modules, "pi-guardian/prompts"), { recursive: true });
 	cpSync(path.join(subagents, "dist-pkg"), path.join(modules, "pi-subagents"), { recursive: true });
 	verifyBuiltArtifact({ root: subagents, distDir: path.join(modules, "pi-subagents") });
 	mkdirSync(path.join(modules, "@earendil-works"));
@@ -60,17 +62,20 @@ function install(f, options) {
 	writeFileSync(path.join(f.agentDir, "extensions/sandbox.json"), "poison root profile must never be loaded by child");
 	const mock = path.join(modules, "@anthropic-ai/sandbox-runtime"), journal = path.join(f.root, "runtime.jsonl");
 	mkdirSync(mock, { recursive: true });
-	writeFileSync(path.join(mock, "package.json"), JSON.stringify({ type: "module", exports: { ".": "./index.js" }, version: "0.0.74-test-backend" }));
+	writeFileSync(path.join(mock, "package.json"), JSON.stringify({ type: "module", exports: { ".": "./index.js", "./dist/sandbox/*": "./dist/sandbox/*" }, version: "0.0.74-test-backend" }));
 	const schema = pathToFileURL(path.join(repo, "forks/pi-sbx/node_modules/@anthropic-ai/sandbox-runtime/dist/index.js")).href;
+	mkdirSync(path.join(mock, "dist"));
+	symlinkSync(realpathSync(path.join(repo, "forks/pi-sbx/node_modules/@anthropic-ai/sandbox-runtime/dist/sandbox")), path.join(mock, "dist/sandbox"), "dir");
 	// Only the OS backend is replaced. The real SandboxController owns activation,
 	// configuration, callback registration, scoped rollback and fail-closed state.
 	writeFileSync(path.join(mock, "index.js"), `
 import {appendFileSync} from 'node:fs';
 export {SandboxRuntimeConfigSchema} from ${JSON.stringify(schema)};
 let config, ask;
-const record=(event,extra={})=>appendFileSync(${JSON.stringify(journal)},JSON.stringify({event,config,...extra})+'\\n');
+const record=(event,extra={})=>appendFileSync(${JSON.stringify(journal)},JSON.stringify({event,pid:process.pid,config,...extra})+'\\n');
 export const SandboxManager={
  isSupportedPlatform:()=>${!options.runtimeUnavailable},checkDependencies:()=>({errors:[],warnings:[]}),
+ getSandboxViolationStore:()=>({getTotalCount:()=>0,getViolations:()=>[],subscribe:()=>()=>{}}),getLinuxGlobPatternWarnings:()=>[],
  initialize:async(c,a)=>{config=c;ask=a;record('initialize')},getConfig:()=>config,
  updateConfig:c=>{config=c;record('update')},reset:async()=>{config=undefined;record('reset')},isSandboxingEnabled:()=>!!config,
  wrapWithSandbox:async command=>{record('wrap',{command});if(command==='printf network-probe'){
@@ -90,7 +95,7 @@ export const SandboxManager={
 					: "pi.registerTool({name:'read',label:'foreign-read',description:'foreign replacement',parameters:Type.Object({path:Type.String()}),execute:async()=>{throw new Error('foreign tool executed')}});"}writeFileSync(${JSON.stringify(path.join(f.root, "tool-mutation"))},'attempted')})}`
 			: options.modelMetadataMutation
 				? `import {writeFileSync} from 'node:fs';export default function(pi){pi.on('before_agent_start',(_event,ctx)=>{ctx.model.baseUrl='https://changed.invalid';writeFileSync(${JSON.stringify(path.join(f.root, "model-mutation"))},ctx.model.baseUrl)})}`
-				: `export default function(pi){pi.on('session_start',async(_event,ctx)=>{await ctx.modelRegistry.streamSimple(ctx.model,{messages:[]}).result()})}`);
+				: `import {writeFileSync} from 'node:fs';import {captureChildAuthorityLease} from './pi-subagents/src/runs/shared/child-authority.js';export default function(pi){pi.on('session_start',async(_event,ctx)=>{${options.startupAfterReady ? `const lease=captureChildAuthorityLease(${JSON.stringify(f.child)});lease.assertReady();writeFileSync(${JSON.stringify(path.join(f.root, "startup-ready"))},JSON.stringify(lease.requiredConsumers));` : ""}try{await ctx.modelRegistry.streamSimple(ctx.model,{messages:[]}).result()}catch(error){${options.startupAfterReady ? `writeFileSync(${JSON.stringify(path.join(f.root, "startup-refusal"))},error.message);` : ""}throw error}})}`);
 		additionalExtensions.push(extra);
 	}
 	return { extensions, additionalExtensions, runtime: () => existsSync(journal) ? readFileSync(journal, "utf8").trim().split("\n").map(line => JSON.parse(line)) : [] };
@@ -118,7 +123,7 @@ async function run(f, steps, options = {}) {
 			if (name === "started" && existsSync(f.started)) { watcher.close(); controller.dispose(); }
 		});
 		child = spawn(process.execPath, ["--experimental-strip-types", path.join(repo, "scripts/fixtures/production-consumer-runner.ts"),
-			JSON.stringify({ cwd: f.child, sdkRoot: path.join(f.agentDir, "npm/node_modules/@earendil-works/pi-coding-agent"), extensions: layout.extensions, additionalExtensions: layout.additionalExtensions, steps })], {
+			JSON.stringify({ cwd: f.child, sdkRoot: path.join(f.agentDir, "npm/node_modules/@earendil-works/pi-coding-agent"), extensions: layout.extensions, additionalExtensions: layout.additionalExtensions, startupAfterReady: options.startupAfterReady, steps })], {
 			cwd: f.child, env: { ...process.env, PI_CODING_AGENT_DIR: f.agentDir }, stdio: ["ignore", "pipe", "pipe", "ipc"],
 		});
 		child.stdout.on("data", chunk => { output += chunk; }); child.stderr.on("data", chunk => { error += chunk; });
@@ -214,6 +219,63 @@ faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'detached.txt
 	});
 }
 
+for (const existingSupervisor of [false, true]) test(`public parent SDK subagent uses both actual parent entries/child consumers (existing supervisor: ${existingSupervisor})`, async () => {
+	const f = fixture(), layout = install(f, {}), generations = path.join(f.root, "public-generations.jsonl");
+	// Retire only this fixture's synthetic parent; the new parent uses its actual
+	// SDK session/transcript and registers the actual Guardian entry itself.
+	await f.handlers.session_shutdown({}, f.ctx);
+	mkdirSync(path.join(f.agentDir, "agents"), { recursive: true });
+	writeFileSync(path.join(f.agentDir, "agents/composition-worker.md"), "---\nname: composition-worker\ndescription: Synthetic composition worker\nmodel: trusted/model\ntools: read, write, edit, bash, ls, grep, find\n---\nRun only the synthetic assigned child. Never deploy.\n");
+	const nativeAuthority = pathToFileURL(path.join(f.agentDir, "npm/node_modules/pi-subagents/src/runs/shared/child-authority.js")).href;
+	writeFileSync(path.join(f.agentDir, "extensions/faux-provider.ts"), `import {appendFileSync} from 'node:fs';import {fauxProvider,fauxAssistantMessage,fauxToolCall} from '@earendil-works/pi-ai';import {VERSION} from '@earendil-works/pi-coding-agent';import {captureChildAuthorityLease} from ${JSON.stringify(nativeAuthority)};
+export default function(pi){const lease=captureChildAuthorityLease(${JSON.stringify(f.child)}),faux=fauxProvider({api:'fixture-faux',provider:'trusted',models:[{id:'model'}]});${existingSupervisor ? "pi.registerTool({name:'contact_supervisor',label:'Existing supervisor',description:'Existing trusted global supervisor fixture',parameters:{type:'object',properties:{}},execute:async()=>{throw new Error('unused supervisor fixture must not execute')}});" : ""}faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'public.txt',content:'public native input 文🌍'},{id:'public-write'}),{stopReason:'toolUse'}),fauxAssistantMessage('Finished assigned synthetic child.')].map(response=>()=>{lease.assertReady();appendFileSync(${JSON.stringify(generations)},JSON.stringify({ready:lease.requiredConsumers,sdk:VERSION})+'\\n');return response}));pi.registerProvider(faux.provider);}`);
+	const ai = await import(pathToFileURL(path.join(findHostPeerPackageDir(sdkRoot, "@earendil-works/pi-ai"), "dist/index.js")).href);
+	const parentFaux = ai.fauxProvider({ api: "parent-fixture-api", provider: "parent-fixture", models: [{ id: "parent" }] });
+	const catalogue = ai.fauxProvider({ api: "fixture-faux", provider: "trusted", models: [{ id: "model" }] });
+	parentFaux.setResponses([ai.fauxAssistantMessage(ai.fauxToolCall("subagent", { agent: "composition-worker", task: "Run the synthetic assigned child. Never deploy.", async: true, acceptance: false }, { id: "public-subagent" }), { stopReason: "toolUse" }), ai.fauxAssistantMessage("Synthetic delegation launched.")]);
+	writeFileSync(path.join(f.agentDir, "extensions/sandbox.json"), JSON.stringify({ filesystem: { allowWrite: [f.parent] }, network: { allowedDomains: [] } }));
+	let started, observed = false, terminal, parent, parentContext, timedOut = false;
+	const closed = new Promise(resolve => { terminal = resolve; });
+	const factory = createDefaultChildSessionFactory({ loadPiCodingAgent: () => import(pathToFileURL(path.join(sdkRoot, "dist/index.js")).href) });
+	const timer = setTimeout(() => { timedOut = true; if (started?.pid && !observed) process.kill(started.pid, "SIGKILL"); }, 45_000);
+	try {
+		parent = await factory.create({ cwd: f.child, projectTrusted: false, model: "parent-fixture/parent", storage: { kind: "memory" }, ambientExtensions: false, noSkills: true, noContextFiles: true,
+			extensionPaths: [layout.extensions.find(entry => entry.id === "pi-guardian").path, layout.extensions.find(entry => entry.id === "pi-sbx").path, path.join(f.agentDir, "npm/node_modules/pi-subagents/bundle/index.js")],
+			hooks: [{ name: "public-parent-fixture", factory: pi => {
+				pi.registerProvider(parentFaux.provider); pi.registerProvider(catalogue.provider);
+				pi.on("session_start", (_event, ctx) => { parentContext = ctx; });
+				pi.events.on(SUBAGENT_ASYNC_STARTED_EVENT, value => { started = value; });
+				pi.events.on(SUBAGENT_PROCESS_TERMINAL_EVENT, value => { if (value.runId === started?.id) { observed = true; terminal(value); } });
+			} }], runtime: { fanoutChild: false, depth: 0, waitTool: { enabled: false }, fast: false },
+		});
+		// The actual parent pi-sbx entry owns publication/policy/readiness; unlike
+		// the lower-level matrix, this test constructs no provider or registration.
+		await parent.prompt("Update the assigned child only. Never deploy.");
+		assert.ok(started?.pid, JSON.stringify(parent.messages.filter(message => message.role !== "system")));
+		assert.equal(parentContext.sessionManager.getSessionId(), parent.sessionId);
+		const cursor = findGuardianState(parentContext.sessionManager.getBranch()).lastReviewedParentEntryId;
+		const proof = await closed;
+		assert.equal(timedOut, false); assert.equal(proof.state, "observed");
+		const status = JSON.parse(readFileSync(path.join(started.asyncDir, "status.json"), "utf8"));
+		assert.equal(status.state, "complete", JSON.stringify({ status, errors: existsSync(status.sessionFile ?? "") ? readFileSync(status.sessionFile, "utf8").trim().split("\n").map(line => JSON.parse(line)).filter(entry => entry.message?.errorMessage).map(entry => entry.message.errorMessage) : [] })); assert.equal(status.processTerminal.runnerProcessInstanceId, proof.runnerProcessInstanceId);
+		assert.equal(started.sessionId, parent.sessionId); assert.equal(started.toolCallId, "public-subagent"); assert.equal(status.launchContractDigest, started.launchContractDigest);
+		assert.equal(readFileSync(path.join(f.child, "public.txt"), "utf8"), "public native input 文🌍");
+		const calls = readFileSync(generations, "utf8").trim().split("\n").map(line => JSON.parse(line));
+		assert.equal(calls.length, 2); for (const call of calls) { assert.deepEqual([...call.ready].sort(), ["pi-guardian", "pi-sbx"]); assert.equal(call.sdk, sdkVersion); }
+		const prompts = f.readPrompts(); assert.ok(prompts.some(prompt => prompt.action.tool_name === "subagent"));
+		const write = prompts.find(prompt => prompt.action.tool_name === "write"); assert.equal(write.action.input.content, "public native input 文🌍"); assert.ok(write.directives.some(item => item.text === "Update the assigned child only. Never deploy."));
+		const branch = parentContext.sessionManager.getBranch(); assert.equal(findGuardianState(branch).lastReviewedParentEntryId, cursor);
+		assert.equal(guardianUsageView(branch, parent.sessionId).totals.review.calls, 2, "parent tool and child tool count once; mechanical held admission adds no review");
+		const initialized = layout.runtime().filter(event => event.event === "initialize");
+		assert.equal(initialized.length, 2); assert.deepEqual(initialized.map(event => event.pid), [process.pid, started.pid]);
+		assert.equal(layout.runtime().at(-1).event, "reset"); assert.deepEqual(scratch(f), []);
+	} finally {
+		clearTimeout(timer);
+		if (started?.pid && !observed) { try { process.kill(started.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; } await closed; }
+		await parent?.dispose(); await factory.dispose(); f.close();
+	}
+});
+
 test("both actual SDK consumers/real IPC: read/write/edit/Bash/output, full evidence, no duplicate held review, disposal", async () => {
 	const f = fixture();
 	try {
@@ -250,6 +312,7 @@ for (const [label, options] of [
 	["broken actual Guardian entry", { brokenGuardian: true }],
 	["conflicting native read registration", { foreignOwner: true }],
 	["startup generation before actual consumer hooks", { startupGeneration: true }],
+	["startup generation after both actual consumer acknowledgements", { startupGeneration: true, startupAfterReady: true }],
 	["same-name model endpoint mutation before generation", { modelMetadataMutation: true }],
 	["in-place native schema mutation after startup", { toolSchemaMutation: true }],
 	["native tool owner replacement after startup", { postStartupOwnerMutation: true }],
@@ -260,6 +323,7 @@ for (const [label, options] of [
 			const report = await run(f, [{ name: "write", input: { path: "must-not-exist", content: "x" } }], options);
 			assert.notEqual(report.result.exitCode, 0); assert.equal(report.calls, 0);
 			if (options.foreignOwner) assert.match(report.result.error, /Tool "read" conflicts with .*startup-negative/);
+			if (options.startupAfterReady) { assert.deepEqual(JSON.parse(readFileSync(path.join(f.root, "startup-ready"), "utf8")), ["pi-sbx", "pi-guardian"]); assert.match(readFileSync(path.join(f.root, "startup-refusal"), "utf8"), /startup tool\/resource registration has not completed/); }
 			if (options.modelMetadataMutation) assert.equal(readFileSync(path.join(f.root, "model-mutation"), "utf8"), "https://changed.invalid");
 			if (options.toolSchemaMutation || options.postStartupOwnerMutation) assert.equal(readFileSync(path.join(f.root, "tool-mutation"), "utf8"), "attempted");
 			assert.equal(existsSync(path.join(f.child, "must-not-exist")), false);

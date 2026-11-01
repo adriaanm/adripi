@@ -12,6 +12,7 @@ interface Config {
 	sdkRoot: string;
 	extensions: Array<{ id: string; path: string }>;
 	additionalExtensions: string[];
+	startupAfterReady?: boolean;
 	steps: Array<{ name: string; input: Record<string, unknown> }>;
 }
 const config = JSON.parse(process.argv[2]) as Config;
@@ -46,7 +47,7 @@ try {
 		config: runtime,
 		session: {
 			cwd: config.cwd, model: "trusted/model", storage: { kind: "memory" },
-			extensionPaths: [...config.additionalExtensions, ...config.extensions.map(item => item.path)], requiredExtensions: config.extensions,
+			extensionPaths: config.startupAfterReady ? [...config.extensions.map(item => item.path), ...config.additionalExtensions] : [...config.additionalExtensions, ...config.extensions.map(item => item.path)], requiredExtensions: config.extensions,
 			ambientExtensions: false, hooks: [{ name: "fixture-provider", factory: (api: Parameters<ChildHookExtension["factory"]>[0]) => api.registerProvider(faux.provider) }],
 			tools: ["read", "write", "edit", "bash", "ls", "grep", "find"], noSkills: true, noContextFiles: true, runtime,
 		},

@@ -4,7 +4,7 @@ import { createChildAuthorityLease, withChildAuthority, captureChildAuthorityLea
 import { guardChildGeneration } from "../../src/runs/shared/child-generation-guard.ts";
 
 // Barrier/SDK-operation fixtures only, NOT production enforcement consumer acks.
-function fixture(ready = true, makeResult?: () => any, virtual = false, extra: Record<string, unknown> = {}, route?: (...args: any[]) => any) {
+function fixture(ready = true, makeResult?: () => any, virtual = false, extra: Record<string, unknown> = {}, route?: (...args: any[]) => any, startupComplete = true) {
 	const { lease } = createChildAuthorityLease({ leaseId: "generation", identity: { parentSessionId: "parent", runId: "run", agent: "worker", index: 0, cwd: process.cwd() }, payload: {}, requiredConsumers: ["pi-sbx", "pi-guardian"], send: () => false, cancel: () => {}, requestTimeoutMs: 100 });
 	if (ready) withChildAuthority(lease, () => {
 		for (const id of lease.requiredConsumers) { claimChildAuthority(id, process.cwd()); acknowledgeChildAuthority(id); }
@@ -23,11 +23,54 @@ function fixture(ready = true, makeResult?: () => any, virtual = false, extra: R
 		resolveModel: async (...args: any[]) => route ? route(...args) : { model: physical, thinkingLevel: "off" },
 		getPhysicalModel: (provider: string, id: string) => provider === catalogue.model.provider && id === catalogue.model.id ? catalogue.model : undefined,
 		registerProvider() {}, refresh() {}, getAuth: async () => "owned-cleanup-auth" };
-	const guard = guardChildGeneration(runtime, lease, model); guard.bind(session);
+	const guard = guardChildGeneration(runtime, lease, model); guard.bind(session); if (startupComplete) guard.completeStartup();
 	return { lease, runtime, guard, model, tools, active, callable, physical, catalogue, session, calls: () => calls, options: () => options };
 }
 
 describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () => {
+	const starting = () => fixture(true, undefined, false, {}, undefined, false);
+	for (const method of ["stream", "streamSimple", "streamDeferred", "generateImages", "classify"] as const) {
+		it(`does not dispatch ${method} during SDK startup even with both consumers ready`, () => {
+			const f = starting();
+			assert.throws(() => f.runtime[method](f.model, {}, {}), /startup.*not completed/);
+			assert.equal(f.calls(), 0); assert.equal(f.lease.signal.aborted, true);
+		});
+	}
+	it("seals SDK startup additions once and rejects their subsequent mutation", () => {
+		const f = starting(); f.tools.push({ ...f.tools[0]!, name: "contact_supervisor" });
+		f.active.push("contact_supervisor"); f.callable.push("contact_supervisor");
+		f.guard.completeStartup(); assert.equal(f.runtime.stream(f.model, {}, {}), "same-native-result");
+		f.tools[1]!.description = "changed after startup";
+		assert.throws(() => f.runtime.stream(f.model, {}, {}), /schemas or source provenance changed/);
+		assert.equal(f.calls(), 1);
+	});
+	for (const mutation of ["schema", "owner", "API", "removal"] as const) it(`rejects existing ${mutation} drift during startup without rebasing it`, () => {
+		const f = starting();
+		if (mutation === "schema") f.tools[0]!.description = "changed during startup";
+		if (mutation === "owner") f.tools[0]!.execute = () => "foreign tool";
+		if (mutation === "API") f.session.getAllTools = () => [];
+		if (mutation === "removal") f.tools.splice(0);
+		assert.throws(() => f.guard.completeStartup(), /provenance.*changed/);
+		assert.equal(f.calls(), 0); assert.equal(f.lease.signal.aborted, true);
+	});
+	for (const selection of ["active", "callable"] as const) it(`cannot widen a pre-existing ${selection} selection during startup`, () => {
+		const f = fixture(); f[selection].splice(0);
+		const guard = guardChildGeneration({ stream() {}, streamSimple() {} }, f.lease, f.model); guard.bind(f.session);
+		f[selection].push("read"); assert.throws(() => guard.completeStartup(), /selected ceiling during startup/);
+		assert.equal(f.lease.signal.aborted, true);
+	});
+	it("allows startup to narrow an existing selection", () => {
+		const f = starting(); f.active.splice(0); f.callable.splice(0); f.guard.completeStartup();
+		assert.equal(f.runtime.stream(f.model, {}, {}), "same-native-result"); f.guard.close();
+	});
+	it("cannot seal a second time to adopt a later loadout", () => {
+		const f = fixture(); assert.throws(() => f.guard.completeStartup(), /cannot complete or rebind/);
+		assert.equal(f.lease.signal.aborted, true);
+	});
+	it("cannot seal after lease revocation", () => {
+		const f = starting(); f.lease.dispose(); assert.throws(() => f.guard.completeStartup(), /cannot complete or rebind/);
+		assert.equal(f.calls(), 0);
+	});
 	for (const method of ["stream", "streamSimple", "streamDeferred", "generateImages", "classify"] as const) {
 		it(`does not dispatch ${method} before required consumer readiness`, () => {
 			const f = fixture(false);

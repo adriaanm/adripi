@@ -398,3 +398,33 @@ Local seven-tool1000-event fixture costs189.7–266.9ms vs0.16–0.38ms bare, no
 latency/savings/billing proof. Remaining scope and exact evidence:
 `docs/round-2-production-consumers.md`. No live install/restart/policy/config/toggle/
 protected-content/runtime replacement or push.
+
+## Startup discovery conflicted with the pinned SDK tool loadout
+
+Actual public parent SDK dispatch now loads both real parent entries and the full
+built subagents graph; actual pi-sbx owns publication/policy/registration, without
+fixture claims/acks/providers. Normal subagent tool dispatch reaches compiled CLI,
+both child consumers, real parent broker and native Unicode Write; exact identity,
+observed process finalization, actual parent directive/cursor and two-call Guardian
+cost projection hold. Missing/existing trusted supervisor declarations both work.
+SRT OS backend/violation telemetry, provider/reviewer/usage/human are explicit doubles;
+real shipped schema/matcher helpers and Guardian prompt assets are installed.
+
+The supervisor helper legitimately registers at session_start. Earlier registration
+conflicts with other extensions' pending definitions; preserve upstream lifecycle.
+Add one internal generation-guard seal after SDK binding/native MCP readiness,
+before returning a promptable child. Even both consumer acks cannot enable startup
+generation. Existing APIs/definitions/schema/source/code and pre-existing selection
+ceilings stay pinned; SDK startup additions receive the final bounded snapshot.
+Afterwards no additions/replacement/widening; narrowing remains supported. No repeat
+seal/revocation adoption/new role/ack/permission mechanism/loader/transport/backend.
+Actual both-acked startup refusal and15 unit additions supplement existing negatives.
+
+**4,336/4,319 pass/17 skip/zero fail/443 suites**, types; **29/29 per genuine SDK1.2
+and1.4**, four graph tests. Source `70c8dc45739f2f51`, artifact `02d417062d9ace54`;
+384 inputs/17 exports/330 compiled/18 URLs/768 files. Public tasks explicitly use
+async:true/acceptance:false/seven native tools, not default/control-workflow or live
+OS/billing proof. See `docs/round-2-production-consumers.md` for exact evidence and
+remaining acceptance/provenance/lifecycle/deployment/OS/Git/cost/latency gates.
+No live install/restart/policy/config/toggle/protected-content/runtime replacement,
+paid-provider operation or push.

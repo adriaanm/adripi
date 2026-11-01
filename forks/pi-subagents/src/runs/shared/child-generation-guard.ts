@@ -49,9 +49,10 @@ function snapshotMetadata(value: unknown, budget = { nodes: 1024, bytes: 65536 }
  * The actual consumers still own policy/operation checks and readiness. */
 export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease, selectedModel: ModelIdentity, startupSignal?: AbortSignal): {
 	bind(session: BoundSession): void;
+	completeStartup(): void;
 	close(): void;
 } {
-	let session: BoundSession | undefined, sessionId: string | undefined, closed = false;
+	let session: BoundSession | undefined, sessionId: string | undefined, closed = false, startupComplete = false;
 	const target = runtime as Record<string, unknown>;
 	const fail = (reason: string): never => { closed = true; lease.dispose(); throw new Error(`Guarded child generation refused: ${reason}`); };
 	const metadata = (model: ModelIdentity | undefined): ModelIdentity => {
@@ -61,10 +62,12 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 			return data;
 		} catch { return fail("model metadata cannot be pinned as bounded accessor-free SDK data"); }
 	};
-	// Pin the real public SDK loadout before extension startup. Keep SDK schemas,
-	// code and state mechanisms; later narrowing is permitted, widening is not.
+	// Pin existing definitions before startup. The SDK can discover/register new
+	// tools during startup (including MCP); no generation may run until the
+	// factory seals that final loadout. Existing definitions cannot be replaced.
+	// Afterwards narrowing is permitted, widening is not.
 	const toolMethods = ["getAllTools", "getToolDefinition", "getActiveToolNames", "getCallableToolNames"] as const;
-	let toolAPIs: Method[], toolSnapshot: unknown, definitions: unknown[], activeCeiling: Set<string>, callableCeiling: Set<string>;
+	let toolAPIs: Method[], toolSnapshot: { info: Array<{ name: string }>; definitions: unknown[] }, definitions: unknown[], activeCeiling: Set<string>, callableCeiling: Set<string>;
 	const toolState = () => {
 		try {
 			const budget = { nodes: 16384, bytes: 524288 };
@@ -72,7 +75,7 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 			if (!Array.isArray(info) || info.length > 256 || info.some(tool => !tool || typeof tool !== "object" || typeof tool.name !== "string")) throw new Error("unsupported tool list");
 			const currentDefinitions = info.map(tool => session!.getToolDefinition(tool.name));
 			if (currentDefinitions.some(value => !value || typeof value !== "object")) throw new Error("missing tool definition");
-			return { definitions: currentDefinitions, data: { info, definitions: snapshotMetadata(currentDefinitions, budget, new Set(), 0, true) } };
+			return { definitions: currentDefinitions, data: { info, definitions: snapshotMetadata(currentDefinitions, budget, new Set(), 0, true) as unknown[] } };
 		} catch { return fail("the SDK tool loadout cannot be pinned as bounded accessor-free owned data"); }
 	};
 	const toolNames = (name: "getActiveToolNames" | "getCallableToolNames"): string[] => {
@@ -99,6 +102,7 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 		if (closed || lease.signal.aborted || startupSignal?.aborted || signal?.aborted) fail("the bound generation lifetime ended or was cancelled");
 		try { lease.assertReady(); } catch (error) { fail(error instanceof Error ? error.message : String(error)); }
 		if (!session || session.sessionId !== sessionId) return fail("the SDK session/model identity changed or is not bound");
+		if (!startupComplete) fail("SDK startup tool/resource registration has not completed");
 		const current = metadata(session.model);
 		if (key(current) !== requestedModel) return fail("the SDK session/model identity changed or is not bound");
 		if (!isDeepStrictEqual(current, selected)) fail("the selected model metadata changed after exact SDK resolution");
@@ -189,6 +193,21 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 			toolAPIs = toolMethods.map(name => { if (typeof value[name] !== "function") fail(`this SDK lacks the public ${name} tool provenance boundary`); return value[name]; });
 			const tools = toolState(); definitions = tools.definitions; toolSnapshot = tools.data;
 			activeCeiling = new Set(toolNames("getActiveToolNames")); callableCeiling = new Set(toolNames("getCallableToolNames"));
+		},
+		completeStartup() {
+			if (!session || closed || startupComplete || lease.signal.aborted || startupSignal?.aborted || session.sessionId !== sessionId) fail("the SDK startup lifetime cannot complete or rebind");
+			if (toolMethods.some((name, index) => session![name] !== toolAPIs[index])) fail("the SDK tool provenance APIs changed");
+			const final = toolState();
+			for (let index = 0; index < toolSnapshot.info.length; index++) {
+				const found = final.data.info.findIndex(tool => tool.name === toolSnapshot.info[index]!.name);
+				if (found < 0 || final.definitions[found] !== definitions[index] || !isDeepStrictEqual(final.data.info[found], toolSnapshot.info[index]) || !isDeepStrictEqual(final.data.definitions[found], toolSnapshot.definitions[index])) fail("the SDK tool definitions, schemas or source provenance changed during startup");
+			}
+			const originalNames = new Set(toolSnapshot.info.map(tool => tool.name));
+			const finalActive = toolNames("getActiveToolNames"), finalCallable = toolNames("getCallableToolNames");
+			if (finalActive.some(name => originalNames.has(name) && !activeCeiling.has(name)) || finalCallable.some(name => originalNames.has(name) && !callableCeiling.has(name))) fail("the SDK tool loadout exceeded its selected ceiling during startup");
+			definitions = final.definitions; toolSnapshot = final.data;
+			activeCeiling = new Set(finalActive); callableCeiling = new Set(finalCallable);
+			startupComplete = true;
 		},
 		close() { closed = true; lease.dispose(); },
 	};
