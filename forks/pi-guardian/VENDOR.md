@@ -278,6 +278,28 @@ closes compatible-runtime source gate #4, not actual production child consumers,
 OS containment, live accounting/performance or the host Node26 crash. See
 [the VM evidence and recipe](../../docs/guardian-container-verification.md).
 
+## Delegated terminal failure reporting follow-up
+
+Actual SDK + both registered consumers + real Node IPC exposed a terminal deny
+that stopped the SDK tool batch but resolved `prompt()` normally; the standard
+child runner reported exit0 with no final assistant response. Guardian now also
+poisons/disposes the SAME shared authority lifetime before returning a parent
+`terminate` verdict. The runner observes its existing revocation signal and
+reports failure, with no mutation or next provider call. Nonterminal denials stay
+action-local and require a new parent decision for a different action. **37**
+consumer cases and **214 non-headless Guardian tests**/types pass. This does not
+replace the still-required current compatible-runtime HTTP gate.
+
+The existing registered parent/credential-free sidecar fixture moved unchanged
+to `test/support/delegated-parent.ts`, also used by the root **13-case**
+`just check-child-composition` gate. Its verdict predicate now understands both
+exact tool and existing exception envelopes; deterministic usage remains a fixture,
+not paid-provider accounting. Both actual consumers/SDK/IPC are real there; SRT
+backend, model provider, reviewer verdict/usage and human answers are doubles.
+No child reviewer/broker/store, new approval transport, deployed identity or live
+OS/Git/accounting/latency acceptance is claimed. See
+[the precise composition scope](../../docs/round-2-production-consumers.md).
+
 ## Deploy
 
 `install.sh` installs `pi-guardian@0.1.0` from npm (the newest *published*

@@ -225,3 +225,26 @@ bootstrap/dependency/provider-data provenance, actual virtual dispatch, policy-a
 startup resources, selected-tool fidelity, registered production SDK/IPC composition
 and deployed/OS/Git/paid-cost/latency gates are still open. No live installation,
 restart, policy/toggle edit, credential/audit content access or push occurred.
+
+## Combined-consumer IPC teardown follow-up
+
+The source SDK/IPC composition negative for conflicting native registration
+reproduced an asynchronous `EPIPE` after the controller had removed its error
+listener. Every authority send now owns its native asynchronous completion/error
+callback: parent grant/decision/revoke failures dispose the controller; runner
+request/cancel/release failures close the same client/lease. No retries, fallback
+endpoint, new protocol or approval mechanism. Disposal stays idempotent and a
+backpressure return is not confused with write failure. Four deterministic
+actual-endpoint error-injection tests cover parent late revoke and all three
+runner send kinds; the full IPC file has **31 tests**.
+
+Full unit: **4,279 total / 4,262 pass / 17 skip / zero fail / 443 suites**, concurrency4;
+types pass. Fresh graph: **384 inputs / 17 exports / 330 compiled modules /
+18 module-URL targets / 768 artifacts**, artifact `27cf8b4eaeb2ea26`; four graph
+tests pass. The root `just check-child-composition` gate adds **13 source cases**
+with both actual registered consumers and the real default SDK/session runner,
+whole copied verified API graph, actual Node IPC/controller/provider and registered
+parent Guardian. SRT backend, provider, reviewer verdict/usage and human answers
+remain explicit doubles. This is not the complete detached-launch/bootstrap,
+virtual/resource provenance, deployed/OS/Git or paid-provider/latency gate. No live
+installation, restart, policy/toggle edit, protected-content access or push.

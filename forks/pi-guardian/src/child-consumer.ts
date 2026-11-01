@@ -61,7 +61,14 @@ export async function registerChildGuardian(pi: ExtensionAPI, root: () => void, 
 			if (phase !== "active" || lease.signal.aborted || ctx.signal?.aborted) throw new Error("the parent authority or child action ended before verdict consumption");
 			if (ctx.sessionManager.getSessionId() !== sessionId) throw new Error("the child SDK session changed during review");
 			bridge.decodeChildPolicy(policy, ctx.cwd);
-			if (verdict.outcome !== "allow") return blocked(verdict.rationale ?? `parent decision: ${verdict.outcome}`, verdict.terminate === true);
+			if (verdict.outcome !== "allow") {
+				const reason = verdict.rationale ?? `parent decision: ${verdict.outcome}`;
+				// SDK batch termination can resolve prompt() normally with no terminal
+				// assistant message. End the shared authority lifetime too, so the
+				// standard runner observes cancellation rather than reporting success.
+				if (verdict.terminate) poison(reason);
+				return blocked(reason, verdict.terminate === true);
+			}
 			// Semantic allow grants NO file scope, log path or host command. The
 			// separately installed pi-sbx adapters must still admit those actions.
 			return;

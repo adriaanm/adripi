@@ -210,6 +210,9 @@ authority. See `docs/guardian-costs.md`; estimates are not provider invoices.
 ## Verification
 
 - `just check` — shell syntax plus the config templates.
+- `just check-child-composition` — fresh third-fork build/graph and both actual
+  registered consumers through SDK/Node IPC. OS backend, provider, reviewer and
+  human answers are explicit source fixtures; not deployed/OS/live acceptance.
 - `cd forks/pi-sbx && npx vitest run && npx tsc --noEmit`
 - `cd forks/pi-guardian && npm test && npm run check` (`node --test`).
   `test/headless.test.ts` crashes macOS Node26 with an assertion in libuv

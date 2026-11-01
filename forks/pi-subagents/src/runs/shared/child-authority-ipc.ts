@@ -338,7 +338,10 @@ class IpcChildAuthorityController implements ChildAuthorityController {
 	private send(message: ChildAuthorityWireMessage): boolean {
 		if (!this.child.connected) return false;
 		try {
-			this.child.send(message);
+			// Own each asynchronous write error even after dispose() detaches the
+			// channel listeners. Without a callback, a late EPIPE is emitted as an
+			// unhandled ChildProcess error instead of a terminal authority loss.
+			this.child.send(message, (error) => { if (error) this.dispose(); });
 			return true;
 		} catch {
 			return false;
@@ -656,7 +659,8 @@ class IpcChildAuthorityRunnerClient implements ChildAuthorityRunnerClient {
 		handle.lease.signal.addEventListener("abort", () => {
 			if (!this.target.connected || typeof this.target.send !== "function") return;
 			try {
-				this.target.send({ kind: REVOKE_KIND, version: CHILD_AUTHORITY_ENVELOPE_VERSION, sessionId, runId, leaseId } satisfies ChildAuthorityLeaseRevoke);
+				this.target.send({ kind: REVOKE_KIND, version: CHILD_AUTHORITY_ENVELOPE_VERSION, sessionId, runId, leaseId } satisfies ChildAuthorityLeaseRevoke,
+					(error) => { if (error) this.fail(new ChildAuthorityError("transport-unavailable", "The parent IPC channel could not accept child authority release.")); });
 			} catch {
 				// Channel loss independently revokes the parent's lease.
 			}
@@ -710,7 +714,9 @@ class IpcChildAuthorityRunnerClient implements ChildAuthorityRunnerClient {
 			action,
 		};
 		try {
-			this.target.send(message);
+			this.target.send(message, (error) => {
+				if (error) this.fail(new ChildAuthorityError("transport-unavailable", "The parent IPC channel could not accept this child authority request."));
+			});
 			return true;
 		} catch {
 			return false;
@@ -729,7 +735,9 @@ class IpcChildAuthorityRunnerClient implements ChildAuthorityRunnerClient {
 			reason,
 		};
 		try {
-			this.target.send(message);
+			this.target.send(message, (error) => {
+				if (error) this.fail(new ChildAuthorityError("transport-unavailable", "The parent IPC channel could not accept child authority cancellation."));
+			});
 		} catch {
 			// The parent's own bound still settles its review work; the child has already given up locally.
 		}

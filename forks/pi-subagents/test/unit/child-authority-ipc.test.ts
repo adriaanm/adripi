@@ -277,6 +277,47 @@ describe("child authority over real process IPC", () => {
 		return created;
 	}
 
+	it("owns asynchronous revoke write errors after detaching controller listeners", async () => {
+		const { fixture, controller, ledger } = attach({ config: { consumers: DEFAULT_CONSUMERS, acknowledge: DEFAULT_CONSUMERS } });
+		const send = fixture.child.send.bind(fixture.child);
+		let callbacks = 0;
+		fixture.child.send = ((message: unknown, ...args: unknown[]) => {
+			if ((message as { kind?: unknown })?.kind === "child-authority:revoke") {
+				const callback = args.find(arg => typeof arg === "function") as ((error: Error) => void) | undefined;
+				process.nextTick(() => {
+					const error = Object.assign(new Error("fixture late EPIPE"), { code: "EPIPE" });
+					if (callback) { callbacks++; callback(error); } else fixture.child.emit("error", error);
+				});
+				return true;
+			}
+			return (send as (...args: unknown[]) => boolean)(message, ...args);
+		}) as typeof fixture.child.send;
+		await controller.prepare({ agent: "worker", index: 0, cwd: CWD });
+		controller.dispose();
+		assert.equal((await fixture.outcome).code, 0, "a late failed send must not emit an unowned process error");
+		assert.equal(callbacks, 1); assert.equal(ledger.disposed, 1);
+	});
+
+	for (const surface of ["request", "cancel", "revoke"] as const) {
+		it(`owns runner ${surface} asynchronous write failure without a process crash or live authority`, async () => {
+			const { fixture, controller, ledger } = attach({
+				config: { ...REQUEST_CONFIG, requests: surface === "revoke" ? [] : [WRITE_REQUEST], asyncSendFailure: surface,
+					...(surface === "cancel" ? { abortAfterMs: 1 } : {}) },
+				provider: surface === "cancel" ? { decide: (_action, signal) => new Promise(resolve => {
+					signal.addEventListener("abort", () => resolve({ outcome: "cancelled", rationale: "owned request cancelled" }), { once: true });
+				}) } : {},
+			});
+			await controller.prepare({ agent: "worker", index: 0, cwd: CWD });
+			const outcome = await fixture.outcome;
+			assert.equal(outcome.code, 0, outcome.stderr);
+			if (surface !== "revoke") {
+				assert.equal(outcome.result.signalAborted, true);
+				assert.equal(decisionsOf(outcome.result)[0].decision?.outcome, "cancelled");
+			}
+			if (surface === "cancel") assert.equal(ledger.decisions[0].signal.aborted, true);
+		});
+	}
+
 	it("prepares a lease over the child's real IPC channel and correlates a parent allow", async () => {
 		const { fixture, controller, ledger } = attach({ config: REQUEST_CONFIG });
 		// A spawned ChildProcess has no authority listeners of its own; any residue after dispose is a leak.

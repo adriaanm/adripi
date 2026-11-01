@@ -300,6 +300,20 @@ afterEach(async () => {
 describe("registered native output capture with the actual SDK backend (mocked OS sandbox)", () => {
   beforeEach(() => { state.realSdkTools = true; });
 
+  it("marks refusals and deferrals as SDK errors without erasing native result details", async () => {
+    const { tool, ctx, handlers } = await start();
+    const refused = await invoke(tool, ctx, "invalid", { command: "printf forbidden", dangerouslyDisableSandbox: false });
+    const hook = handlers.get("tool_result")!;
+    expect(hook({ toolName: "bash", details: details(refused), isError: false }, ctx)).toEqual({ isError: true });
+    expect(details(refused).refusal).toBeTypeOf("string");
+    const capture = { path: "/synthetic/partial", complete: false };
+    const event = { toolName: "bash", details: { deferred: true, reason: "no parent human", outputCapture: capture } };
+    expect(hook(event, ctx)).toEqual({ isError: true });
+    expect(event.details.outputCapture).toBe(capture);
+    expect(hook({ toolName: "bash", details: { outputCapture: capture } }, ctx)).toBeUndefined();
+    expect(hook({ toolName: "read", details: { refusal: "foreign tool" } }, ctx)).toBeUndefined();
+  });
+
   it("captures exact combined output to a private new file without changing the command", async () => {
     const { tool, ctx } = await start();
     const command = "printf stdout; printf stderr >&2";

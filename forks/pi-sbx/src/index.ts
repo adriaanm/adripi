@@ -743,6 +743,16 @@ function installSandbox(pi: ExtensionAPI, child?: ChildSandbox) {
 
   if (child) registerChildNativeTools(pi, child);
 
+  // ToolDefinition.execute returns content/details, not the SDK's error bit.
+  // Use the public result hook so a refusal/defer is not persisted as a
+  // successful Bash result. Retain the exact refusal and capture metadata.
+  pi.on("tool_result", (event) => {
+    const details = event.details as { refusal?: unknown; deferred?: unknown } | undefined;
+    if (event.toolName === "bash" && (typeof details?.refusal === "string" || details?.deferred === true)) {
+      return { isError: true };
+    }
+  });
+
   // Sandbox conventions are not trained knowledge; keep them in the prompt while
   // the sandbox is on, and leave it alone when the sandbox is off.
   pi.on("before_agent_start", (event) => {

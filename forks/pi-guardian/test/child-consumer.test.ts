@@ -232,6 +232,19 @@ describe("production Guardian semantic consumer (sandbox fixture only)", () => {
 		const result = await emit("tool_call", event());
 		assert.equal(result.block, true); assert.equal(result.terminate, true);
 		assert.match(result.reason, /parent fixed restriction/); assert.equal(sent.length, 1); assert.equal(rootCalls, 0);
+		assert.equal(handle.lease.signal.aborted, true, "batch termination must also stop the runner's authority lifetime");
+		assert.equal((await emit("tool_call", event("later"))).terminate, true);
+		assert.equal(sent.length, 1, "no later request can reopen the terminated child");
+	});
+
+	it("keeps a nonterminal denial action-local without caching it as permission", async () => {
+		await initialize(); verdict = { outcome: "deny", rationale: "choose a different action", terminate: false };
+		assert.equal((await emit("tool_call", event())).terminate, false);
+		assert.equal(handle.lease.signal.aborted, false);
+		await emit("tool_result", { toolCallId: "tool" });
+		verdict = { outcome: "allow" };
+		assert.equal(await emit("tool_call", event("different")), undefined);
+		assert.equal(sent.length, 2, "the different action needs its own current parent decision");
 	});
 
 	it("fails closed when a latched runner has no live scope, not back to root config", async () => {

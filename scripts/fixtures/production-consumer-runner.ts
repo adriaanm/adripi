@@ -1,0 +1,63 @@
+// Real runner/SDK/registered consumers and IPC; only the installed SRT backend
+// and parent's credential-free reviewer verdict are doubles. Never claim/ack here.
+import { createDefaultChildSessionFactory, type ChildHookExtension } from "../../forks/pi-subagents/src/runs/shared/child-session.ts";
+import { bindRunnerChildAuthority } from "../../forks/pi-subagents/src/runs/shared/child-authority-launch.ts";
+import { runChildSession } from "../../forks/pi-subagents/src/runs/background/run-child-session.ts";
+import type { InProcessChildLaunch } from "../../forks/pi-subagents/src/runs/shared/child-launch.ts";
+import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "../../forks/pi-subagents/node_modules/@earendil-works/pi-ai/dist/index.js";
+
+interface Config {
+	cwd: string;
+	extensions: Array<{ id: string; path: string }>;
+	additionalExtensions: string[];
+	steps: Array<{ name: string; input: Record<string, unknown> }>;
+}
+const config = JSON.parse(process.argv[2]) as Config;
+const faux = fauxProvider({ provider: "trusted", models: [{ id: "model" }] });
+const factory = createDefaultChildSessionFactory({
+	// Pin the installed locked test SDK, not a fake factory/session/runtime.
+	loadPiCodingAgent: () => import("../../forks/pi-subagents/node_modules/@earendil-works/pi-coding-agent/dist/index.js"),
+});
+let authority: Awaited<ReturnType<typeof bindRunnerChildAuthority>>;
+const readyAtGenerations: string[][] = [];
+faux.setResponses([
+	...config.steps.map((step, index) => fauxAssistantMessage(
+		fauxToolCall(step.name, step.input, { id: `native-${index}` }), { stopReason: "toolUse" },
+	)),
+	fauxAssistantMessage("Fixture finished; inspect tool results for expected refusals."),
+].map(response => () => {
+	// Observes (and never creates) readiness on every actual native provider call.
+	authority!.lease.assertReady();
+	readyAtGenerations.push([...authority!.lease.requiredConsumers]);
+	return response;
+}));
+try {
+	authority = await bindRunnerChildAuthority();
+	if (!authority) throw new Error("real IPC authority was not bound");
+	const runtime = { agent: "worker", childIndex: 0, runId: "run", fanoutChild: false, depth: 1,
+		waitTool: { enabled: false }, fast: false };
+	// The standard runner's launch-shaped input: no alternative session, transport,
+	// model engine, approval API or consumer. Full launch-plan acceptance is separate.
+	const launch = {
+		toolPlan: { extensionArgs: [], requiredExtensions: config.extensions, configuredExtensions: [], runtimeExtensions: [], warnings: [] },
+		config: runtime,
+		session: {
+			cwd: config.cwd, model: "trusted/model", storage: { kind: "memory" },
+			extensionPaths: [...config.additionalExtensions, ...config.extensions.map(item => item.path)], requiredExtensions: config.extensions,
+			ambientExtensions: false, hooks: [{ name: "fixture-provider", factory: (api: Parameters<ChildHookExtension["factory"]>[0]) => api.registerProvider(faux.provider) }],
+			tools: ["read", "write", "edit", "bash", "ls", "grep", "find"], noSkills: true, noContextFiles: true, runtime,
+		},
+		capture: { structuredOutput: () => ({ called: false, acceptanceReportProvided: false }), toolDiagnostic: () => undefined,
+			runtimeAcknowledgedExtensions: () => undefined, finalDrainHeld: () => false },
+		launchResolvedExtensions: { version: 1 }, warnings: [],
+	} as unknown as InProcessChildLaunch;
+	const result = await runChildSession({ factory, launch, authority,
+		prompt: "Execute the credential-free source fixture only.", appendChildEvent() {}, writeOutputLine() {} });
+	console.log("PRODUCTION_RESULT " + JSON.stringify({ result, calls: faux.state.callCount, readyAtGenerations }));
+} catch (error) {
+	console.log("PRODUCTION_ERROR " + JSON.stringify({ message: error instanceof Error ? error.message : String(error), calls: faux.state.callCount, readyAtGenerations }));
+	process.exitCode = 1;
+} finally {
+	await factory.dispose();
+	authority?.dispose();
+}

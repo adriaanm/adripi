@@ -267,6 +267,28 @@ routes in Git history are retired, not additional supported APIs.
     startup/teardown, actual deployed runtime/OS/Git/live
     accounting remain open. No deployment, restart, policy/toggle edit or push.
 
+## Registered SDK/IPC failure reporting follow-up (source composition)
+
+Bash refusal/deferred results previously retained normal SDK `isError:false`
+because `ToolDefinition.execute` returns content/details, not that error bit.
+The shared registration now uses the SDK's public `tool_result` result hook to
+mark only its Bash refusal/defer as errors, preserving exact details and partial
+capture metadata. Root and child use the same hook; no exception/approval path
+or alternate execution engine was added. **429 tests / 30 files** and types pass.
+
+`just check-child-composition` builds/verifies the whole third-fork graph and
+runs **13 credential-free source cases** with both actual registered consumers,
+the default SDK factory/standard session runner, actual Node IPC and registered
+parent Guardian. Actual SDK native read/write/edit/Bash/output work with genuine
+owner metadata; held IO adds no duplicate semantic review. Startup warming,
+missing runtime/Guardian, conflicting native registration, semantic termination,
+maintenance, independent output admission, network callback routing, scoped
+rollback/no lending, exact host admission and pending-review cancellation are
+covered. SRT OS backend, provider, semantic verdict/usage and human answers are
+explicit fixtures, not containment, paid usage or real human/deployed acceptance.
+Full launch-plan/bootstrap/resources/provider/virtual provenance and later OS/Git/
+live gates remain open. See [composition evidence](../../docs/round-2-production-consumers.md).
+
 ## Failure modes repaired in round 1
 
 Inline host escalation skipped the old validator; consumed host grants bypassed

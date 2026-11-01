@@ -535,6 +535,84 @@ be audited with the complete composition matrix. No deployed/OS/Git/paid-provide
 or live total-cost/latency result, installation, restart, policy/toggle edit,
 protected-content access or push is claimed.
 
+## Both registered consumers with real SDK/IPC (source composition follow-up)
+
+`just check-child-composition` now builds/verifies the actual third-fork graph,
+runs the four bundle/compiled identity tests, then runs
+`scripts/child-composition.test.mjs`. The gate preflights build freshness and
+verifies the **complete copied** `dist-pkg` graph again in each synthetic install;
+it does not install an API facade or a source-only third fork. Both actual
+pi-sbx/Guardian entries load through the locked SDK **1.2.0** resource loader/Jiti.
+The real default factory, standard `runChildSession`, host-created Node IPC,
+controller, pi-sbx provider and registered parent Guardian are used. No fixture
+claims or acknowledges a consumer. Every actual faux-provider generation observes
+`assertReady()` with both real consumer ids; successful startup also proves the
+SDK's real `sourceInfo.path` matches the installed native adapters.
+
+Thirteen source cases cover:
+
+- Native write/read/edit and genuine SDK Bash plus independent `output_file`.
+  Exact Unicode write/edit content and original parent directives survive. Four
+  tools produce three semantic reviews (read is a fixed allow); held native IO
+  and output capture have their own current-parent requests but no duplicate
+  semantic review, human question or synthetic parent assistant usage. The
+  parent's seeded review cursor is unchanged. Scratch is removed on shutdown.
+- Missing runtime, broken required Guardian import, conflicting native read
+  registration and an actual SDK request from a startup hook before consumer
+  startup all refuse with **zero provider calls and no mutation/scratch leak**.
+  The SDK itself rejects the duplicate read registration before the sandbox's
+  ownership check; this is not evidence for a post-startup owner-replacement race.
+- Parent semantic denial/termination, no inherited maintenance despite parent
+  semantic allow, unavailable independent output-write admission (no dispatch),
+  actual controller connection callbacks for held/static-denied hosts, scoped
+  runtime rollback/no lending to subsequent native IO, explicit-host mandatory
+  exact parent human admission/no standing rule, and parent cancellation while
+  the real sidecar transport has a review in flight.
+
+The matrix exposed two actual failure-reporting defects after fixture corrections:
+`.local/goal-consumers/composition-before.log` has **9 pass / 2 fail**. A parent
+terminal deny stopped the SDK batch but `prompt()` resolved normally, so the child
+runner reported exit0 without a final assistant message. The real Guardian child
+consumer now poisons/disposes the **same shared lease** before returning that
+terminal verdict; the runner's existing revocation listener produces failure,
+without mutation or another generation. Nonterminal denials remain action-local.
+Bash refusal/defer content was also persisted by the SDK with `isError:false`.
+The shared pi-sbx registration uses the SDK's public `tool_result` return contract
+to mark these as errors without losing exact content/details or capture metadata;
+merely adding `isError` to `ToolDefinition.execute` would not set that SDK bit.
+
+The conflicting-registration startup negative additionally exposed asynchronous
+`EPIPE` during revocation after controller error listeners were detached. Each
+native IPC send now owns its error callback, on **both** peers. Failure terminally
+disposes the existing controller/client/lease, including pending work; no retry,
+fallback endpoint or authority is invented. Four deterministic native-endpoint
+write-failure cases cover the parent late revoke and runner request/cancel/release;
+**31 IPC tests** pass. This is normal async error ownership, not a protocol change.
+
+Current verification: **13/13 composition**, **429 pi-sbx / 30 files** and types,
+**214 non-headless Guardian** and types, **4,279 subagents unit / 4,262 pass /
+17 skip / zero fail / 443 suites**, concurrency4, and types. Fresh graph:
+**384 inputs / 17 exports / 330 compiled modules / 18 module-URL targets /
+768 artifacts**, artifact `27cf8b4eaeb2ea26`; four graph tests pass.
+Evidence: `.local/goal-consumers/{composition-before,composition-after,
+composition-subagents-full,ipc-callback-tests}.log`, and the current fork logs
+under `.local/goal-child-runtime/` and `.local/goal-guardian-consumer/`.
+
+**This advances source composition, not complete #14 or deployed acceptance.**
+The SRT OS backend, local faux model, semantic verdict/usage and human answers are
+explicit doubles. Connection callbacks do not open real sockets; the explicit-host
+branch runs the harmless test command in the existing test process environment,
+not an OS-host escape or real human approval. The driver supplies launch-shaped
+input to the standard session runner, not the complete detached launch-plan/CLI
+pipeline. Bootstrap/dependency/provider-data and trusted-global-code provenance,
+policy-aware startup resources, actual virtual routing and selected-tool lifetime
+fidelity still need audit and the remaining combined negative matrix. Nested/MCP/
+unknown-tool evidence has separate source coverage, not a claimed supported nested
+runtime here. The earlier full Node24 HTTP result predates these consumer changes.
+Deployment/restart/live broker, actual OS/Git, paid-provider accounting and
+representative total cost/latency stay separate and open. No installation, restart,
+policy/toggle edit, protected-content access, host-runtime replacement or push.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the
