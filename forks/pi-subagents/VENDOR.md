@@ -506,3 +506,24 @@ d3f7ab3618b3946a, graph384/17/330/18/768. Full scope/evidence/remaining private-
 effective-auth, transport-handoff, deployed/OS/Git/live cost gates:
 docs/round-2-production-consumers.md. No live install/restart/config/policy/toggle/
 session/protected-content/runtime replacement/paid-provider/push.
+
+## A queued provider swap ran after the last header snapshot
+
+Actual SDK red probe: four microtasks after headers, the swapped streamSimple ran
+(calls1/readiness0) before later revocation. Following full bounded data validation,
+freeze the existing public provider data graphs and make getProvider/getProviders/
+getAuth own properties nonreplaceable with their exact original function values.
+No operation/provider/transport wrapper or substitute, function-object/model/tool-
+schema freeze, role/API/protocol/store addition. Native private state/auth results
+remain untouched; caught ineffective writes may continue with unchanged authority.
+Actual delayed4/8 continuation cases prove TypeError/no replacement/original native
+operation+assigned Write/both roles ready/reset/cleanup. Immediate violations still
+refuse; opaque owner replacement/failure tests remain (not successful data swaps).
+3added units;4369total4352pass17skip0fail443suites/types;37/37 per actualSDK1.2/1.4,
+4graph/root gates. Source8877dd166fad256e/artifactc8eb7e56a8ae0f5a,384/17/330/18/768.
+Synthetic pre-provider-pin/current1000-event7-real-tool/faux-metadata ranges
+193.7–208.3/198.8–216.1ms (~6.1µs/event mean difference, not isolated freeze cost or
+paid latency/savings). Exact evidence/remaining raw model/private code/effective-
+auth/transport/deployed/OS/Git/live-cost gates:docs/round-2-production-consumers.md.
+No live install/restart/session/config/policy/toggle/protected-content/runtime
+replacement/paid provider/push.

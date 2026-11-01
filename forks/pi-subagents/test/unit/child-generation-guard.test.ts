@@ -26,8 +26,9 @@ function fixture(ready = true, makeResult?: () => any, virtual = false, extra: R
 		getPhysicalModel: (provider: string, id: string) => provider === catalogue.model.provider && id === catalogue.model.id ? catalogue.model : undefined,
 		getProviders: () => [...providers], getProvider: (id: string) => providers.find(provider => provider.id === id),
 		registerProvider() {}, refresh() {}, getAuth: async () => "owned-cleanup-auth" };
+	const originalAPIs = { getProvider: runtime.getProvider, getProviders: runtime.getProviders, getAuth: runtime.getAuth };
 	const guard = guardChildGeneration(runtime, lease, model); guard.bind(session); if (startupComplete) guard.completeStartup();
-	return { lease, runtime, guard, model, tools, active, callable, physical, catalogue, providers, session, calls: () => calls, options: () => options };
+	return { lease, runtime, originalAPIs, native, guard, model, tools, active, callable, physical, catalogue, providers, session, calls: () => calls, options: () => options };
 }
 
 describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () => {
@@ -311,50 +312,69 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 			await assert.rejects(() => f.runtime[method](f.model, {}, {}), /identity changed/);
 		});
 	}
-	for (const change of ["dispatch", "auth", "metadata", "owner", "API", "auth API"] as const) it(`rejects live provider ${change} drift without a new registry call`, () => {
+	for (const change of ["dispatch", "auth", "metadata", "owner", "API", "auth API"] as const) it(`prevents live provider ${change} drift without substituting native code`, () => {
 		const f = fixture();
-		if (change === "dispatch") f.providers[0]!.streamSimple = () => "foreign dispatch";
-		if (change === "auth") f.providers[0]!.auth.resolve = () => undefined;
-		if (change === "metadata") Object.assign(f.providers[0]!, { baseUrl: "https://changed.invalid" });
-		if (change === "owner") f.providers[0] = { ...f.providers[0]! };
-		if (change === "API") f.runtime.getProvider = () => f.providers[0];
-		if (change === "auth API") f.runtime.getAuth = async () => "borrowed auth";
-		assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /provider.*changed/);
-		assert.equal(f.calls(), 0); assert.equal(f.lease.signal.aborted, true);
+		const mutate = () => {
+			if (change === "dispatch") f.providers[0]!.streamSimple = () => "foreign dispatch";
+			if (change === "auth") f.providers[0]!.auth.resolve = () => undefined;
+			if (change === "metadata") Object.assign(f.providers[0]!, { baseUrl: "https://changed.invalid" });
+			if (change === "owner") f.providers[0] = { ...f.providers[0]! };
+			if (change === "API") f.runtime.getProvider = () => f.providers[0];
+			if (change === "auth API") f.runtime.getAuth = async () => "borrowed auth";
+		};
+		if (change === "owner") {
+			mutate(); assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /provider identity changed/);
+			assert.equal(f.calls(), 0); assert.equal(f.lease.signal.aborted, true);
+		} else {
+			assert.throws(mutate, TypeError); assert.equal(f.runtime.streamSimple(f.model, {}, {}), "same-native-result");
+			assert.equal(f.calls(), 1); f.guard.close();
+		}
+	});
+	it("keeps native function/API identities while making only provider data immutable", () => {
+		const f = fixture(); assert.equal(f.providers[0]!.streamSimple, f.native);
+		for (const name of ["getProvider", "getProviders", "getAuth"] as const) assert.equal(f.runtime[name], f.originalAPIs[name]);
+		assert.equal(Object.isFrozen(f.providers[0]), true); assert.equal(Object.isFrozen(f.providers[0]!.auth), true);
+		assert.equal(Object.isFrozen(f.native), false, "SDK function objects are not recursively frozen or replaced");
+		f.guard.close();
+	});
+	for (const shape of ["accessor", "proxy"] as const) it(`refuses a ${shape} provider catalogue without executing metadata`, () => {
+		const f = fixture(); let traps = 0; let provider: any = { id: "trusted" };
+		if (shape === "accessor") Object.defineProperty(provider, "extra", { get() { traps++; } });
+		else provider = new Proxy(provider, { ownKeys() { traps++; return []; } });
+		assert.throws(() => guardChildGeneration({ ...f.runtime, getProviders: () => [provider] }, f.lease, f.model), /provider catalogue cannot be pinned/);
+		assert.equal(traps, 0); assert.equal(f.lease.signal.aborted, true);
 	});
 	it("poisons the same lifetime when the pinned provider lookup itself throws", () => {
 		const f = fixture(); f.providers.find = () => { throw new Error("untrusted lookup details"); };
 		assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /provider provenance lookup failed/);
 		assert.equal(f.calls(), 0); assert.equal(f.lease.signal.aborted, true);
 	});
-	it("does not inspect provider accessors or proxies after startup", () => {
+	it("cannot install metadata accessors or proxies after startup", () => {
 		for (const kind of ["accessor", "proxy"]) {
 			const f = fixture(); let traps = 0;
-			if (kind === "accessor") Object.defineProperty(f.providers[0], "extra", { get() { traps++; } });
-			else Object.assign(f.providers[0]!, { extra: new Proxy({}, { ownKeys() { traps++; return []; } }) });
-			assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /provider provenance.*accessor-free/);
-			assert.equal(traps, 0); assert.equal(f.calls(), 0);
+			const mutate = () => kind === "accessor" ? Object.defineProperty(f.providers[0], "extra", { get() { traps++; } }) : Object.assign(f.providers[0]!, { extra: new Proxy({}, { ownKeys() { traps++; return []; } }) });
+			assert.throws(mutate, TypeError); assert.equal(traps, 0); assert.equal(f.calls(), 0); f.guard.close();
 		}
 	});
-	it("rechecks provider code after an asynchronous native header callback", async () => {
-		const f = fixture(); f.runtime.streamSimple(f.model, {}, { transformHeaders: async () => { await Promise.resolve(); f.providers[0]!.auth.resolve = () => undefined; return {}; } });
-		await assert.rejects(() => f.options().transformHeaders({}), /provider code, auth or metadata provenance changed/); assert.equal(f.lease.signal.aborted, true);
+	it("rechecks provider ownership after an asynchronous native header callback", async () => {
+		const f = fixture(); f.runtime.streamSimple(f.model, {}, { transformHeaders: async () => { await Promise.resolve(); f.providers[0] = { ...f.providers[0]! }; return {}; } });
+		await assert.rejects(() => f.options().transformHeaders({}), /provider identity changed/); assert.equal(f.lease.signal.aborted, true);
 	});
 	it("still revokes provider drift when an asynchronous callback rejects", async () => {
-		const f = fixture(); f.runtime.streamSimple(f.model, {}, { transformHeaders: async () => { f.providers[0]!.auth.resolve = () => undefined; throw new Error("hook failed"); } });
-		await assert.rejects(() => f.options().transformHeaders({}), /provider code, auth or metadata provenance changed/); assert.equal(f.lease.signal.aborted, true);
+		const f = fixture(); f.runtime.streamSimple(f.model, {}, { transformHeaders: async () => { f.providers[0] = { ...f.providers[0]! }; throw new Error("hook failed"); } });
+		await assert.rejects(() => f.options().transformHeaders({}), /provider identity changed/); assert.equal(f.lease.signal.aborted, true);
 	});
 	it("preserves the original hook failure when provenance and lifetime remain current", async () => {
 		const f = fixture(), original = new Error("owned hook failure"); f.runtime.streamSimple(f.model, {}, { transformHeaders: async () => { throw original; } });
 		await assert.rejects(() => f.options().transformHeaders({}), error => error === original); assert.equal(f.lease.signal.aborted, false); f.guard.close();
 	});
-	it("rejects changed physical-provider code before observing a first native route", async () => {
-		const f = fixture(true, undefined, true); f.providers[1]!.streamSimple = () => "foreign physical code";
-		await assert.rejects(() => f.runtime.resolveModel(f.model, [], {}), /provider code, auth or metadata provenance changed/); assert.equal(f.calls(), 0);
+	it("rejects changed physical-provider ownership before observing a first native route", async () => {
+		const f = fixture(true, undefined, true); f.providers[1] = { ...f.providers[1]! };
+		await assert.rejects(() => f.runtime.resolveModel(f.model, [], {}), /provider identity changed/); assert.equal(f.calls(), 0);
 	});
-	it("does not return a late provider stream result after provider code changes", async () => {
-		const f = fixture(true, () => ({ result: async () => { f.providers[0]!.auth.resolve = () => undefined; return "late"; } }));
-		await assert.rejects(() => f.runtime.streamSimple(f.model, {}, {}).result(), /provider code, auth or metadata provenance changed/);
+	it("does not return a late provider stream result after provider ownership changes", async () => {
+		const f = fixture(true, () => ({ result: async () => { f.providers[0] = { ...f.providers[0]! }; return "late"; } }));
+		await assert.rejects(() => f.runtime.streamSimple(f.model, {}, {}).result(), /provider identity changed/);
 	});
 	it("requires the genuine public provider boundary instead of inventing a registry view", () => {
 		const f = fixture(); assert.throws(() => guardChildGeneration({ stream() {}, streamSimple() {} }, f.lease, f.model), /public provider provenance boundary/);
@@ -372,9 +392,9 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		const f = fixture(); f.guard.close(); assert.throws(() => f.runtime.cancelDeferred(f.model, {}, {}), /lifetime ended/);
 		assert.equal(await f.runtime.getAuth(), "owned-cleanup-auth"); assert.equal(f.calls(), 0);
 	});
-	it("revokes changed provider code even when a native promise rejects", async () => {
-		const f = fixture(true, async () => { f.providers[0]!.auth.resolve = () => undefined; throw new Error("native failure"); });
-		await assert.rejects(() => f.runtime.cancelDeferred(f.model, {}, {}), /provider code, auth or metadata provenance changed/); assert.equal(f.lease.signal.aborted, true);
+	it("revokes changed provider ownership even when a native promise rejects", async () => {
+		const f = fixture(true, async () => { f.providers[0] = { ...f.providers[0]! }; throw new Error("native failure"); });
+		await assert.rejects(() => f.runtime.cancelDeferred(f.model, {}, {}), /provider identity changed/); assert.equal(f.lease.signal.aborted, true);
 	});
 	it("does not permit replacement of the guarded dispatch or selected provider registry", () => {
 		const f = fixture();

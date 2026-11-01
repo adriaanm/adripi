@@ -43,6 +43,16 @@ function snapshotMetadata(value: unknown, budget = { nodes: 1024, bytes: 65536 }
 	return result;
 }
 
+/** Only validated, bounded SDK-owned provider DATA reaches this function.
+ * Keep functions themselves untouched; their exact values are pinned above.
+ * Immutable data closes the async handoff gap without substituting a provider. */
+function freezeProviderData(value: unknown, seen: Set<object>): void {
+	if (!value || typeof value !== "object" || seen.has(value)) return;
+	seen.add(value);
+	for (const name of Reflect.ownKeys(value)) freezeProviderData(Object.getOwnPropertyDescriptor(value, name)!.value, seen);
+	Object.freeze(value);
+}
+
 /** Fence the existing, fresh SDK runtime, not a second provider/transport. The
  * runner's first prompt check alone cannot stop session_start-triggered prompts,
  * summaries or cache warming. No claim/ack or permission decision is made here.
@@ -106,6 +116,11 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 		for (const [index, provider] of data.entries()) {
 			if (!provider || typeof provider !== "object" || typeof provider.id !== "string" || !provider.id || providerPins.has(provider.id)) throw new Error("invalid provider identity");
 			providerPins.set(provider.id, { reference: providers[index], data: snapshotMetadata(provider, { nodes: 1024, bytes: 65536 }, new Set(), 0, true) });
+		}
+		const frozen = new Set<object>();
+		for (const pinned of providerPins.values()) freezeProviderData(pinned.reference, frozen);
+		for (const [name, method] of [["getProvider", providerLookup], ["getProviders", providerList], ["getAuth", authLookup]] as const) {
+			Object.defineProperty(runtime, name, { value: method, writable: false, configurable: false });
 		}
 	} catch { fail("the SDK provider catalogue cannot be pinned as bounded accessor-free owned data"); }
 	const assertProvider = (id: string) => {

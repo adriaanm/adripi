@@ -1084,6 +1084,55 @@ effective-auth/code provenance audits remain open alongside deployment/loaded br
 OS/Git/live accounting/total latency. No installed config/policy/toggle/session,
 protected credential/audit content, runtime replacement, paid provider or push action.
 
+## Provider snapshots alone left an asynchronous code-swap handoff
+
+A continuation probe against the genuine SDK found the missing boundary: schedule
+`streamSimple` replacement four microtasks after `before_provider_headers`. The
+replacement **ran**, the faux provider recorded1 invocation and readiness observer0
+before eventual authority revocation. Thus callback-exit/result checks alone were
+not evidence that the earlier pinned code actually served the handoff. Exact red
+output: `.local/goal-consumers/provider-handoff-before.log` (`delay:4`,
+`replacementRan:true`, `calls:1`, `ready:[]`).
+
+After complete bounded/accessor-free catalogue validation, make the existing public
+provider data graphs immutable and install the **same original function values**
+as nonreplaceable own `getProvider`/`getProviders`/`getAuth` properties. Provider,
+auth and header data fields cannot change between checks or native dispatch.
+No provider/transport/function-value substitution, method wrapper, schema freeze,
+new API, registry, approval store, role, protocol or lease. Function objects, tool/
+model definitions, private implementation closure state and native SDK auth results
+are not frozen or rewritten. A failed attempt that leaves the original authority
+unchanged need not revoke it: native code can continue if the caller catches that
+TypeError. Uncaught SDK hook failures still follow normal guarded shutdown. Only
+the fresh supported guarded runtime is bound this way; it cannot rebind after close.
+
+Actual delayed4/8-microtask tests record the TypeError, **no replacement invocation**,
+and successful use of the unchanged original provider (2 calls, both roles ready),
+normal assigned Write/parent review, observed shutdown/reset and no scratch leak.
+They do not report successful mutation as a successful refusal. Existing immediate
+mutation tests still fail closed before a provider call. Revised opaque fixtures
+prove prevented mutations/native values retained, and still test real owner changes,
+lookup failures/rejected callbacks/late results;3 added units cover exact native/API
+identities and pre-freeze accessor/proxy refusal without traps.
+
+**4,369 total /4,352 pass /17 skip /zero fail /443 suites**, types, **37/37 per
+genuine SDK1.2/1.4**, zero composition fail/skip;4graph/root gates. Source
+`8877dd166fad256e`, artifact `c8eb7e56a8ae0f5a`, graph384/17/330/18/768. Same-input
+five-sample synthetic benchmark vs the pre-provider-pin guard:1000 events/seven real
+native definitions/one real faux metadata object,193.7–208.3ms baseline versus
+198.8–216.1ms current (mean increment~6.1µs/event/~3.0%); setup~0.38–1.79ms versus
+~0.41–1.37ms. This includes the previous provider pinning, not an isolated freeze
+cost, real dispatch, large catalogue or representative paid latency/savings.
+Evidence `.local/goal-consumers/provider-handoff-{before,focused,after,composition,
+sdk14,full,bench,root}.log`; the earlier same-input benchmark script/baseline remain.
+
+This closes that public code/data swap, not mutable raw model/request data, private
+provider/global API implementations, auth-resolved endpoint/header/env provenance,
+all transport handoffs/network effects or hostile host code. Those source audits,
+production acceptance and deployed/broker/OS/Git/paid accounting/total latency gates
+remain open. No live install/restart/session/policy/config/toggle, credential/audit
+content, runtime replacement, paid provider or push action.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the
