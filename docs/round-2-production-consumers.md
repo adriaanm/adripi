@@ -670,6 +670,41 @@ See `guardian-container-verification.md` for exact image/archive/driver hashes.
 This closes the stale-full-HTTP-evidence item above, not #14 or the separate
 bootstrap/virtual/resources/tool-lifetime/deployed/OS/Git/live-cost gates.
 
+## Guarded detached startup cannot inherit unvetted preloads
+
+A real `executeAsyncSingle`/Node bootstrap regression wrote a harmless marker
+from inherited `NODE_OPTIONS --import=...` **before child authority binding**, even
+though parent preparation subsequently refused. Its runner was terminated and
+observed before checking the marker. Seven further spawn-boundary negatives also
+failed before the fix (`.local/goal-consumers/bootstrap-before.log`). Later SDK
+readiness or tool hooks cannot retroactively contain this startup code.
+
+The existing guarded launch admission now refuses nonempty `NODE_OPTIONS`,
+`NODE_PATH`, `LD_*`, `DYLD_*`, `OPENSSL_CONF`, `OPENSSL_MODULES`, `OPENSSL_ENGINES`
+and unowned `JITI_*` overrides **before spawn**. The existing host-owned
+`JITI_ALIAS` peer map is still explicitly constructed/replaced, not accepted from
+the caller. Empty values remain empty; unguarded startup configuration remains
+unchanged. It does not silently strip user flags (which could weaken memory/TLS
+configuration), parse a second trusted flag dialect, grant preload-file authority
+or retry another runner. A guarded launch currently requires a clean host startup
+environment; filesystem/host standing permissions cannot authorize these overrides.
+Diagnostics name only the key, never its value.
+
+Ten added regressions cover actual harmless preload prevention, seven unsupported
+variable classes, unguarded preservation and empty/host-owned alias handling.
+Full subagents **4,303 total / 4,286 pass / 17 skip / zero fail / 443 suites**,
+concurrency4, and types pass. Fresh complete graph **384 inputs / 17 exports /
+330 compiled / 18 module-URL targets / 768 artifacts**, artifact `0bdb7d1beead1157`;
+four graph tests and all **14 combined-consumer cases** pass again. Evidence:
+`.local/goal-consumers/bootstrap-{before,focused,full,composition}.log`.
+
+This closes ambient preload inheritance in the actual detached spawn path, not
+complete bootstrap/dependency/resource/provider provenance or the full actual-
+consumer detached CLI pipeline. The earlier current215-test Node24 HTTP result
+remains the Guardian-source gate (no Guardian source changed here). All remaining
+#14/deployment/OS/Git/live-accounting/latency boundaries stay open. No live startup
+environment/config/toggle/runtime was changed, and no install/restart/push occurred.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

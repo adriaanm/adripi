@@ -277,3 +277,24 @@ measured119–126ms per10,000 guarded events (~12µs/event total guard), not a l
 latency/billing or savings result. Evidence/scope in
 `docs/round-2-production-consumers.md` and `.local/goal-consumers/model-metadata-*`.
 No deployment/restart/live policy/toggle/protected-content/runtime replacement/push.
+
+## Ambient Node preloads ran before child authority binding
+
+An actual detached launch/Node regression executed inherited `NODE_OPTIONS`
+preload code before binding IPC, despite later parent preparation refusal. Its
+owned runner was terminated/observed; seven further spawn-boundary negatives also
+failed before repair. Existing guarded admission now refuses nonempty
+`NODE_OPTIONS`, `NODE_PATH`, `LD_*`, `DYLD_*`, `OPENSSL_CONF`, `OPENSSL_MODULES`,
+`OPENSSL_ENGINES` and unowned `JITI_*` before spawn. The existing explicit host
+`JITI_ALIAS` peer-map replacement remains; empty values and unguarded configuration
+remain unchanged. No silent flag/environment sanitization, preload grant, new
+trusted flag parser, protocol or fallback runner; error messages expose names only.
+
+Ten additional regressions; full **4,303 total / 4,286 pass / 17 skip / zero fail /
+443 suites**, concurrency4, and types pass. Four graph and14 combined-consumer cases
+pass. Graph **384 inputs / 17 exports / 330 compiled / 18 module-URL targets /
+768 artifacts**, artifact `0bdb7d1beead1157`. Evidence under
+`.local/goal-consumers/bootstrap-*`; scope and remaining provenance/CLI/deployed/
+OS/Git/live-cost gates in `docs/round-2-production-consumers.md`. Guardian source
+is unchanged since its current215/215 Node24 HTTP gate. No live startup/config/
+policy/toggle/runtime change, deployment, restart, protected-content access or push.

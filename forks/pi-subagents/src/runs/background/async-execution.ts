@@ -807,6 +807,16 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 	if (childAuthorityAdmission.guarded) {
 		const refusal = childAuthorityPlacementRefusal(runnerChildAuthorityPlacement(cfg, steps as RunnerStep[], Boolean(binaryHost)));
 		if (refusal) return { error: refusal };
+		// Node/native-loader preloads execute before the runner can bind IPC or
+		// load its consumers. Do not silently strip user startup configuration or
+		// claim that later hooks can contain it. JITI_ALIAS alone is replaced by
+		// the existing host-owned peer map below, not inherited from this env.
+		const unsafe = Object.keys(process.env).find(name => {
+			const key = process.platform === "win32" ? name.toUpperCase() : name;
+			return (key === "NODE_OPTIONS" || key === "NODE_PATH" || key === "OPENSSL_CONF" || key === "OPENSSL_MODULES" || key === "OPENSSL_ENGINES"
+				|| key.startsWith("LD_") || key.startsWith("DYLD_") || (key.startsWith("JITI_") && key !== JITI_ALIAS_ENV)) && Boolean(process.env[name]);
+		});
+		if (unsafe) return { error: `Guarded background launch refuses inherited startup override '${unsafe}'; it can change code before child enforcement. No child process was started. Use a clean host startup environment; nothing was stripped or granted.` };
 	}
 	if (!binaryHost && "error" in piPackageSelection) throw piPackageSelection.error;
 	const nodeExecutable = resolveNodeExecutable();

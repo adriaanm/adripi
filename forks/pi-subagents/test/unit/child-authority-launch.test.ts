@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
+import childProcess, { spawn, type ChildProcess } from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
 	ChildAuthorityError,
 	CHILD_AUTHORITY_PROVIDER_VERSION,
@@ -644,6 +645,66 @@ describe("registered async dispatch under child authority", { skip: isAsyncAvail
 			assert.equal(fs.existsSync(path.join(DIRS.async, id)), false);
 		}
 		clearProvider();
+	});
+
+	it("does not execute inherited Node preloads before the child authority binding", async () => {
+		registerHostGuard();
+		publishProvider({ ...providerFor(SESSION_ID), async prepare() { await new Promise(resolve => setTimeout(resolve, 600)); throw new Error("deliberate prepare refusal"); } });
+		const marker = path.join(tempDir, "preload-ran"), preload = path.join(tempDir, "preload.mjs");
+		fs.writeFileSync(preload, `import {writeFileSync} from 'node:fs';writeFileSync(${JSON.stringify(marker)},'ran before binding');`);
+		const previous = process.env.NODE_OPTIONS;
+		process.env.NODE_OPTIONS = `--import=${pathToFileURL(preload).href}`;
+		try {
+			const id = `authority-preload-${Date.now().toString(36)}`;
+			const result = await launch(id);
+			assert.equal(result.isError, true);
+			const statusPath = path.join(DIRS.async, id, "status.json");
+			if (fs.existsSync(statusPath) && JSON.parse(fs.readFileSync(statusPath, "utf8")).pid) {
+				await waitFor(() => JSON.parse(fs.readFileSync(statusPath, "utf8")).processTerminal?.state === "observed", "the refused preload runner to terminate");
+			}
+			assert.equal(fs.existsSync(marker), false, "Node executed ambient preload code before the authority binding");
+			assert.match(JSON.stringify(result), /inherited startup override.*NODE_OPTIONS/);
+		} finally { if (previous === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = previous; }
+	});
+
+	for (const name of ["NODE_PATH", "LD_PRELOAD", "LD_AUDIT", "DYLD_INSERT_LIBRARIES", "OPENSSL_CONF", "OPENSSL_MODULES", "JITI_FS_CACHE"]) {
+		it(`refuses inherited ${name} before any child spawn`, (t) => {
+			registerHostGuard(); publishProvider(providerFor(SESSION_ID));
+			const previous = process.env[name];
+			const captured = t.mock.method(childProcess, "spawn", () => { throw new Error("unexpected child spawn"); }); syncBuiltinESMExports();
+			process.env[name] = "untrusted-startup-override";
+			try {
+				const result = launch(`authority-bootstrap-${name}-${Date.now().toString(36)}`);
+				assert.ok(!(result instanceof Promise)); assert.equal(result.isError, true);
+				assert.match(JSON.stringify(result), new RegExp(`inherited startup override.*${name}`)); assert.equal(captured.mock.callCount(), 0);
+			} finally { t.mock.restoreAll(); syncBuiltinESMExports(); if (previous === undefined) delete process.env[name]; else process.env[name] = previous; }
+		});
+	}
+
+	it("preserves unguarded startup configuration instead of silently sanitizing it", (t) => {
+		const previous = process.env.NODE_OPTIONS; process.env.NODE_OPTIONS = "--max-old-space-size=256";
+		const captured = t.mock.method(childProcess, "spawn", () => { throw new Error("captured unguarded spawn"); }); syncBuiltinESMExports();
+		try {
+			const result = launch(`unguarded-bootstrap-${Date.now().toString(36)}`);
+			assert.ok(!(result instanceof Promise)); assert.match(JSON.stringify(result), /captured unguarded spawn/);
+			assert.equal(captured.mock.callCount(), 1); assert.equal(captured.mock.calls[0]!.arguments[2]!.env.NODE_OPTIONS, process.env.NODE_OPTIONS);
+		} finally { t.mock.restoreAll(); syncBuiltinESMExports(); if (previous === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = previous; }
+	});
+	it("retains empty overrides and the existing host-owned peer alias replacement", (t) => {
+		registerHostGuard(); publishProvider(providerFor(SESSION_ID));
+		const previous = { NODE_OPTIONS: process.env.NODE_OPTIONS, JITI_ALIAS: process.env.JITI_ALIAS };
+		process.env.NODE_OPTIONS = ""; process.env.JITI_ALIAS = '{"ambient":"untrusted"}';
+		const captured = t.mock.method(childProcess, "spawn", () => { throw new Error("captured clean guarded spawn"); }); syncBuiltinESMExports();
+		try {
+			const result = launch(`guarded-owned-alias-${Date.now().toString(36)}`);
+			assert.ok(!(result instanceof Promise)); assert.match(JSON.stringify(result), /captured clean guarded spawn/);
+			assert.equal(captured.mock.callCount(), 1);
+			const env = captured.mock.calls[0]!.arguments[2]!.env;
+			assert.equal(env.NODE_OPTIONS, ""); assert.equal(JSON.parse(env.JITI_ALIAS).ambient, undefined);
+		} finally {
+			t.mock.restoreAll(); syncBuiltinESMExports();
+			for (const [name, value] of Object.entries(previous)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+		}
 	});
 
 	it("refuses a launch whose provider cannot prepare, and leaves no running runner behind", async () => {
