@@ -20,12 +20,14 @@ function fixture(ready = true, makeResult?: () => any, virtual = false, extra: R
 	const native = (_model: unknown, _context: unknown, value: unknown) => { calls++; options = value; return makeResult ? makeResult() : "same-native-result"; };
 	const physical = { provider: "physical", id: "routed", api: "faux", baseUrl: "https://physical.invalid", headers: { trace: "original" } };
 	const catalogue = { model: physical };
-	const runtime = { stream: native, streamSimple: native, streamDeferred: native, generateImages: native, classify: native,
+	const providers = ["trusted", "physical"].map(id => ({ id, auth: { resolve: () => undefined }, streamSimple: native }));
+	const runtime = { stream: native, streamSimple: native, streamDeferred: native, cancelDeferred: native, generateImages: native, classify: native,
 		resolveModel: async (...args: any[]) => route ? route(...args) : { model: physical, thinkingLevel: "off" },
 		getPhysicalModel: (provider: string, id: string) => provider === catalogue.model.provider && id === catalogue.model.id ? catalogue.model : undefined,
+		getProviders: () => [...providers], getProvider: (id: string) => providers.find(provider => provider.id === id),
 		registerProvider() {}, refresh() {}, getAuth: async () => "owned-cleanup-auth" };
 	const guard = guardChildGeneration(runtime, lease, model); guard.bind(session); if (startupComplete) guard.completeStartup();
-	return { lease, runtime, guard, model, tools, active, callable, physical, catalogue, session, calls: () => calls, options: () => options };
+	return { lease, runtime, guard, model, tools, active, callable, physical, catalogue, providers, session, calls: () => calls, options: () => options };
 }
 
 describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () => {
@@ -67,7 +69,7 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		const f = structured(); await assert.rejects(f.tool.execute("output", { value: "not an object" }), /validation failed/);
 		assert.equal(f.captured(), 0); f.guard.close();
 	});
-	for (const method of ["stream", "streamSimple", "streamDeferred", "generateImages", "classify"] as const) {
+	for (const method of ["stream", "streamSimple", "streamDeferred", "cancelDeferred", "generateImages", "classify"] as const) {
 		it(`does not dispatch ${method} during SDK startup even with both consumers ready`, () => {
 			const f = starting();
 			assert.throws(() => f.runtime[method](f.model, {}, {}), /startup.*not completed/);
@@ -93,7 +95,7 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 	});
 	for (const selection of ["active", "callable"] as const) it(`cannot widen a pre-existing ${selection} selection during startup`, () => {
 		const f = fixture(); f[selection].splice(0);
-		const guard = guardChildGeneration({ stream() {}, streamSimple() {} }, f.lease, f.model); guard.bind(f.session);
+		const guard = guardChildGeneration({ stream() {}, streamSimple() {}, getProvider: f.runtime.getProvider, getProviders: f.runtime.getProviders, getAuth: f.runtime.getAuth }, f.lease, f.model); guard.bind(f.session);
 		f[selection].push("read"); assert.throws(() => guard.completeStartup(), /selected ceiling during startup/);
 		assert.equal(f.lease.signal.aborted, true);
 	});
@@ -109,7 +111,7 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		const f = starting(); f.lease.dispose(); assert.throws(() => f.guard.completeStartup(), /cannot complete or rebind/);
 		assert.equal(f.calls(), 0);
 	});
-	for (const method of ["stream", "streamSimple", "streamDeferred", "generateImages", "classify"] as const) {
+	for (const method of ["stream", "streamSimple", "streamDeferred", "cancelDeferred", "generateImages", "classify"] as const) {
 		it(`does not dispatch ${method} before required consumer readiness`, () => {
 			const f = fixture(false);
 			assert.throws(() => f.runtime[method](f.model, {}, {}), /not ready|acknowledged|consumer/i);
@@ -279,7 +281,7 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		}
 	});
 	it("refuses a missing public tool API during binding without inventing a replacement view", () => {
-		const f = fixture(), guard = guardChildGeneration({ stream() {}, streamSimple() {} }, f.lease, f.model);
+		const f = fixture(), guard = guardChildGeneration({ stream() {}, streamSimple() {}, getProvider: f.runtime.getProvider, getProviders: f.runtime.getProviders, getAuth: f.runtime.getAuth }, f.lease, f.model);
 		assert.throws(() => guard.bind({ ...f.session, getAllTools: undefined } as never), /lacks the public getAllTools/); assert.equal(f.lease.signal.aborted, true);
 	});
 	it("rechecks schema fidelity after an asynchronous generation hook", async () => {
@@ -301,7 +303,7 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		await assert.rejects(async () => { for await (const event of f.runtime.streamSimple(f.model, {}, {})) received.push(event); }, /lifetime ended/);
 		assert.deepEqual(received, ["first"]);
 	});
-	for (const method of ["classify", "generateImages"] as const) {
+	for (const method of ["classify", "generateImages", "cancelDeferred"] as const) {
 		it(`rejects a late ${method} result after session drift`, async () => {
 			let change: () => void = () => {};
 			const f = fixture(true, async () => { await Promise.resolve(); change(); return "late"; });
@@ -309,6 +311,71 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 			await assert.rejects(() => f.runtime[method](f.model, {}, {}), /identity changed/);
 		});
 	}
+	for (const change of ["dispatch", "auth", "metadata", "owner", "API", "auth API"] as const) it(`rejects live provider ${change} drift without a new registry call`, () => {
+		const f = fixture();
+		if (change === "dispatch") f.providers[0]!.streamSimple = () => "foreign dispatch";
+		if (change === "auth") f.providers[0]!.auth.resolve = () => undefined;
+		if (change === "metadata") Object.assign(f.providers[0]!, { baseUrl: "https://changed.invalid" });
+		if (change === "owner") f.providers[0] = { ...f.providers[0]! };
+		if (change === "API") f.runtime.getProvider = () => f.providers[0];
+		if (change === "auth API") f.runtime.getAuth = async () => "borrowed auth";
+		assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /provider.*changed/);
+		assert.equal(f.calls(), 0); assert.equal(f.lease.signal.aborted, true);
+	});
+	it("poisons the same lifetime when the pinned provider lookup itself throws", () => {
+		const f = fixture(); f.providers.find = () => { throw new Error("untrusted lookup details"); };
+		assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /provider provenance lookup failed/);
+		assert.equal(f.calls(), 0); assert.equal(f.lease.signal.aborted, true);
+	});
+	it("does not inspect provider accessors or proxies after startup", () => {
+		for (const kind of ["accessor", "proxy"]) {
+			const f = fixture(); let traps = 0;
+			if (kind === "accessor") Object.defineProperty(f.providers[0], "extra", { get() { traps++; } });
+			else Object.assign(f.providers[0]!, { extra: new Proxy({}, { ownKeys() { traps++; return []; } }) });
+			assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /provider provenance.*accessor-free/);
+			assert.equal(traps, 0); assert.equal(f.calls(), 0);
+		}
+	});
+	it("rechecks provider code after an asynchronous native header callback", async () => {
+		const f = fixture(); f.runtime.streamSimple(f.model, {}, { transformHeaders: async () => { await Promise.resolve(); f.providers[0]!.auth.resolve = () => undefined; return {}; } });
+		await assert.rejects(() => f.options().transformHeaders({}), /provider code, auth or metadata provenance changed/); assert.equal(f.lease.signal.aborted, true);
+	});
+	it("still revokes provider drift when an asynchronous callback rejects", async () => {
+		const f = fixture(); f.runtime.streamSimple(f.model, {}, { transformHeaders: async () => { f.providers[0]!.auth.resolve = () => undefined; throw new Error("hook failed"); } });
+		await assert.rejects(() => f.options().transformHeaders({}), /provider code, auth or metadata provenance changed/); assert.equal(f.lease.signal.aborted, true);
+	});
+	it("preserves the original hook failure when provenance and lifetime remain current", async () => {
+		const f = fixture(), original = new Error("owned hook failure"); f.runtime.streamSimple(f.model, {}, { transformHeaders: async () => { throw original; } });
+		await assert.rejects(() => f.options().transformHeaders({}), error => error === original); assert.equal(f.lease.signal.aborted, false); f.guard.close();
+	});
+	it("rejects changed physical-provider code before observing a first native route", async () => {
+		const f = fixture(true, undefined, true); f.providers[1]!.streamSimple = () => "foreign physical code";
+		await assert.rejects(() => f.runtime.resolveModel(f.model, [], {}), /provider code, auth or metadata provenance changed/); assert.equal(f.calls(), 0);
+	});
+	it("does not return a late provider stream result after provider code changes", async () => {
+		const f = fixture(true, () => ({ result: async () => { f.providers[0]!.auth.resolve = () => undefined; return "late"; } }));
+		await assert.rejects(() => f.runtime.streamSimple(f.model, {}, {}).result(), /provider code, auth or metadata provenance changed/);
+	});
+	it("requires the genuine public provider boundary instead of inventing a registry view", () => {
+		const f = fixture(); assert.throws(() => guardChildGeneration({ stream() {}, streamSimple() {} }, f.lease, f.model), /public provider provenance boundary/);
+		assert.equal(f.lease.signal.aborted, true);
+	});
+	it("bounds each provider before startup instead of accepting an uninspectable event path", () => {
+		const f = fixture(); assert.throws(() => guardChildGeneration({ ...f.runtime, getProviders: () => [{ id: "trusted", extra: "x".repeat(65537) }] }, f.lease, f.model), /provider catalogue cannot be pinned/);
+		assert.equal(f.lease.signal.aborted, true);
+	});
+	it("bounds the startup provider catalogue instead of truncating the future route set", () => {
+		const f = fixture(); assert.throws(() => guardChildGeneration({ ...f.runtime, getProviders: () => Array.from({ length: 257 }, (_, i) => ({ id: String(i) })) }, f.lease, f.model), /provider catalogue cannot be pinned/);
+		assert.equal(f.lease.signal.aborted, true);
+	});
+	it("does not lend remote cancellation after close while keeping SDK cleanup authentication available", async () => {
+		const f = fixture(); f.guard.close(); assert.throws(() => f.runtime.cancelDeferred(f.model, {}, {}), /lifetime ended/);
+		assert.equal(await f.runtime.getAuth(), "owned-cleanup-auth"); assert.equal(f.calls(), 0);
+	});
+	it("revokes changed provider code even when a native promise rejects", async () => {
+		const f = fixture(true, async () => { f.providers[0]!.auth.resolve = () => undefined; throw new Error("native failure"); });
+		await assert.rejects(() => f.runtime.cancelDeferred(f.model, {}, {}), /provider code, auth or metadata provenance changed/); assert.equal(f.lease.signal.aborted, true);
+	});
 	it("does not permit replacement of the guarded dispatch or selected provider registry", () => {
 		const f = fixture();
 		assert.throws(() => { f.runtime.streamSimple = () => "replaced"; }, TypeError);
@@ -331,7 +398,7 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 	});
 	it("refuses an SDK without the public generation boundary rather than wrapping another engine", () => {
 		const f = fixture();
-		assert.throws(() => guardChildGeneration({}, f.lease, f.model), /lacks the public stream/);
+		assert.throws(() => guardChildGeneration({ getProvider: f.runtime.getProvider, getProviders: f.runtime.getProviders, getAuth: f.runtime.getAuth }, f.lease, f.model), /lacks the public stream/);
 		assert.equal(f.lease.signal.aborted, true);
 	});
 });

@@ -29,9 +29,10 @@ function sdk(options: {
 	register?: () => void;
 	create?: () => unknown;
 } = {}): PiCodingAgentModule {
+	const provider = { id: "trusted" };
 	return {
 		SettingsManager, DefaultResourceLoader,
-		ModelRuntime: { create: async () => ({ stream: () => undefined, streamSimple: () => undefined, registerProvider: () => options.register?.(), refresh: async () => {} }) },
+		ModelRuntime: { create: async () => ({ getProviders: () => [provider], getProvider: () => provider, getAuth: async () => undefined, stream: () => undefined, streamSimple: () => undefined, registerProvider: () => options.register?.(), refresh: async () => {} }) },
 		SessionManager: { inMemory: () => ({}) },
 		resolveCliModel: options.resolve ?? (() => ({ model: { provider: "trusted", id: "model" } })),
 		createAgentSession: async ({ resourceLoader, settingsManager }: { resourceLoader: DefaultResourceLoader; settingsManager: SettingsManager }) => {
@@ -87,7 +88,8 @@ describe("guarded SDK child startup", () => {
 		const registrations: unknown[] = [];
 		const api = sdk({ onLoader: loader => assert.deepEqual(loader.getExtensions().extensions.map(e => e.path), [path.join(agent, "provider.ts")]) });
 		// Record registrations without initializing any provider auth/SDK model transport.
-		api.ModelRuntime.create = async () => ({ stream: () => undefined, streamSimple: () => undefined, registerProvider: (_id: string, config: unknown) => registrations.push(config), refresh: async () => {} }) as never;
+		const createRuntime = api.ModelRuntime.create;
+		api.ModelRuntime.create = async () => ({ ...await createRuntime(), registerProvider: (_id: string, config: unknown) => registrations.push(config) }) as never;
 		const factory = createDefaultChildSessionFactory({ loadPiCodingAgent: async () => api });
 		await assert.rejects(() => guarded(cwd, () => factory.create(launch(cwd))), /captured-before-session/);
 		assert.deepEqual(registrations, [{ marker: "global" }]);

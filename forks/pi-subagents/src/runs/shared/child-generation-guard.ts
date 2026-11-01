@@ -92,6 +92,33 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 		if (toolNames("getActiveToolNames").some(name => !activeCeiling.has(name)) || toolNames("getCallableToolNames").some(name => !callableCeiling.has(name))) fail("the SDK tool loadout exceeded its selected ceiling");
 	};
 	const selected = metadata(selectedModel), requestedModel = key(selected);
+	// Pin the SDK-owned concrete providers, not just catalogue model names or
+	// registry mutators. getProvider exposes live auth/dispatch objects. Virtual
+	// routes may pick any pre-existing concrete provider; pin all once, then
+	// inspect only the selected provider on each operation/callback/event.
+	const providerLookup = target.getProvider, providerList = target.getProviders, authLookup = target.getAuth;
+	if (typeof providerLookup !== "function" || typeof providerList !== "function" || typeof authLookup !== "function") fail("this SDK lacks the public provider provenance boundary");
+	const providerPins = new Map<string, { reference: unknown; data: unknown }>();
+	try {
+		const providers = (providerList as Method).call(runtime);
+		const data = snapshotMetadata(providers, { nodes: 16384, bytes: 524288 }, new Set(), 0, true) as Array<{ id: string }>;
+		if (!Array.isArray(data) || data.length > 256) throw new Error("unsupported provider list");
+		for (const [index, provider] of data.entries()) {
+			if (!provider || typeof provider !== "object" || typeof provider.id !== "string" || !provider.id || providerPins.has(provider.id)) throw new Error("invalid provider identity");
+			providerPins.set(provider.id, { reference: providers[index], data: snapshotMetadata(provider, { nodes: 1024, bytes: 65536 }, new Set(), 0, true) });
+		}
+	} catch { fail("the SDK provider catalogue cannot be pinned as bounded accessor-free owned data"); }
+	const assertProvider = (id: string) => {
+		const pinned = providerPins.get(id);
+		let current: unknown;
+		try { current = (providerLookup as Method).call(runtime, id); }
+		catch { return fail("the SDK provider provenance lookup failed"); }
+		if (!pinned || current !== pinned.reference) return fail("the SDK provider identity changed or was not present at model resolution");
+		let data: unknown;
+		try { data = snapshotMetadata(current, { nodes: 1024, bytes: 65536 }, new Set(), 0, true); }
+		catch { fail("the SDK provider provenance is not bounded accessor-free owned data"); }
+		if (!isDeepStrictEqual(data, pinned.data)) fail("the SDK provider code, auth or metadata provenance changed");
+	};
 	// Observed native router outputs, not decisions/grants or a substitute router.
 	// Exact SDK-owned references also cover its native cache warmer's reuse. Each
 	// operation still checks readiness, cancellation and all pinned model data.
@@ -107,6 +134,7 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 		if (key(current) !== requestedModel) return fail("the SDK session/model identity changed or is not bound");
 		if (!isDeepStrictEqual(current, selected)) fail("the selected model metadata changed after exact SDK resolution");
 		assertTools();
+		if (target.getProvider !== providerLookup || target.getProviders !== providerList || target.getAuth !== authLookup) fail("the SDK provider provenance APIs changed");
 		const requested = model && metadata(model);
 		if (requestMetadata && !isDeepStrictEqual(requested, requestMetadata)) fail("the in-flight request model metadata changed");
 		if (requested && key(requested) === requestedModel && !isDeepStrictEqual(requested, selected)) fail("the request substituted metadata behind the selected provider/model name");
@@ -118,6 +146,8 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 			const catalogue = (physicalLookup as Method).call(runtime, requested.provider, requested.id);
 			if (!isDeepStrictEqual(metadata(catalogue), observed)) fail("the SDK physical catalogue no longer matches the native route");
 		}
+		const concrete = requested ?? selected;
+		if (concrete.api !== "pi-virtual") assertProvider(concrete.provider);
 	};
 	const install = (name: string, wrap: (original: Method) => Method, required = false) => {
 		const method = target[name];
@@ -137,13 +167,14 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 			const physical = metadata(route?.model);
 			const catalogue = (physicalLookup as Method).call(runtime, physical.provider, physical.id);
 			if (physical.api === "pi-virtual" || !isDeepStrictEqual(physical, metadata(catalogue))) fail("the native route is not the physical SDK catalogue model");
+			assertProvider(physical.provider);
 			const previous = routed.get(route.model);
 			if (previous && !isDeepStrictEqual(physical, previous)) fail("the native routed model metadata changed");
 			routed.set(route.model, physical);
 			return route;
 		}, true);
 	}
-	for (const name of ["stream", "streamSimple", "streamDeferred", "generateImages", "classify"]) {
+	for (const name of ["stream", "streamSimple", "streamDeferred", "cancelDeferred", "generateImages", "classify"]) {
 		install(name, original => (model: ModelIdentity, context: unknown, options?: Record<string, unknown>) => {
 			const signal = AbortSignal.any([lease.signal, ...(startupSignal ? [startupSignal] : []), ...(options?.signal ? [options.signal as AbortSignal] : [])]);
 			const requestMetadata = metadata(model);
@@ -155,13 +186,12 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 				const previous = options?.[callback];
 				(bounded as Record<string, unknown>)[callback] = async (...args: unknown[]) => {
 					assert(model, signal, requestMetadata);
-					const value = typeof previous === "function" ? await previous(...args) : callback === "transformHeaders" ? args[0] : undefined;
-					assert(model, signal, requestMetadata);
-					return value;
+					try { return typeof previous === "function" ? await previous(...args) : callback === "transformHeaders" ? args[0] : undefined; }
+					finally { assert(model, signal, requestMetadata); }
 				};
 			}
 			const result = original(model, context, bounded);
-			if (name === "generateImages" || name === "classify") return Promise.resolve(result).then(value => { assert(model, signal, requestMetadata); return value; });
+			if (name === "generateImages" || name === "classify" || name === "cancelDeferred") return Promise.resolve(result).finally(() => { assert(model, signal, requestMetadata); });
 			// Preserve the SDK stream itself, its public iteration/result contract
 			// and native provider cancellation. Do not synthesize messages/usage.
 			if (result && typeof result === "object") return new Proxy(result, {

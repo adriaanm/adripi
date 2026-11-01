@@ -1031,6 +1031,59 @@ negative proofs, not certification of all lazy code/content, hardlink/OS aliasin
 arbitrary trusted host changes or effective provider/auth provenance. Remaining
 acceptance and no-live-deployment/approval/billing boundaries stay open.
 
+## Live SDK provider objects could bypass the registry lock
+
+Two actual SDK composition regressions changed the public concrete provider's
+`streamSimple` or `auth.apiKey.resolve` during `before_agent_start`; both tasks still
+completed successfully before the fix. Locking register/refresh APIs and model
+metadata did not pin those live SDK-exposed objects.
+
+The existing generation guard now snapshots the actual public `getProviders`
+catalogue at exact model resolution and pins `getProvider`/`getProviders`/`getAuth`
+API identities. It retains independent bounded provider data and owned function/
+symbol identities, not reusable permission decisions. At each existing generation,
+callback, iteration/result and structured-control check, inspect only the selected
+concrete provider against that initial reference/data. A native virtual route must
+also match an initially pinned provider before its reference is observed. Startup
+catalogue limits:256 providers/16384 nodes/512KiB total;1024 nodes/64KiB per provider.
+Unknown/missing/replaced/malformed/proxy/accessor/oversized data or failed lookup
+revokes the same lease without logging auth values or invoking metadata accessors.
+No provider/transport/registry replacement, new public API, role, wire field or ack.
+
+The optional public `cancelDeferred` operation now uses the same live lease/model/
+provider fences; it is not a cleanup-name exemption for arbitrary remote actions.
+Ordinary SDK `getAuth` remains usable after close for owned cleanup. Async callback
+and non-stream promise checks run in `finally`, including rejected hooks/results;
+unchanged failures retain their original error. No fresh permission is inferred.
+This does not certify ownership of arbitrary deferred handles or remote billing.
+
+**4,366 total /4,349 pass /17 skip /zero fail /443 suites**, types.21 added unit
+cases plus faithful existing mock API updates. **35/35 on each genuine SDK1.2/1.4**,
+zero fail/skip;4graph tests. Actual composition additionally proves an asynchronous
+`before_provider_headers` mutation refuses before the captured replacement runs:
+zero faux provider calls, file mutation, semantic review or scratch leak in these
+negatives. Public-parent/default-acceptance/structured capture/denial, exact cursor/
+directive/accounting and actual process termination cases remain green. The flaky
+npm PID-marker prerequisite now observes/awaits the real ChildProcess using public
+Node diagnostics, no substituted backend or weakened timeout (commit6680c75).
+
+Same-input five-sample guard microbenchmark:1000 synthetic stream events/seven real
+SDK native definitions/one real faux provider metadata object, no provider/auth
+operation. Baseline186.3–203.0ms versus current191.3–210.2ms; mean increment~4.7µs/
+event (~2.5%). Setup~0.37–1.72ms versus~0.38–1.18ms. This bounds only that fixture,
+not representative provider latency, live spending, large catalogues or savings.
+Source `022b2c6f444686d2`, artifact `d3f7ab3618b3946a`, graph384/17/330/18/768.
+Evidence `.local/goal-consumers/provider-fidelity-{before,focused,composition,sdk14,
+full,npm-observation,bench,root}.log`, `provider-fidelity-bench.mjs` and historical
+`provider-baseline.ts` in that same directory.
+
+These checks pin SDK-exposed provider objects/API code, not every private closure,
+underlying provider/global API registry, auth-resolved endpoint/header/environment
+value, asynchronous transport handoff or actual network operation. Those resource/
+effective-auth/code provenance audits remain open alongside deployment/loaded broker/
+OS/Git/live accounting/total latency. No installed config/policy/toggle/session,
+protected credential/audit content, runtime replacement, paid provider or push action.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

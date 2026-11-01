@@ -482,3 +482,27 @@ instruction. Observe the actual ChildProcess through Node's existing public
 SIGTERM. No mocked/replaced execFile/backend, PID polling, new production API or
 weakened500ms timeout. Seven focused tests pass; no runtime/permission change.
 Evidence: .local/goal-consumers/provider-fidelity-npm-observation.log.
+
+## Live provider auth/dispatch objects bypassed the locked registry
+
+Pin the actual SDK public getProviders catalogue and getProvider/getProviders/
+getAuth API identities at model resolution. Existing guard points inspect only
+that request's concrete provider against independent reference/data/code snapshots;
+virtual routes must use an initially pinned provider. Catalogue256/16384nodes/
+512KiB, each provider1024nodes/64KiB. Malformed/replaced/accessor/proxy/oversized/
+lookup-failed state revokes the same lease, no auth-value logging or getters.
+Optional cancelDeferred uses the existing active generation fences; getAuth still
+works for owned cleanup after close. Async callback/promise finally checks cover
+failures too and preserve unchanged errors. No new SDK/provider/transport/registry/
+role/wire/ack/public API/permission store. Existing opaque fixtures expose faithful
+public APIs instead of substituting an engine.
+21 added units:4366total/4349pass/17skip/0fail443suites, types.35 composition per
+actual SDK1.2/1.4 +4graph/root gates. Two real pre-generation mutation regressions
+previously completed; async real SDK header mutation now also refuses with zero
+provider calls/mutation/reviews/scratch leak. Baseline/current1000-event seven-real-
+tool/real-faux-metadata fixture ranges186.3–203.0/191.3–210.2ms (mean+4.7µs/event),
+not paid/representative latency or savings. Source022b2c6f444686d2/artifact
+d3f7ab3618b3946a, graph384/17/330/18/768. Full scope/evidence/remaining private-code,
+effective-auth, transport-handoff, deployed/OS/Git/live cost gates:
+docs/round-2-production-consumers.md. No live install/restart/config/policy/toggle/
+session/protected-content/runtime replacement/paid-provider/push.
