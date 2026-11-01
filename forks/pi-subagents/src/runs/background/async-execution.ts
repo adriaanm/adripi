@@ -820,6 +820,9 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 	}
 	if (!binaryHost && "error" in piPackageSelection) throw piPackageSelection.error;
 	const nodeExecutable = resolveNodeExecutable();
+	if (childAuthorityAdmission.guarded && (process.versions.bun !== undefined || nodeExecutable !== process.execPath || !path.isAbsolute(nodeExecutable))) {
+		return { error: "Guarded background launch requires the current Node executable; PATH fallback cannot select a different runtime. No child process was started." };
+	}
 	const nativeRunnerSupported = supportsNativeRunner(nodeExecutable);
 	const runner = asyncRunnerSourcePath();
 	const runnerIsJavaScript = path.extname(runner) === ".js";

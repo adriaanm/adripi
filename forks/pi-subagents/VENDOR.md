@@ -319,3 +319,19 @@ parent SDK tool-event/complete bootstrap/resource/virtual/tool-lifetime/OS/deplo
 paid-provider proof. Explicit doubles and outstanding gates/evidence are documented
 in `docs/round-2-production-consumers.md`. No live deployment/restart/config/toggle/
 protected-content/runtime change or push.
+
+## Guarded Node selection still attempted PATH fallback
+
+When the current executable's access check failed, guarded background launch used
+upstream's bare `node` fallback. A pre-fix spawn regression proves it. The existing
+admission now refuses any non-absolute/non-current selection and uncompiled Bun
+hosts, even when named `node`. Unguarded resolution stays unchanged; no alternate
+runtime, retry or public compatibility flag. This is selection proof, not full
+executable/code/dependency integrity certification.
+
+Two new negatives pass; full **4,305 total / 4,288 pass / 17 skip / zero fail /
+443 suites**, types,22 composition and four graph tests pass. Same384-input,
+17-export,330-compiled,18-URL,768-artifact graph, digest `f2e150f60f4d2368`.
+Evidence/scope: `docs/round-2-production-consumers.md` and
+`.local/goal-consumers/executable-*`. No live runtime/policy/config/toggle,
+install/restart/protected-content change or push.

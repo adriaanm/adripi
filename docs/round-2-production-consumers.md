@@ -748,6 +748,22 @@ explicit doubles. Deployment/broker/actual OS/Git/paid-cost/latency acceptance a
 #14's remaining source audit stay open; no install/restart/live policy/toggle/
 protected-content/runtime replacement/push occurred.
 
+## Guarded runtime selection cannot fall back to PATH
+
+A spawn-boundary regression forced the current executable's access check to fail;
+the old guarded path then attempted bare `node` from PATH. Existing guarded
+admission now requires an absolute, usable **current Node executable**, and rejects
+an uncompiled Bun host too (including one named `node`). No retry/alternate runtime,
+public flag or unguarded resolver change. This fixes runtime selection, not an
+inode/code/dependency pin or complete bootstrap provenance claim.
+
+The pre-fix regression, both new negatives, full **4,305 unit / 4,288 pass /
+17 skip / zero fail / 443 suites** (concurrency4), types, **22 composition**, four
+graph tests and root checks pass. Graph384 inputs/17 exports/330 compiled/18 URLs/
+768 files, artifact `f2e150f60f4d2368`. Evidence:
+`.local/goal-consumers/executable-{before,full,composition,root}.log`.
+No live runtime/config/policy/toggle change, install, restart or push.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

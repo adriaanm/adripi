@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import childProcess, { spawn, type ChildProcess } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
-import * as fs from "node:fs";
+import fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -645,6 +645,33 @@ describe("registered async dispatch under child authority", { skip: isAsyncAvail
 			assert.equal(fs.existsSync(path.join(DIRS.async, id)), false);
 		}
 		clearProvider();
+	});
+
+	it("refuses a guarded PATH-based Node substitution when the current executable cannot be used", (t) => {
+		registerHostGuard(); publishProvider(providerFor(SESSION_ID));
+		const access = fs.accessSync;
+		t.mock.method(fs, "accessSync", (target, mode) => { if (String(target) === process.execPath) throw new Error("current executable unavailable"); return access(target, mode); });
+		const captured = t.mock.method(childProcess, "spawn", () => { throw new Error("unexpected PATH Node spawn"); }); syncBuiltinESMExports();
+		try {
+			const result = launch(`authority-executable-${Date.now().toString(36)}`);
+			assert.ok(!(result instanceof Promise)); assert.equal(result.isError, true);
+			assert.match(JSON.stringify(result), /current Node executable.*PATH/); assert.equal(captured.mock.callCount(), 0);
+		} finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+	});
+
+	it("refuses an uncompiled Bun host even if its executable is named node", (t) => {
+		registerHostGuard(); publishProvider(providerFor(SESSION_ID));
+		const bun = Object.getOwnPropertyDescriptor(process.versions, "bun");
+		Object.defineProperty(process.versions, "bun", { value: "fixture-bun", configurable: true });
+		const captured = t.mock.method(childProcess, "spawn", () => { throw new Error("unexpected Bun runner spawn"); }); syncBuiltinESMExports();
+		try {
+			const result = launch(`authority-bun-host-${Date.now().toString(36)}`);
+			assert.ok(!(result instanceof Promise)); assert.equal(result.isError, true);
+			assert.match(JSON.stringify(result), /current Node executable.*PATH/); assert.equal(captured.mock.callCount(), 0);
+		} finally {
+			t.mock.restoreAll(); syncBuiltinESMExports();
+			if (bun) Object.defineProperty(process.versions, "bun", bun); else delete process.versions.bun;
+		}
 	});
 
 	it("does not execute inherited Node preloads before the child authority binding", async () => {
