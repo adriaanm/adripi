@@ -305,6 +305,28 @@ See [current contract](../../docs/product.md),
 Git history exercised the now-retired session-grant protocol; they do not verify
 this round's installed runtime.
 
+## Structured-output control is code/lease-bound, not a tool-name grant
+
+Actual public-parent SDK typed-output tasks previously failed because the child
+native-only gate rejected structured_output. Require the same installed public
+child-authority API's current SDK-definition/producer/lease inspection. Only that
+no-path helper can pass; names/inline labels/serialized metadata/semantic allow do
+not mint filesystem/host/maintenance scope. Unknown/foreign controls remain blocked.
+The actual producer checks lifetime, definition and caller cancellation around
+async validation/capture; original schema, capture callback and terminal result stay
+upstream-owned. No second broker/store/registry/reviewer/approval transport or role.
+
+Full430 tests/30 files and types pass, including refusal of an incomplete current-
+version API. The older registered-provider synthetic positive fixture explicitly
+owns/restores a clean NODE_PATH (pnpm's Vitest shim injects it); production startup-
+override refusal is unchanged. Both real parent entries and compiled child consumers
+pass32 composition cases per genuine SDK1.2/1.4, including default lightweight
+acceptance, typed output, parent denial without capture, exact evidence/accounting,
+observed process close and cleanup. These use explicit OS/provider/reviewer/usage/
+human doubles, not live OS/billing approval. See docs/round-2-production-consumers.md.
+Deployment/restart/policy/config/toggle/protected-content/runtime replacement and
+push were not performed; source acceptance remains bounded by the remaining gates.
+
 ## Deploy/update
 
 `install.sh` installs npm `pi-sbx@0.1.3` and mirrors this `src/` over the installed

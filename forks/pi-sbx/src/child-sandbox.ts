@@ -52,6 +52,12 @@ export class ChildSandbox implements ChildNativeAuthority {
       this.executionPins.push({ path, canonical, stamp: this.executionStamp(canonical) });
     }
   }
+  runtimeControlTool(name: string, ctx: ExtensionContext): boolean {
+    this.assertActive(ctx);
+    // Name/sourceInfo labels alone are not provenance. The same public API
+    // checks the live SDK definition against its lease-bound producer code.
+    return this.api.isChildRuntimeControlTool(this.lease!, name) === true;
+  }
   shell(ctx: ExtensionContext): string { this.assertActive(ctx); return this.shellPath!; }
   scratchpad?: Scratchpad;
   config?: ReturnType<typeof compileChildConfig>;
@@ -190,7 +196,7 @@ export async function registerChildSandbox(pi: ExtensionAPI, root: () => void, i
     try {
       if (phase !== "child" || !binding) throw new Error(failure);
       binding.assertActive(ctx);
-      if (!(NATIVE_NAMES as readonly string[]).includes(event.toolName)) throw new Error(`unsupported delegated tool ${event.toolName}; no bounded native adapter is installed`);
+      if (!(NATIVE_NAMES as readonly string[]).includes(event.toolName) && !binding.runtimeControlTool(event.toolName, ctx)) throw new Error(`unsupported delegated tool ${event.toolName}; no bounded native adapter is installed`);
     } catch (error) { return { block: true, reason: `Child sandbox blocked the action: ${message(error)}` }; }
   });
   try {

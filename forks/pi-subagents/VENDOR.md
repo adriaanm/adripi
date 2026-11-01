@@ -428,3 +428,33 @@ OS/billing proof. See `docs/round-2-production-consumers.md` for exact evidence 
 remaining acceptance/provenance/lifecycle/deployment/OS/Git/cost/latency gates.
 No live install/restart/policy/config/toggle/protected-content/runtime replacement,
 paid-provider operation or push.
+
+## Structured output was rejected as an unowned tool
+
+Actual public SDK outputSchema tasks could not complete: pi-sbx rejected the
+existing structured_output helper. Names/inline labels cannot authorize it. Mark
+its exact producer function with the current opaque lease reference and bind one
+non-replaceable SDK-definition inspector on that same lease after startup. Add
+pure code/lifetime inspection to the existing public child-authority API, consumed
+by pi-sbx; no separate registry/permission store/approval path/role/ack/wire change.
+Internal marking/binding functions are not public package-API exports. Arbitrary
+privileged host code remains outside this boundary, as with the provider API.
+
+Preserve native schema/validation/capture/termination. Check current definition,
+pinned metadata, lease and caller cancellation around async validation/capture.
+No model-selected file target, filesystem/host/maintenance scope or semantic-review
+exemption. Metadata-only code captures the actual current scope without assuming
+process cwd equals task cwd; runner/SDK/consumer cwd checks stay exact. No inspector
+replacement or producer retargeting; old API without inspection refuses in pi-sbx.
+
+Actual public dispatch now proves default lightweight acceptance, typed capture and
+terminal return, and parent semantic denial without capture; three reviews count
+once, cursor/directives/process/cleanup remain checked. Seven unit additions prove
+foreign-code/lease refusal, binding identity, validation and async cancellation/
+revocation/replacement. Generic supervisor/wait/MCP controls remain unsupported.
+**4,343/4,326 pass/17 skip/zero fail/443 suites**, types; **32/32 per genuine SDK1.2
+and1.4**, four graph tests. Source `b62b504e34add416`, artifact `dfa62bc52350e223`,
+graph384/17/330/18/768. See docs/round-2-production-consumers.md for explicit
+OS/provider/reviewer/usage/human doubles and remaining acceptance boundaries.
+No live install/restart/policy/config/toggle/protected-content/runtime replacement,
+paid-provider operation or push.

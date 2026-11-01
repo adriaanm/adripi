@@ -56,6 +56,11 @@ describe("co-installed public child-authority bridge (not enforcement)", () => {
     await expect(loadInstalledChildConsumerApi(agentDir)).rejects.toThrow(/malformed/);
   });
 
+  it("refuses a current-version API missing runtime code inspection instead of allowing tools by name", async () => {
+    install("export const CHILD_AUTHORITY_PROVIDER_VERSION=2; export function hasChildAuthorityContext(){}; export function claimChildAuthority(){}; export function acknowledgeChildAuthority(){};");
+    await expect(loadInstalledChildConsumerApi(agentDir)).rejects.toThrow(/malformed/);
+  });
+
   it("refuses a package-export escape before loading its code", async () => {
     install("throw new Error('the wrong entry ran')", "../../outside.js");
     await expect(loadInstalledChildConsumerApi(agentDir)).rejects.toThrow(/escapes its package root/);
@@ -82,6 +87,8 @@ describe("co-installed public child-authority bridge (not enforcement)", () => {
         expect(() => sbx.assertReady()).toThrow(/pi-guardian/);
         api.acknowledgeChildAuthority("pi-guardian");
         expect(() => sbx.assertReady()).not.toThrow();
+        expect(api.isChildRuntimeControlTool(sbx, "structured_output")).toBe(false);
+        expect(api.isChildRuntimeControlTool(sbx, "arbitrary-tool")).toBe(false);
       });
       expect(api.hasChildAuthorityContext()).toBe(false);
     } finally { handle.lease.dispose(); }

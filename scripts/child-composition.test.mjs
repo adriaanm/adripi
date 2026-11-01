@@ -219,7 +219,11 @@ faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'detached.txt
 	});
 }
 
-for (const existingSupervisor of [false, true]) test(`public parent SDK subagent uses both actual parent entries/child consumers (existing supervisor: ${existingSupervisor})`, async () => {
+for (const { existingSupervisor, acceptance, structured = false, denyControl = false } of [
+	{ existingSupervisor: false, acceptance: false }, { existingSupervisor: true, acceptance: false },
+	{ existingSupervisor: false }, { existingSupervisor: false, acceptance: false, structured: true },
+	{ existingSupervisor: false, acceptance: false, structured: true, denyControl: true },
+]) test(`public parent SDK subagent uses both actual parent entries/child consumers (existing supervisor: ${existingSupervisor}, acceptance: ${acceptance ?? "default"}, structured: ${structured}, deny control: ${denyControl})`, async () => {
 	const f = fixture(), layout = install(f, {}), generations = path.join(f.root, "public-generations.jsonl");
 	// Retire only this fixture's synthetic parent; the new parent uses its actual
 	// SDK session/transcript and registers the actual Guardian entry itself.
@@ -228,11 +232,11 @@ for (const existingSupervisor of [false, true]) test(`public parent SDK subagent
 	writeFileSync(path.join(f.agentDir, "agents/composition-worker.md"), "---\nname: composition-worker\ndescription: Synthetic composition worker\nmodel: trusted/model\ntools: read, write, edit, bash, ls, grep, find\n---\nRun only the synthetic assigned child. Never deploy.\n");
 	const nativeAuthority = pathToFileURL(path.join(f.agentDir, "npm/node_modules/pi-subagents/src/runs/shared/child-authority.js")).href;
 	writeFileSync(path.join(f.agentDir, "extensions/faux-provider.ts"), `import {appendFileSync} from 'node:fs';import {fauxProvider,fauxAssistantMessage,fauxToolCall} from '@earendil-works/pi-ai';import {VERSION} from '@earendil-works/pi-coding-agent';import {captureChildAuthorityLease} from ${JSON.stringify(nativeAuthority)};
-export default function(pi){const lease=captureChildAuthorityLease(${JSON.stringify(f.child)}),faux=fauxProvider({api:'fixture-faux',provider:'trusted',models:[{id:'model'}]});${existingSupervisor ? "pi.registerTool({name:'contact_supervisor',label:'Existing supervisor',description:'Existing trusted global supervisor fixture',parameters:{type:'object',properties:{}},execute:async()=>{throw new Error('unused supervisor fixture must not execute')}});" : ""}faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'public.txt',content:'public native input 文🌍'},{id:'public-write'}),{stopReason:'toolUse'}),fauxAssistantMessage('Finished assigned synthetic child.')].map(response=>()=>{lease.assertReady();appendFileSync(${JSON.stringify(generations)},JSON.stringify({ready:lease.requiredConsumers,sdk:VERSION})+'\\n');return response}));pi.registerProvider(faux.provider);}`);
+export default function(pi){const lease=captureChildAuthorityLease(${JSON.stringify(f.child)}),faux=fauxProvider({api:'fixture-faux',provider:'trusted',models:[{id:'model'}]});${existingSupervisor ? "pi.registerTool({name:'contact_supervisor',label:'Existing supervisor',description:'Existing trusted global supervisor fixture',parameters:{type:'object',properties:{}},execute:async()=>{throw new Error('unused supervisor fixture must not execute')}});" : ""}faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'public.txt',content:'public native input 文🌍'},{id:'public-write'}),{stopReason:'toolUse'}),${structured ? `fauxAssistantMessage(fauxToolCall('structured_output',{value:{summary:${JSON.stringify(denyControl ? "FORBIDDEN capture" : "Native fixture completed")}}},{id:'public-output'}),{stopReason:'toolUse'})` : "fauxAssistantMessage('Native fixture completed. Residual risks: synthetic fixture, no live OS/provider verification.')"}].map(response=>()=>{lease.assertReady();appendFileSync(${JSON.stringify(generations)},JSON.stringify({ready:lease.requiredConsumers,sdk:VERSION,controlSource:pi.getAllTools().find(tool=>tool.name==='structured_output')?.sourceInfo})+'\\n');return response}));pi.registerProvider(faux.provider);}`);
 	const ai = await import(pathToFileURL(path.join(findHostPeerPackageDir(sdkRoot, "@earendil-works/pi-ai"), "dist/index.js")).href);
 	const parentFaux = ai.fauxProvider({ api: "parent-fixture-api", provider: "parent-fixture", models: [{ id: "parent" }] });
 	const catalogue = ai.fauxProvider({ api: "fixture-faux", provider: "trusted", models: [{ id: "model" }] });
-	parentFaux.setResponses([ai.fauxAssistantMessage(ai.fauxToolCall("subagent", { agent: "composition-worker", task: "Run the synthetic assigned child. Never deploy.", async: true, acceptance: false }, { id: "public-subagent" }), { stopReason: "toolUse" }), ai.fauxAssistantMessage("Synthetic delegation launched.")]);
+	parentFaux.setResponses([ai.fauxAssistantMessage(ai.fauxToolCall("subagent", { agent: "composition-worker", task: "Run the synthetic assigned child. Never deploy.", async: true, ...(acceptance === undefined ? {} : { acceptance }), ...(structured ? { outputSchema: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"], additionalProperties: false } } : {}) }, { id: "public-subagent" }), { stopReason: "toolUse" }), ai.fauxAssistantMessage("Synthetic delegation launched.")]);
 	writeFileSync(path.join(f.agentDir, "extensions/sandbox.json"), JSON.stringify({ filesystem: { allowWrite: [f.parent] }, network: { allowedDomains: [] } }));
 	let started, observed = false, terminal, parent, parentContext, timedOut = false;
 	const closed = new Promise(resolve => { terminal = resolve; });
@@ -257,15 +261,16 @@ export default function(pi){const lease=captureChildAuthorityLease(${JSON.string
 		const proof = await closed;
 		assert.equal(timedOut, false); assert.equal(proof.state, "observed");
 		const status = JSON.parse(readFileSync(path.join(started.asyncDir, "status.json"), "utf8"));
-		assert.equal(status.state, "complete", JSON.stringify({ status, errors: existsSync(status.sessionFile ?? "") ? readFileSync(status.sessionFile, "utf8").trim().split("\n").map(line => JSON.parse(line)).filter(entry => entry.message?.errorMessage).map(entry => entry.message.errorMessage) : [] })); assert.equal(status.processTerminal.runnerProcessInstanceId, proof.runnerProcessInstanceId);
+		assert.equal(status.state, denyControl ? "partial" : "complete", JSON.stringify({ state: status.state, error: status.error, stepError: status.steps?.[0]?.error, recent: status.steps?.[0]?.recentOutput, control: existsSync(generations) ? readFileSync(generations, "utf8") : null, errors: existsSync(status.sessionFile ?? "") ? readFileSync(status.sessionFile, "utf8").trim().split("\n").map(line => JSON.parse(line)).filter(entry => entry.message?.errorMessage).map(entry => entry.message.errorMessage) : [] })); assert.equal(status.processTerminal.runnerProcessInstanceId, proof.runnerProcessInstanceId);
 		assert.equal(started.sessionId, parent.sessionId); assert.equal(started.toolCallId, "public-subagent"); assert.equal(status.launchContractDigest, started.launchContractDigest);
 		assert.equal(readFileSync(path.join(f.child, "public.txt"), "utf8"), "public native input 文🌍");
+		if (structured) { const outputPath = status.steps[0].structuredOutputPath; assert.equal(typeof outputPath, "string"); if (denyControl) assert.equal(existsSync(outputPath), false); else assert.deepEqual(JSON.parse(readFileSync(outputPath, "utf8")), { summary: "Native fixture completed" }); }
 		const calls = readFileSync(generations, "utf8").trim().split("\n").map(line => JSON.parse(line));
 		assert.equal(calls.length, 2); for (const call of calls) { assert.deepEqual([...call.ready].sort(), ["pi-guardian", "pi-sbx"]); assert.equal(call.sdk, sdkVersion); }
 		const prompts = f.readPrompts(); assert.ok(prompts.some(prompt => prompt.action.tool_name === "subagent"));
 		const write = prompts.find(prompt => prompt.action.tool_name === "write"); assert.equal(write.action.input.content, "public native input 文🌍"); assert.ok(write.directives.some(item => item.text === "Update the assigned child only. Never deploy."));
 		const branch = parentContext.sessionManager.getBranch(); assert.equal(findGuardianState(branch).lastReviewedParentEntryId, cursor);
-		assert.equal(guardianUsageView(branch, parent.sessionId).totals.review.calls, 2, "parent tool and child tool count once; mechanical held admission adds no review");
+		assert.equal(guardianUsageView(branch, parent.sessionId).totals.review.calls, structured ? 3 : 2, "parent and child tool count once; mechanical held admission adds no review");
 		const initialized = layout.runtime().filter(event => event.event === "initialize");
 		assert.equal(initialized.length, 2); assert.deepEqual(initialized.map(event => event.pid), [process.pid, started.pid]);
 		assert.equal(layout.runtime().at(-1).event, "reset"); assert.deepEqual(scratch(f), []);

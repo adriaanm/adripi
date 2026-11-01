@@ -18,6 +18,7 @@ export {
 	acknowledgeChildAuthority,
 	claimChildAuthority,
 	hasChildAuthorityContext,
+	isChildRuntimeControlTool,
 	readChildAuthorityProvider,
 	withChildAuthority,
 	type ChildAuthorityAction,

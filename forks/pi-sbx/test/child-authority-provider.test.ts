@@ -745,10 +745,14 @@ describe("registered provider composed with the real launcher and parent approva
     const factoryModule = new URL("../../pi-subagents/src/runs/shared/child-session.ts", import.meta.url).href;
     const { childSessionFactoryModule, setChildSessionFactoryModule } = await import(factoryModule);
     const beforeFactory = childSessionFactoryModule();
-    const envKeys = ["CHILD_AUTHORITY_LAUNCH_EVIDENCE", "CHILD_AUTHORITY_LAUNCH_REQUESTS"] as const;
+    const envKeys = ["CHILD_AUTHORITY_LAUNCH_EVIDENCE", "CHILD_AUTHORITY_LAUNCH_REQUESTS", "NODE_PATH"] as const;
     const beforeEnv = envKeys.map((key) => process.env[key]);
     try {
       setChildSessionFactoryModule(fileURLToPath(new URL("../../pi-subagents/test/fixtures/child-authority/launch-consumer-factory.ts", import.meta.url)));
+      // pnpm's Vitest shim injects NODE_PATH. This synthetic positive launch
+      // explicitly owns a clean host environment; production still refuses
+      // inherited startup overrides (covered by the launcher negative suite).
+      delete process.env.NODE_PATH;
       process.env.CHILD_AUTHORITY_LAUNCH_EVIDENCE = evidence;
       process.env.CHILD_AUTHORITY_LAUNCH_REQUESTS = JSON.stringify(requests);
       // Load the cross-fork execution graph at runtime: it has its own SDK and

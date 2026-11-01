@@ -168,6 +168,34 @@ export interface ChildAuthorityLease {
 	dispose(): void;
 }
 
+// Code-only provenance on the existing opaque lease/function, never a serialized
+// grant or another permission store. As with the provider slot, arbitrary trusted
+// host code is outside this boundary; a child shell cannot carry these references.
+const RUNTIME_TOOL_INSPECTOR = Symbol.for("pi-subagents.child-runtime-tool-inspector.v1");
+const STRUCTURED_OUTPUT_CODE = Symbol.for("pi-subagents.structured-output-code.v1");
+
+/** Internal producer proof. Only the no-path structured-output implementation uses it. */
+export function markChildStructuredOutputCode(lease: ChildAuthorityLease, execute: Function): void {
+	Object.defineProperty(execute, STRUCTURED_OUTPUT_CODE, { value: lease });
+}
+/** Internal factory binding: the actual SDK definition remains the authority on code identity. */
+export function bindChildRuntimeToolInspector(lease: ChildAuthorityLease, inspect: (execute?: unknown) => boolean): boolean {
+	if (Object.getOwnPropertyDescriptor(lease, RUNTIME_TOOL_INSPECTOR)) return false;
+	Object.defineProperty(lease, RUNTIME_TOOL_INSPECTOR, { value: inspect });
+	return true;
+}
+export function hasChildStructuredOutputCode(lease: ChildAuthorityLease, execute: unknown): boolean {
+	return typeof execute === "function" && Object.getOwnPropertyDescriptor(execute, STRUCTURED_OUTPUT_CODE)?.value === lease;
+}
+/** Pure code/lifetime inspection, NOT permission. The parent still reviews the
+ * exact tool action; no filesystem/host/maintenance scope is implied. */
+export function isChildRuntimeControlTool(lease: ChildAuthorityLease, name: string, execute?: unknown): boolean {
+	if (name !== "structured_output") return false;
+	lease.assertReady();
+	const inspect = Object.getOwnPropertyDescriptor(lease, RUNTIME_TOOL_INSPECTOR)?.value;
+	return !lease.signal.aborted && typeof inspect === "function" && inspect(execute) === true;
+}
+
 function byteLength(value: string): number {
 	return Buffer.byteLength(value, "utf8");
 }
@@ -589,12 +617,14 @@ export function withChildAuthority<T>(lease: ChildAuthorityLease, callback: () =
 
 /** Internal SDK/runner fence: capture the SAME opaque lease without claiming or
  * acknowledging an enforcement role. Never create a registry for missing intent.
+ * SDK/runner callers supply their exact cwd; metadata-only runtime helpers can
+ * capture the current scope without assuming the Node process cwd is the task cwd.
  * Public consumers still use claimChildAuthority and install their own fences. */
-export function captureChildAuthorityLease(cwd: string): ChildAuthorityLease {
+export function captureChildAuthorityLease(cwd?: string): ChildAuthorityLease {
 	const slot = (globalThis as Record<PropertyKey, unknown>)[CHILD_AUTHORITY_LEASE_SLOT_KEY];
 	if (!isLeaseSlot(slot)) throw new ChildAuthorityError("invalid-lease", "Guarded SDK startup requires the actual live child authority scope.");
 	const lease = slot.storage.getStore();
-	if (!lease || lease.version !== CHILD_AUTHORITY_PROVIDER_VERSION || lease.identity.cwd !== cwd || lease.signal.aborted) {
+	if (!lease || lease.version !== CHILD_AUTHORITY_PROVIDER_VERSION || (cwd !== undefined && lease.identity.cwd !== cwd) || lease.signal.aborted) {
 		throw new ChildAuthorityError("invalid-lease", "Guarded SDK startup requires its own live child authority identity.");
 	}
 	requireClaim(lease);

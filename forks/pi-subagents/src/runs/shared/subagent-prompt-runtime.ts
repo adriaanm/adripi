@@ -8,6 +8,7 @@ import { permissionDecision } from "./permissions.ts";
 import type { SteerRequest } from "../background/control-channel.ts";
 import { RUNTIME_EXTENSION_ACK_EVENT, isRuntimeAcknowledgedExtensionId } from "./runtime-acknowledged-extensions.ts";
 import { createStructuredOutputToolParameters, MISSING_STRUCTURED_ACCEPTANCE_REPORT_ERROR, validateStructuredOutputValue } from "./structured-output.ts";
+import { captureChildAuthorityLease, hasChildAuthorityContext, isChildRuntimeControlTool, markChildStructuredOutputCode } from "./child-authority.ts";
 import { validateAcceptanceReport } from "./acceptance.ts";
 import { formatChildToolDiagnostic } from "./tool-availability.ts";
 import { shouldBlockToolForBudget, toolBudgetBlockedMessage, toolBudgetSoftNudge } from "./tool-budget.ts";
@@ -599,14 +600,21 @@ function registerStructuredOutputTool(pi: ExtensionAPI, structured: NonNullable<
 		parameters: unknown;
 		execute: (_id: string, params: { value: unknown; acceptanceReport?: unknown }) => Promise<unknown>;
 	}) => void;
-	registerTool({
+	const lease = hasChildAuthorityContext() ? captureChildAuthorityLease() : undefined;
+	const assertCurrent = (signal?: AbortSignal): void => {
+		if (signal?.aborted) throw new Error("Structured output was cancelled before capture");
+		if (lease && !isChildRuntimeControlTool(lease, "structured_output", tool.execute)) throw new Error("Structured output has no current lease-bound SDK code provenance");
+	};
+	const tool = {
 		name: "structured_output",
 		...MODEL_ONLY_TOOL,
 		label: "Structured Output",
 		description: "Submit the required final structured output for this subagent step. This terminates the step.",
 		parameters,
-		async execute(_id: string, params: { value: unknown; acceptanceReport?: unknown }) {
+		async execute(_id: string, params: { value: unknown; acceptanceReport?: unknown }, signal?: AbortSignal) {
+			assertCurrent(signal);
 			const validation = await validateStructuredOutputValue(structured.schema, params.value);
+			assertCurrent(signal);
 			if (validation.status === "invalid") {
 				throw new Error(`Structured output validation failed: ${validation.message}`);
 			}
@@ -619,7 +627,9 @@ function registerStructuredOutputTool(pi: ExtensionAPI, structured: NonNullable<
 					throw new Error(`Invalid structured output acceptance report: ${acceptanceValidation.errors.join("; ")}`);
 				}
 			}
+			assertCurrent(signal);
 			structured.capture(params.value, structured.acceptanceReport ? params.acceptanceReport : undefined);
+			assertCurrent(signal);
 			terminalState.captured = true;
 			return {
 				content: [{ type: "text", text: "Structured output captured." }],
@@ -627,7 +637,9 @@ function registerStructuredOutputTool(pi: ExtensionAPI, structured: NonNullable<
 				terminate: true,
 			};
 		},
-	});
+	};
+	if (lease) markChildStructuredOutputCode(lease, tool.execute);
+	registerTool(tool);
 }
 
 /** Register every child-side hook the prompt runtime owns for one child session. */

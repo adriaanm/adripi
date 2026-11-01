@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createChildAuthorityLease, withChildAuthority, captureChildAuthorityLease, claimChildAuthority, acknowledgeChildAuthority } from "../../src/runs/shared/child-authority.ts";
+import { createChildAuthorityLease, withChildAuthority, captureChildAuthorityLease, claimChildAuthority, acknowledgeChildAuthority, isChildRuntimeControlTool, markChildStructuredOutputCode, bindChildRuntimeToolInspector } from "../../src/runs/shared/child-authority.ts";
+import registerSubagentPromptRuntime from "../../src/runs/shared/subagent-prompt-runtime.ts";
 import { guardChildGeneration } from "../../src/runs/shared/child-generation-guard.ts";
 
 // Barrier/SDK-operation fixtures only, NOT production enforcement consumer acks.
@@ -29,6 +30,43 @@ function fixture(ready = true, makeResult?: () => any, virtual = false, extra: R
 
 describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () => {
 	const starting = () => fixture(true, undefined, false, {}, undefined, false);
+	const structured = () => {
+		const f = starting(); let captured = 0, tool: any;
+		withChildAuthority(f.lease, () => registerSubagentPromptRuntime({ on() {}, registerTool(value: any) { if (value.name === "structured_output") tool = value; } } as never,
+			{ fanoutChild: false, depth: 1, fast: false, waitTool: { enabled: false }, structuredOutput: { schema: { type: "object" }, capture() { captured++; } } }));
+		f.tools.push(tool); f.active.push(tool.name); f.callable.push(tool.name); f.guard.completeStartup();
+		return { ...f, tool, captured: () => captured };
+	};
+	it("does not authenticate a foreign implementation by its tool name", () => {
+		const f = starting(); f.tools.push({ ...f.tools[0]!, name: "structured_output" }); f.guard.completeStartup();
+		assert.equal(isChildRuntimeControlTool(f.lease, "structured_output"), false);
+		assert.equal(bindChildRuntimeToolInspector(f.lease, () => true), false, "a later inspector cannot turn a code refusal into admission");
+		assert.equal(isChildRuntimeControlTool(f.lease, "structured_output"), false); f.guard.close();
+	});
+	it("does not authenticate code branded to a different otherwise-identical lease", () => {
+		const f = starting(), other = fixture(); const execute = () => "foreign lease";
+		markChildStructuredOutputCode(other.lease, execute);
+		assert.throws(() => markChildStructuredOutputCode(f.lease, execute), /redefine/);
+		f.tools.push({ ...f.tools[0]!, name: "structured_output", execute }); f.guard.completeStartup();
+		assert.equal(isChildRuntimeControlTool(f.lease, "structured_output"), false); f.guard.close(); other.guard.close();
+	});
+	it("authenticates only the actual current SDK definition and captures/terminates without path scope", async () => {
+		const f = structured(); assert.equal(isChildRuntimeControlTool(f.lease, "structured_output"), true);
+		assert.equal(isChildRuntimeControlTool(f.lease, "structured_output", () => {}), false);
+		assert.equal(isChildRuntimeControlTool(f.lease, "bash"), false);
+		const result = await f.tool.execute("output", { value: {} }); assert.equal(result.terminate, true);
+		assert.equal(f.captured(), 1); assert.equal(f.calls(), 0); f.guard.close();
+	});
+	for (const change of ["revocation", "cancellation", "definition"] as const) it(`refuses ${change} during async validation before structured capture`, async () => {
+		const f = structured(), caller = new AbortController();
+		queueMicrotask(() => { if (change === "revocation") f.lease.dispose(); if (change === "cancellation") caller.abort(); if (change === "definition") f.tool.execute = () => "foreign code"; });
+		await assert.rejects(f.tool.execute("output", { value: {} }, caller.signal), /disposed|ended|cancelled|provenance changed/);
+		assert.equal(f.captured(), 0); f.guard.close();
+	});
+	it("does not capture structured output with invalid schema data", async () => {
+		const f = structured(); await assert.rejects(f.tool.execute("output", { value: "not an object" }), /validation failed/);
+		assert.equal(f.captured(), 0); f.guard.close();
+	});
 	for (const method of ["stream", "streamSimple", "streamDeferred", "generateImages", "classify"] as const) {
 		it(`does not dispatch ${method} during SDK startup even with both consumers ready`, () => {
 			const f = starting();

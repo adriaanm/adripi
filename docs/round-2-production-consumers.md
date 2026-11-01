@@ -934,6 +934,58 @@ paid-provider operation or push occurred. Production-consumer acceptance remains
 false; remaining provenance, default/control workflows, lifecycle, deployment,
 loaded-broker, OS/Git and live accounting/total-latency gates remain open.
 
+## Lease-bound structured output is not model filesystem authority
+
+The public-parent follow-up now also covers default lightweight acceptance and
+`outputSchema`. Default acceptance works, but the real typed-output task previously
+failed: pi-sbx rejected `structured_output` as an unknown native tool, so no required
+output was captured. Its inline `sourceInfo` label is not proof of ownership.
+
+The actual structured-output producer now marks its exact function with its current
+opaque lease reference. After startup, the existing generation fence binds a
+non-replaceable inspector on that same lease. The ONE public child-authority API's
+`isChildRuntimeControlTool` checks the current actual SDK definition, pinned tool/
+model data, exact producer function/lease identity and lifetime. pi-sbx requires
+this current API and uses the inspection only for this no-path control operation;
+unknown/foreign implementations still refuse. Neither names, inline labels, matching
+lease-ID strings nor serialized metadata can replace these references. This is
+code provenance, not another reviewer/broker/registry/permission store, wire role,
+acknowledgement or filesystem/host/maintenance grant. Arbitrary privileged host
+code is outside this boundary, as with the existing host-injected provider API.
+
+Capture rechecks identity, revocation and SDK caller cancellation before/after
+asynchronous schema validation and immediately around the existing SDK-owned capture
+callback. The value is data; it cannot select a file destination. Native terminal
+results and the original schema/validation/capture implementation remain intact.
+Metadata-only producers capture the current live scope without assuming Node's
+process cwd equals the SDK task cwd; SDK/runner and enforcement-consumer cwd checks
+remain exact. The checker cannot be rebound to adopt a second SDK session, nor can
+an existing producer function be retargeted to another lease.
+
+Actual public parent/compiled-child tests now show default lightweight acceptance,
+validated typed capture and termination, and parent semantic denial preventing
+capture despite valid producer provenance. Actual SDK parent accounting is three
+reviews for delegation + native Write + structured output, not another mechanical
+review; cursor continuity, exact directives, distinct controller PIDs, observed
+termination and scratch cleanup remain proven. This is not independent writer
+review/verified-command acceptance or generic control/MCP support. Contact-supervisor,
+wait and other unfenced tools remain unsupported rather than gaining a name bypass.
+Seven unit cases cover foreign code/lease, immutable binding, exact definition,
+validation, async revocation/cancellation and replacement before capture. The bridge
+also rejects a current-version package missing the required inspection API.
+
+Fresh gates: **4,343 total /4,326 pass /17 skip /zero fail /443 suites**, types;
+**430 pi-sbx tests /30 files**, types; **32/32 composition on SDK1.2 and1.4**, no
+skips/failures; four graph tests. Source `b62b504e34add416`, artifact
+`dfa62bc52350e223`, unchanged384/17/330/18/768 graph. Evidence:
+`.local/goal-consumers/public-control-{before,source,focused,full,sbx,composition,sdk14}.log`.
+The older pi-sbx synthetic launcher fixture now explicitly owns/restores a clean
+`NODE_PATH` environment (pnpm's Vitest shim sets it); production override refusal
+is unchanged and its negative tests remain. No live deployment/restart/config/
+policy/toggle/protected-content/runtime replacement, paid-provider operation or
+push. Remaining lifecycle/resource/executable/dependency/provider/effective-auth,
+deployment/loaded-broker/OS/Git/live accounting/total-latency gates stay open.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

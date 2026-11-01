@@ -1,5 +1,5 @@
 import { isDeepStrictEqual, types } from "node:util";
-import type { ChildAuthorityLease } from "./child-authority.ts";
+import { bindChildRuntimeToolInspector, hasChildStructuredOutputCode, type ChildAuthorityLease } from "./child-authority.ts";
 
 interface ModelIdentity { provider: string; id: string; api?: string }
 interface BoundSession {
@@ -208,6 +208,11 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 			definitions = final.definitions; toolSnapshot = final.data;
 			activeCeiling = new Set(finalActive); callableCeiling = new Set(finalCallable);
 			startupComplete = true;
+			if (!bindChildRuntimeToolInspector(lease, candidate => {
+				assert();
+				const definition = session!.getToolDefinition("structured_output") as { execute?: unknown } | undefined;
+				return !!definition && (candidate === undefined || candidate === definition.execute) && hasChildStructuredOutputCode(lease, definition.execute);
+			})) fail("the SDK resource provenance cannot rebind a second session to this lease");
 		},
 		close() { closed = true; lease.dispose(); },
 	};
