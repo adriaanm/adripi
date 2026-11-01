@@ -10,7 +10,11 @@ function fixture(ready = true, makeResult?: () => any, virtual = false, extra: R
 		for (const id of lease.requiredConsumers) { claimChildAuthority(id, process.cwd()); acknowledgeChildAuthority(id); }
 	});
 	const model = { provider: "trusted", id: "model", ...(virtual ? { api: "pi-virtual" } : {}), ...extra };
-	const session = { sessionId: "sdk-session", model, agent: { state: { model } } };
+	const tools = [{ name: "read", description: "owned tool", parameters: { [Symbol.for("TypeBox.Kind")]: "Object", properties: { path: { type: "string" } } }, execute: () => "native tool" }];
+	const active = ["read"], callable = ["read"];
+	const session = { sessionId: "sdk-session", model, agent: { state: { model } },
+		getAllTools: () => tools.map(({ name, description, parameters }) => ({ name, description, parameters, sourceInfo: { path: "/owned/tool.ts" } })),
+		getToolDefinition: (name: string) => tools.find(tool => tool.name === name), getActiveToolNames: () => [...active], getCallableToolNames: () => [...callable] };
 	let calls = 0, options: any;
 	const native = (_model: unknown, _context: unknown, value: unknown) => { calls++; options = value; return makeResult ? makeResult() : "same-native-result"; };
 	const physical = { provider: "physical", id: "routed", api: "faux", baseUrl: "https://physical.invalid", headers: { trace: "original" } };
@@ -20,7 +24,7 @@ function fixture(ready = true, makeResult?: () => any, virtual = false, extra: R
 		getPhysicalModel: (provider: string, id: string) => provider === catalogue.model.provider && id === catalogue.model.id ? catalogue.model : undefined,
 		registerProvider() {}, refresh() {}, getAuth: async () => "owned-cleanup-auth" };
 	const guard = guardChildGeneration(runtime, lease, model); guard.bind(session);
-	return { lease, runtime, guard, model, physical, catalogue, session, calls: () => calls, options: () => options };
+	return { lease, runtime, guard, model, tools, active, callable, physical, catalogue, session, calls: () => calls, options: () => options };
 }
 
 describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () => {
@@ -161,6 +165,46 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		await assert.rejects(() => f.runtime.resolveModel(f.model, [], {}), /physical SDK catalogue/); assert.equal(f.calls(), 0);
 		const g = fixture(true, undefined, true); g.runtime.getPhysicalModel = () => g.physical;
 		await assert.rejects(() => g.runtime.resolveModel(g.model, [], {}), /catalogue lookup changed/); assert.equal(g.calls(), 0);
+	});
+	for (const mutation of ["schema", "code", "active", "callable", "lookup"] as const) {
+		it(`rejects changed selected tool ${mutation} before generation`, () => {
+			const f = fixture();
+			if (mutation === "schema") f.tools[0].parameters.properties.path.type = "number";
+			if (mutation === "code") f.tools[0] = { ...f.tools[0], execute: () => "foreign" };
+			if (mutation === "active") f.active.push("write");
+			if (mutation === "callable") f.callable.push("write");
+			if (mutation === "lookup") f.session.getAllTools = () => [];
+			assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /tool.*changed|tool loadout exceeded/); assert.equal(f.calls(), 0); assert.equal(f.lease.signal.aborted, true);
+		});
+	}
+	it("permits a narrower tool loadout without granting a new tool", () => {
+		const f = fixture(); f.active.length = 0; f.callable.length = 0;
+		try { assert.equal(f.runtime.streamSimple(f.model, {}, {}), "same-native-result"); } finally { f.guard.close(); }
+	});
+	it("does not invoke metadata accessors in a changed native schema", () => {
+		const f = fixture(); let calls = 0;
+		Object.defineProperty(f.tools[0].parameters, "get", { get: () => { calls++; return "must not execute"; } });
+		assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /tool loadout cannot be pinned/); assert.equal(calls, 0);
+	});
+	it("refuses proxy code metadata without inspecting or invoking it", () => {
+		const f = fixture(); let traps = 0;
+		Object.defineProperty(f.tools[0], "execute", { value: new Proxy(() => {}, { apply() { traps++; }, ownKeys() { traps++; return []; } }) });
+		assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /tool loadout cannot be pinned/); assert.equal(traps, 0);
+	});
+	it("bounds malformed active/callable selections and closes the same lifetime", () => {
+		for (const target of ["active", "callable"] as const) {
+			const f = fixture(); f[target].push(...Array(256).fill("read"));
+			assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /tool selection is not bounded/); assert.equal(f.lease.signal.aborted, true); assert.equal(f.calls(), 0);
+		}
+	});
+	it("refuses a missing public tool API during binding without inventing a replacement view", () => {
+		const f = fixture(), guard = guardChildGeneration({ stream() {}, streamSimple() {} }, f.lease, f.model);
+		assert.throws(() => guard.bind({ ...f.session, getAllTools: undefined } as never), /lacks the public getAllTools/); assert.equal(f.lease.signal.aborted, true);
+	});
+	it("rechecks schema fidelity after an asynchronous generation hook", async () => {
+		const f = fixture();
+		f.runtime.streamSimple(f.model, {}, { onPayload: async () => { f.tools[0].description = "changed"; } });
+		await assert.rejects(() => f.options().onPayload({}), /tool definitions.*changed/); assert.equal(f.lease.signal.aborted, true);
 	});
 	it("rejects a late native stream result after session drift", async () => {
 		let change: () => void = () => {};

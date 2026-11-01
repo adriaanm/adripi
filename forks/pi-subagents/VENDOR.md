@@ -375,3 +375,26 @@ claim. Source units/types/build unchanged (4,310/4,293 pass/17 skip; artifact
 `ab5e595679b5ef7e`). Reproduction and remaining gates:
 `docs/round-2-production-consumers.md`. No live install/restart/policy/config/toggle/
 protected-content/runtime replacement or push.
+
+## Tool provenance survived admission but changed before generation
+
+Actual SDK post-startup schema mutation previously completed; tool-owner replacement
+allowed one model request before operation ownership refusal. Extend the existing
+generation fence to public SDK tool APIs/declarations/source/definition/code identity
+and selected active/callable ceilings. Pin before extension startup, recheck every
+generation/async hook/iteration/result/native route, allow narrowing not widening.
+Retain real TypeBox symbols/functions as exact code references, no getter/proxy/code
+invocation or JSON loss; model metadata remains data-only.256 tools/16,384 aggregate
+nodes/512KiB text/depth12; malformed/oversized/missing APIs fail on the same lease.
+No freeze/substitute of upstream schemas/state, new public API/protocol/role/ack,
+permission decision/store, registry or backend.
+
+Two genuine negatives now dispatch zero calls/no mutation/review/scratch leak on
+SDK1.2 AND1.4. Eleven unit cases plus faithful empty-tool APIs for two existing
+startup mocks pass. Full **4,321/4,304 pass/17 skip/zero fail/443 suites**, types;
+**26/26 composition per SDK**, four graph/root checks pass. Artifact
+`4b73c50b862cbb40` (384 inputs/17 exports/330 compiled/18 URLs/768 files).
+Local seven-tool1000-event fixture costs189.7–266.9ms vs0.16–0.38ms bare, not live
+latency/savings/billing proof. Remaining scope and exact evidence:
+`docs/round-2-production-consumers.md`. No live install/restart/policy/config/toggle/
+protected-content/runtime replacement or push.

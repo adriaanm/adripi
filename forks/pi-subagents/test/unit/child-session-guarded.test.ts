@@ -36,7 +36,8 @@ function sdk(options: {
 		resolveCliModel: options.resolve ?? (() => ({ model: { provider: "trusted", id: "model" } })),
 		createAgentSession: async ({ resourceLoader, settingsManager }: { resourceLoader: DefaultResourceLoader; settingsManager: SettingsManager }) => {
 			options.onLoader?.(resourceLoader, settingsManager);
-			if (options.create) return { session: { sessionId: "fixture-session", ...options.create() as object } };
+			if (options.create) return { session: { sessionId: "fixture-session", getAllTools: () => [], getToolDefinition: () => undefined,
+				getActiveToolNames: () => [], getCallableToolNames: () => [], ...options.create() as object } };
 			throw new Error("captured-before-session");
 		},
 	} as unknown as PiCodingAgentModule;

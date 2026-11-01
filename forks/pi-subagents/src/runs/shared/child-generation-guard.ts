@@ -5,17 +5,24 @@ interface ModelIdentity { provider: string; id: string; api?: string }
 interface BoundSession {
 	readonly sessionId: string;
 	readonly model: ModelIdentity | undefined;
+	getAllTools(): Array<{ name: string }>;
+	getToolDefinition(name: string): unknown;
+	getActiveToolNames(): string[];
+	getCallableToolNames(): string[];
 }
 type Method = (...args: any[]) => any;
 const key = (model: ModelIdentity | undefined) => model ? `${model.provider}/${model.id}` : undefined;
 
 /** Capture all SDK model data, including future metadata fields, without getters,
  * coercion, JSON loss or retaining mutable nested aliases. Bounds refuse rather
- * than truncating. This is request provenance, never a permission/cache entry. */
-function snapshotMetadata(value: unknown, budget = { nodes: 1024, bytes: 65536 }, ancestors = new Set<object>(), depth = 0): unknown {
+ * than truncating. Owned tool definitions also retain exact function/symbol
+ * identities (SDK code/codecs), never invoking them; models remain data-only.
+ * This is request provenance, never a permission/cache entry. */
+function snapshotMetadata(value: unknown, budget = { nodes: 1024, bytes: 65536 }, ancestors = new Set<object>(), depth = 0, ownedToolCode = false): unknown {
 	if (--budget.nodes < 0 || depth > 12) throw new Error("model metadata exceeds its bounded data shape");
 	if (typeof value === "string") { budget.bytes -= Buffer.byteLength(value); if (budget.bytes < 0) throw new Error("model metadata exceeds its byte bound"); return value; }
 	if (value === null || value === undefined || typeof value === "boolean" || typeof value === "number") return value;
+	if (ownedToolCode && (typeof value === "symbol" || (typeof value === "function" && !types.isProxy(value)))) return value;
 	if (typeof value !== "object" || types.isProxy(value) || ancestors.has(value)) throw new Error("model metadata contains code, proxies, symbols or cycles");
 	if (Array.isArray(value) && value.length > 1024) throw new Error("model metadata array exceeds its item bound");
 	const prototype = Object.getPrototypeOf(value);
@@ -24,13 +31,13 @@ function snapshotMetadata(value: unknown, budget = { nodes: 1024, bytes: 65536 }
 	ancestors.add(value);
 	try {
 		for (const name of Reflect.ownKeys(value)) {
-			if (typeof name !== "string") throw new Error("model metadata has symbol keys");
-			budget.bytes -= Buffer.byteLength(name); if (budget.bytes < 0) throw new Error("model metadata exceeds its byte bound");
+			if (typeof name !== "string" && !ownedToolCode) throw new Error("model metadata has symbol keys");
+			budget.bytes -= Buffer.byteLength(typeof name === "string" ? name : name.description ?? ""); if (budget.bytes < 0) throw new Error("model metadata exceeds its byte bound");
 			const descriptor = Object.getOwnPropertyDescriptor(value, name)!;
 			if (!("value" in descriptor)) throw new Error("model metadata has an accessor");
 			const arrayLength = Array.isArray(value) && name === "length";
 			// Deep comparison must include non-enumerable SDK metadata too.
-			Object.defineProperty(result, name, { value: snapshotMetadata(descriptor.value, budget, ancestors, depth + 1), enumerable: !arrayLength, configurable: !arrayLength, writable: true });
+			Object.defineProperty(result, name, { value: snapshotMetadata(descriptor.value, budget, ancestors, depth + 1, ownedToolCode), enumerable: !arrayLength, configurable: !arrayLength, writable: true });
 		}
 	} finally { ancestors.delete(value); }
 	return result;
@@ -54,6 +61,33 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 			return data;
 		} catch { return fail("model metadata cannot be pinned as bounded accessor-free SDK data"); }
 	};
+	// Pin the real public SDK loadout before extension startup. Keep SDK schemas,
+	// code and state mechanisms; later narrowing is permitted, widening is not.
+	const toolMethods = ["getAllTools", "getToolDefinition", "getActiveToolNames", "getCallableToolNames"] as const;
+	let toolAPIs: Method[], toolSnapshot: unknown, definitions: unknown[], activeCeiling: Set<string>, callableCeiling: Set<string>;
+	const toolState = () => {
+		try {
+			const budget = { nodes: 16384, bytes: 524288 };
+			const info = snapshotMetadata(session!.getAllTools(), budget, new Set(), 0, true) as Array<{ name: string }>;
+			if (!Array.isArray(info) || info.length > 256 || info.some(tool => !tool || typeof tool !== "object" || typeof tool.name !== "string")) throw new Error("unsupported tool list");
+			const currentDefinitions = info.map(tool => session!.getToolDefinition(tool.name));
+			if (currentDefinitions.some(value => !value || typeof value !== "object")) throw new Error("missing tool definition");
+			return { definitions: currentDefinitions, data: { info, definitions: snapshotMetadata(currentDefinitions, budget, new Set(), 0, true) } };
+		} catch { return fail("the SDK tool loadout cannot be pinned as bounded accessor-free owned data"); }
+	};
+	const toolNames = (name: "getActiveToolNames" | "getCallableToolNames"): string[] => {
+		try {
+			const names = snapshotMetadata(session![name]());
+			if (!Array.isArray(names) || names.length > 256 || names.some(value => typeof value !== "string")) throw new Error("unsupported tool names");
+			return names;
+		} catch { return fail("the SDK tool selection is not bounded accessor-free data"); }
+	};
+	const assertTools = () => {
+		if (toolMethods.some((name, index) => session![name] !== toolAPIs[index])) fail("the SDK tool provenance APIs changed");
+		const current = toolState();
+		if (current.definitions.some((value, index) => value !== definitions[index]) || !isDeepStrictEqual(current.data, toolSnapshot)) fail("the SDK tool definitions, schemas or source provenance changed");
+		if (toolNames("getActiveToolNames").some(name => !activeCeiling.has(name)) || toolNames("getCallableToolNames").some(name => !callableCeiling.has(name))) fail("the SDK tool loadout exceeded its selected ceiling");
+	};
 	const selected = metadata(selectedModel), requestedModel = key(selected);
 	// Observed native router outputs, not decisions/grants or a substitute router.
 	// Exact SDK-owned references also cover its native cache warmer's reuse. Each
@@ -68,6 +102,7 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 		const current = metadata(session.model);
 		if (key(current) !== requestedModel) return fail("the SDK session/model identity changed or is not bound");
 		if (!isDeepStrictEqual(current, selected)) fail("the selected model metadata changed after exact SDK resolution");
+		assertTools();
 		const requested = model && metadata(model);
 		if (requestMetadata && !isDeepStrictEqual(requested, requestMetadata)) fail("the in-flight request model metadata changed");
 		if (requested && key(requested) === requestedModel && !isDeepStrictEqual(requested, selected)) fail("the request substituted metadata behind the selected provider/model name");
@@ -151,6 +186,9 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 		bind(value) {
 			if (session || closed || typeof value.sessionId !== "string" || !value.sessionId) fail("the SDK session cannot initialize or rebind its generation lifetime");
 			session = value; sessionId = value.sessionId;
+			toolAPIs = toolMethods.map(name => { if (typeof value[name] !== "function") fail(`this SDK lacks the public ${name} tool provenance boundary`); return value[name]; });
+			const tools = toolState(); definitions = tools.definitions; toolSnapshot = tools.data;
+			activeCeiling = new Set(toolNames("getActiveToolNames")); callableCeiling = new Set(toolNames("getCallableToolNames"));
 		},
 		close() { closed = true; lease.dispose(); },
 	};

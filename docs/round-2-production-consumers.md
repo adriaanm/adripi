@@ -835,6 +835,50 @@ remain under audit. Source units/types unchanged at4,310/4,293 pass/17 skip; bui
 source/artifact still `a99282fe3ff5c9fb`/`ab5e595679b5ef7e`. No install/restart/live
 config/policy/toggle/protected-content/runtime replacement or push.
 
+## Selected-tool data/code must survive startup and async boundaries
+
+Two actual combined SDK regressions were red: changing a native schema during
+`before_agent_start` completed successfully; replacing native Read after startup
+allowed one model request before operation ownership caught it. The existing
+model-generation fence now pins the SDK's public tool APIs, complete declaration/
+source data, definition identities/code references and selected active/callable
+ceilings before extension startup. It checks them at generation, async callback,
+iteration/result and native-routing boundaries. Later narrowing remains allowed;
+new names, replacement, schema/source/code drift, missing APIs, accessor/proxy data
+and malformed/unbounded selections refuse and close the same lease. No new role,
+ack, API/protocol, registry, permission decision/store or substitute tool engine.
+
+Owned snapshots retain real TypeBox symbol/code identities instead of JSON loss,
+without invoking getters/proxies/functions. Limits are256 tools,16,384 aggregate
+nodes,512KiB text and depth12; selection lists use existing stricter data bounds.
+Model metadata stays data-only. SDK definitions remain mutable as upstream defines;
+mutation is detected rather than freezing/replacing its state/schema machinery.
+
+Both negatives now reach their marked post-startup attempt and have **zero model
+calls, no command/native mutation/reviewer request or scratch leak** on SDK1.2 AND
+SDK1.4. Existing operation-level source ownership remains independently enforced.
+Eleven new unit cases cover identity/schema/lookup/selection/code drift, narrower
+loadouts, accessor/proxy non-invocation, malformed selections and async hooks.
+Two startup mocks now supply the real public empty-tool APIs so their original
+startup/model-switch failure and disposal assertions still execute.
+
+Verification: **4,321 total /4,304 pass/17 skip/zero fail/443 suites**, types;
+**26/26 composition cases on EACH SDK1.2.0 and1.4.0**, four graph tests and root
+checks. Graph384 inputs/17 exports/330 compiled/18 URLs/768 files, source
+`c6b40d5f7e4cb132`, artifact `4b73c50b862cbb40`. Evidence:
+`.local/goal-consumers/tool-fidelity-{before,focused,full,composition,sdk14,root}.log`.
+Synthetic iteration-only fixture (seven actual SDK native-tool declarations,1000
+async events, four samples) measured **189.7–266.9ms guarded vs0.16–0.38ms bare**;
+this full per-event check is not a latency improvement or paid/live measurement.
+Evidence `tool-fidelity-bench.{mjs,log}` in the same directory. No native file tool,
+model provider, SRT or paid call executes in that benchmark. Representative total
+cost/latency remains #24/#25's separate live acceptance requirement.
+
+This strengthens selected-tool lifetime fidelity; public-parent dispatch and the
+remaining executable/dependency/provider/effective-auth/resource/deployed/OS/Git/
+live-cost gates remain open. No install/restart/live policy/config/toggle/protected-
+content/runtime replacement or push occurred.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the
