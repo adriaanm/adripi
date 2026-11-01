@@ -1099,9 +1099,10 @@ provider data graphs immutable and install the **same original function values**
 as nonreplaceable own `getProvider`/`getProviders`/`getAuth` properties. Provider,
 auth and header data fields cannot change between checks or native dispatch.
 No provider/transport/function-value substitution, method wrapper, schema freeze,
-new API, registry, approval store, role, protocol or lease. Function objects, tool/
-model definitions, private implementation closure state and native SDK auth results
-are not frozen or rewritten. A failed attempt that leaves the original authority
+new API, registry, approval store, role, protocol or lease. At that milestone,
+function objects, tool/model definitions, private implementation closure state and
+native SDK auth results were not frozen or rewritten (the next section changes
+model DATA immutability only). A failed attempt that leaves the original authority
 unchanged need not revoke it: native code can continue if the caller catches that
 TypeError. Uncaught SDK hook failures still follow normal guarded shutdown. Only
 the fresh supported guarded runtime is bound this way; it cannot rebind after close.
@@ -1132,6 +1133,58 @@ all transport handoffs/network effects or hostile host code. Those source audits
 production acceptance and deployed/broker/OS/Git/paid accounting/total latency gates
 remain open. No live install/restart/session/policy/config/toggle, credential/audit
 content, runtime replacement, paid provider or push action.
+
+## Raw selected/routed model data could change after the header fence
+
+The next genuine-SDK probe delayed `ctx.model.baseUrl` mutation four microtasks
+after headers. A passive input observer delegating to the same native faux backend
+recorded **`https://changed.invalid`** (calls1/readiness0), before its queued
+`onResponse` check revoked authority. No real HTTP was sent; this proves the changed
+endpoint reached the actual SDK-selected test backend, not a live network effect.
+Its earlier response-factory observer alone could not see the input: the guard
+rejected the queued onResponse before that factory ran. Preserve that distinction.
+Exact red output `.local/goal-consumers/model-handoff-before.log`.
+
+Make only admitted bounded/accessor-free model data immutable, retaining original
+objects and aliases: initial exact selection, a validated equivalent session/request
+copy, and each native physical reference **after** catalogue validation. Same
+validated references are captured once for pinning/route tracking; a later getter
+result cannot enter the unvalidated freeze traversal. A private WeakSet skips repeat
+freezing, never readiness/provenance/cancellation checks; it is not a permission
+cache. Generalise the already validated provider-data freezer, not an engine,
+router or schema. Native SDK objects/functions/transport/definitions are not
+replaced, tool schemas/function objects are not frozen, and derived auth results
+remain untouched. A caught unsuccessful assignment preserves unchanged authority;
+uncaught SDK hook errors still close the normal lifetime.
+
+Delayed4/8 cases now prove TypeError, exact original endpoint at the native backend,
+2calls with both roles ready, assigned Write, reset and scratch cleanup. Normal
+source/compiled/public-parent/default acceptance/structured output and virtual
+routing continue passing. Opaque fixtures retain model identity/nested aliases/
+non-enumerable fields and prove equivalent-copy admission, physical-reference reuse,
+invalid-copy/session selection/catalogue drift refusal, late selection change and
+metadata accessor refusal.4added units explicitly cover prestartup data-only freeze,
+single validated getter/route references and equivalent session copies. This is
+not certification of an actual native cache-warmer transport (reference reuse is a
+narrower unit proof).
+
+**4,373 total /4,356 pass /17 skip /zero fail /443 suites**, types;
+**39/39 per genuine SDK1.2/1.4**, zero composition fail/skip;4graph/root/freshness.
+Source `df8360feed30a16f`, artifact `52fbadba145d6190`, graph384/17/330/18/768.
+Five-sample1000-event/seven-native-definition/one-faux-metadata synthetic benchmark
+vs the pre-provider-pin guard:191.0–201.0ms baseline/196.7–199.2ms current, mean
++2.6µs/event (~1.3%); setup~0.37–1.76ms/~0.41–1.27ms. Not an isolated model-freeze
+measurement or representative dispatch/catalogue/paid latency/savings. Evidence
+`.local/goal-consumers/model-handoff-{before,focused,composition,sdk14,full,bench,
+root}.log` and committed regressions.
+
+Still open: provenance of physical catalogue data before its first route admission,
+SDK auth-resolved baseURL/header/env values and mutable prepared requests, private
+provider/base/global API and loaded code/resource/dependency ownership, complete
+initialiser drain and actual cache warming. No aggregate transport/consumer
+production acceptance or deployed/broker/OS/Git/paid-cost/total-latency claim.
+No live install/restart/session/config/policy/toggle/credential/audit-content/runtime
+replacement/paid-provider/push action.
 
 ## Source-proven gaps at the initial baseline
 

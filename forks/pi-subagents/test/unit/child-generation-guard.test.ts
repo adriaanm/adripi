@@ -10,7 +10,8 @@ function fixture(ready = true, makeResult?: () => any, virtual = false, extra: R
 	if (ready) withChildAuthority(lease, () => {
 		for (const id of lease.requiredConsumers) { claimChildAuthority(id, process.cwd()); acknowledgeChildAuthority(id); }
 	});
-	const model = { provider: "trusted", id: "model", ...(virtual ? { api: "pi-virtual" } : {}), ...extra };
+	const model = { provider: "trusted", id: "model", ...(virtual ? { api: "pi-virtual" } : {}) };
+	Object.defineProperties(model, Object.getOwnPropertyDescriptors(extra));
 	const tools = [{ name: "read", description: "owned tool", parameters: { [Symbol.for("TypeBox.Kind")]: "Object", properties: { path: { type: "string" } } }, execute: () => "native tool" }];
 	const active = ["read"], callable = ["read"];
 	const session = { sessionId: "sdk-session", model, agent: { state: { model } },
@@ -148,39 +149,65 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		}
 	});
 	for (const [field, value] of [["api", "substituted-api"], ["baseUrl", "https://changed.invalid"], ["headers", { "x-changed": "endpoint" }], ["compat", { supportsDeveloperRole: false }]] as const) {
-		it(`rejects changed selected ${field} metadata even when provider/model names are unchanged`, () => {
-			const f = fixture(); Object.assign(f.model, { [field]: value });
-			assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /metadata|selection/);
-			assert.equal(f.calls(), 0); assert.equal(f.lease.signal.aborted, true);
+		it(`prevents selected ${field} mutation while retaining the original model object`, () => {
+			const f = fixture(); assert.throws(() => Object.assign(f.model, { [field]: value }), TypeError);
+			assert.equal(f.session.model, f.model); assert.equal(f.runtime.streamSimple(f.model, {}, {}), "same-native-result");
+			assert.equal(f.calls(), 1); f.guard.close();
 		});
 	}
-	it("compares non-enumerable model metadata rather than silently ignoring it", () => {
-		const f = fixture(); Object.defineProperty(f.model, "baseUrl", { value: "https://changed.invalid", enumerable: false });
-		assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /metadata/); assert.equal(f.calls(), 0);
+	it("makes non-enumerable model metadata immutable without dropping it", () => {
+		const extra = Object.defineProperty({}, "baseUrl", { value: "original", enumerable: false, writable: true, configurable: true });
+		const f = fixture(true, undefined, false, extra);
+		assert.equal(Object.getOwnPropertyDescriptor(f.model, "baseUrl")!.value, "original");
+		assert.throws(() => Object.defineProperty(f.model, "baseUrl", { value: "changed" }), TypeError);
+		assert.equal(f.runtime.streamSimple(f.model, {}, {}), "same-native-result"); f.guard.close();
+	});
+	it("freezes selected data before startup without freezing tool schemas or SDK code", () => {
+		const f = starting(); assert.equal(Object.isFrozen(f.model), true);
+		assert.equal(Object.isFrozen(f.tools[0].parameters), false); assert.equal(Object.isFrozen(f.native), false);
+		assert.equal(f.session.model, f.model); assert.equal(f.calls(), 0); f.guard.close();
+	});
+	it("freezes only the validated session reference, not a later getter result", () => {
+		const f = fixture(); let reads = 0, traps = 0;
+		const foreign = new Proxy({}, { ownKeys() { traps++; return []; } });
+		Object.defineProperty(f.session, "model", { get() { return ++reads === 1 ? f.model : foreign; } });
+		assert.equal(f.runtime.streamSimple(f.model, {}, {}), "same-native-result");
+		assert.equal(reads, 1); assert.equal(traps, 0);
+		assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /metadata cannot be pinned/);
+		assert.equal(traps, 0); assert.equal(f.calls(), 1);
+	});
+	it("retains and freezes an equivalent SDK session model copy at admission", () => {
+		const f = fixture(true, undefined, false, { headers: { trace: "original" } });
+		const copy = { ...f.model, headers: { trace: "original" } }; f.session.model = copy;
+		assert.equal(f.runtime.streamSimple(copy, {}, {}), "same-native-result");
+		assert.equal(f.session.model, copy); assert.equal(Object.isFrozen(copy.headers), true); f.guard.close();
 	});
 	it("refuses a same-name request with a substituted endpoint rather than treating its key as provenance", () => {
 		const f = fixture();
 		assert.throws(() => f.runtime.streamSimple({ ...f.model, baseUrl: "https://changed.invalid" }, {}, {}), /metadata|selection/);
 		assert.equal(f.calls(), 0);
 	});
-	it("rechecks model metadata after asynchronous headers without invoking accessors", async () => {
+	it("prevents asynchronous header hooks from installing model accessors", async () => {
 		const f = fixture(); let reads = 0;
 		f.runtime.streamSimple(f.model, {}, { transformHeaders: async () => {
 			Object.defineProperty(f.model, "headers", { get() { reads++; return {}; } }); return {};
 		} });
-		await assert.rejects(() => f.options().transformHeaders({}), /metadata|accessor/);
-		assert.equal(reads, 0); assert.equal(f.lease.signal.aborted, true);
+		await assert.rejects(() => f.options().transformHeaders({}), TypeError);
+		assert.equal(reads, 0); assert.equal(f.lease.signal.aborted, false); f.guard.close();
 	});
 
-	it("retains nested metadata independently rather than adopting a mutated header alias", () => {
+	it("makes nested aliases immutable without replacing their native references", () => {
 		const headers = { trace: "original" }, f = fixture(true, undefined, false, { headers });
-		headers.trace = "changed";
-		assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /metadata/); assert.equal(f.calls(), 0);
+		assert.equal((f.model as any).headers, headers); assert.throws(() => { headers.trace = "changed"; }, TypeError);
+		assert.equal(f.runtime.streamSimple(f.model, {}, {}), "same-native-result"); f.guard.close();
 	});
 	it("accepts an equivalent accessor-free SDK model copy without replacing native execution", () => {
 		const headers = { trace: "original" }, f = fixture(true, undefined, false, { headers });
-		try { assert.equal(f.runtime.streamSimple({ ...f.model, headers: { ...headers } }, {}, {}), "same-native-result"); }
-		finally { f.guard.close(); }
+		const copy = { ...f.model, headers: { ...headers } };
+		try {
+			assert.equal(f.runtime.streamSimple(copy, {}, {}), "same-native-result");
+			assert.equal(Object.isFrozen(copy), true); assert.equal(Object.isFrozen(copy.headers), true);
+		} finally { f.guard.close(); }
 	});
 	for (const [label, value] of [["cycle", (() => { const value: any = {}; value.self = value; return value; })()],
 		["oversized string", "x".repeat(65537)], ["sparse array length", new Array(1025)]]) {
@@ -193,9 +220,9 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		const proxy = new Proxy({}, { getPrototypeOf() { traps++; return Object.prototype; }, ownKeys() { traps++; return []; } });
 		assert.throws(() => fixture(true, undefined, false, { extra: proxy }), /metadata cannot be pinned/); assert.equal(traps, 0);
 	});
-	it("rejects stream results after nested metadata drift during native execution", async () => {
+	it("rejects stream results after the SDK switches to a different nested metadata selection", async () => {
 		const headers = { trace: "original" };
-		const f = fixture(true, () => ({ result: async () => { headers.trace = "changed"; return "late"; } }), false, { headers });
+		const f = fixture(true, () => ({ result: async () => { f.session.model = { ...f.model, headers: { trace: "changed" } }; return "late"; } }), false, { headers });
 		await assert.rejects(() => f.runtime.streamSimple(f.model, {}, {}).result(), /metadata/);
 	});
 
@@ -208,6 +235,13 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 			// The same SDK-owned reference may be reused by native cache warming.
 			assert.equal(f.runtime.streamSimple(result.model, {}, {}), "same-native-result");
 		} finally { f.guard.close(); }
+	});
+	it("captures exactly one validated native route model before freezing or recording it", async () => {
+		let reads = 0;
+		const f = fixture(true, undefined, true, {}, () => ({ get model() { reads++; return f.physical; } }));
+		await f.runtime.resolveModel(f.model, [], {});
+		assert.equal(reads, 1); assert.equal(Object.isFrozen(f.physical), true);
+		assert.equal(f.runtime.streamSimple(f.physical, {}, {}), "same-native-result"); f.guard.close();
 	});
 	it("does not invent route provenance from physical agent state or a known catalogue name", () => {
 		const f = fixture(true, undefined, true); f.session.agent.state.model = f.physical;
@@ -226,18 +260,16 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		const g = fixture(true, undefined, true, {}, (_model, _messages, options) => { caller.abort(); assert.equal(options.signal.aborted, true); return { model: g.physical }; });
 		await assert.rejects(() => g.runtime.resolveModel(g.model, [], { signal: caller.signal }), /cancelled|lifetime ended/); assert.equal(g.calls(), 0);
 	});
-	it("pins routed metadata across generation hooks and later router resolutions", async () => {
-		for (const phase of ["headers", "route"]) {
-			const f = fixture(true, undefined, true); await f.runtime.resolveModel(f.model, [], {});
-			if (phase === "headers") {
-				f.runtime.streamSimple(f.physical, {}, { transformHeaders: async () => { f.physical.headers.trace = "changed"; return {}; } });
-				await assert.rejects(() => f.options().transformHeaders({}), /metadata changed/);
-			} else {
-				f.physical.baseUrl = "https://changed.invalid";
-				await assert.rejects(() => f.runtime.resolveModel(f.model, [], {}), /metadata changed/); assert.equal(f.calls(), 0);
-			}
-			assert.equal(f.lease.signal.aborted, true);
-		}
+	it("makes only admitted physical model data immutable and preserves native route reuse", async () => {
+		const f = fixture(true, undefined, true);
+		assert.equal(Object.isFrozen(f.physical), false);
+		const route = await f.runtime.resolveModel(f.model, [], {});
+		assert.equal(route.model, f.physical); assert.equal(Object.isFrozen(f.physical.headers), true);
+		f.runtime.streamSimple(f.physical, {}, { transformHeaders: async () => { f.physical.headers.trace = "changed"; return {}; } });
+		await assert.rejects(() => f.options().transformHeaders({}), TypeError);
+		assert.throws(() => { f.physical.baseUrl = "https://changed.invalid"; }, TypeError);
+		assert.equal((await f.runtime.resolveModel(f.model, [], {})).model, f.physical);
+		assert.equal(f.runtime.streamSimple(f.physical, {}, {}), "same-native-result"); f.guard.close();
 	});
 	it("rejects an old routed reference after the native catalogue data changes", async () => {
 		const f = fixture(true, undefined, true); await f.runtime.resolveModel(f.model, [], {});

@@ -18,12 +18,21 @@ interface Config {
 const config = JSON.parse(process.argv[2]) as Config;
 const { fauxProvider, fauxAssistantMessage, fauxToolCall } = await import(pathToFileURL(path.join(path.dirname(config.sdkRoot), "pi-ai/dist/index.js")).href);
 const faux = fauxProvider({ provider: "trusted", models: [{ id: "model" }] });
+const initialBaseUrl = faux.getModel().baseUrl;
 const factory = createDefaultChildSessionFactory({
 	// Use the selected genuine SDK/peers in this synthetic layout; no fake runtime.
 	loadPiCodingAgent: () => import(pathToFileURL(path.join(config.sdkRoot, "dist/index.js")).href),
 });
 let authority: Awaited<ReturnType<typeof bindRunnerChildAuthority>>;
 const readyAtGenerations: string[][] = [];
+const modelAtGenerations: Array<{ baseUrl: string; api: string }> = [];
+// Passive observation of the genuine faux backend input, before its queued
+// onResponse hook. The same native faux implementation still owns execution.
+const nativeStream = faux.provider.streamSimple;
+faux.provider.streamSimple = (model, context, options) => {
+	modelAtGenerations.push({ baseUrl: model.baseUrl, api: model.api });
+	return nativeStream.call(faux.provider, model, context, options);
+};
 faux.setResponses([
 	...config.steps.map((step, index) => fauxAssistantMessage(
 		fauxToolCall(step.name, step.input, { id: `native-${index}` }), { stopReason: "toolUse" },
@@ -57,9 +66,9 @@ try {
 	} as unknown as InProcessChildLaunch;
 	const result = await runChildSession({ factory, launch, authority,
 		prompt: "Execute the credential-free source fixture only.", appendChildEvent() {}, writeOutputLine() {} });
-	console.log("PRODUCTION_RESULT " + JSON.stringify({ result, calls: faux.state.callCount, readyAtGenerations }));
+	console.log("PRODUCTION_RESULT " + JSON.stringify({ result, calls: faux.state.callCount, readyAtGenerations, modelAtGenerations, initialBaseUrl }));
 } catch (error) {
-	console.log("PRODUCTION_ERROR " + JSON.stringify({ message: error instanceof Error ? error.message : String(error), calls: faux.state.callCount, readyAtGenerations }));
+	console.log("PRODUCTION_ERROR " + JSON.stringify({ message: error instanceof Error ? error.message : String(error), calls: faux.state.callCount, readyAtGenerations, modelAtGenerations, initialBaseUrl }));
 	process.exitCode = 1;
 } finally {
 	await factory.dispose();

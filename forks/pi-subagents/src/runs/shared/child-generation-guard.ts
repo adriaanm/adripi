@@ -43,13 +43,13 @@ function snapshotMetadata(value: unknown, budget = { nodes: 1024, bytes: 65536 }
 	return result;
 }
 
-/** Only validated, bounded SDK-owned provider DATA reaches this function.
- * Keep functions themselves untouched; their exact values are pinned above.
- * Immutable data closes the async handoff gap without substituting a provider. */
-function freezeProviderData(value: unknown, seen: Set<object>): void {
+/** Only validated, bounded SDK-owned DATA reaches this function. Keep callable
+ * values untouched. Immutable data closes async handoff gaps without replacing
+ * the model/provider objects, SDK definitions or the native transport. */
+function freezeOwnedData(value: unknown, seen: Set<object>): void {
 	if (!value || typeof value !== "object" || seen.has(value)) return;
 	seen.add(value);
-	for (const name of Reflect.ownKeys(value)) freezeProviderData(Object.getOwnPropertyDescriptor(value, name)!.value, seen);
+	for (const name of Reflect.ownKeys(value)) freezeOwnedData(Object.getOwnPropertyDescriptor(value, name)!.value, seen);
 	Object.freeze(value);
 }
 
@@ -71,6 +71,13 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 			if (!data || typeof data !== "object" || typeof Object.getOwnPropertyDescriptor(data, "provider")?.value !== "string" || typeof Object.getOwnPropertyDescriptor(data, "id")?.value !== "string") throw new Error("missing model identity");
 			return data;
 		} catch { return fail("model metadata cannot be pinned as bounded accessor-free SDK data"); }
+	};
+	const immutableModels = new WeakSet<object>();
+	const pinModelData = (model: ModelIdentity) => {
+		if (immutableModels.has(model)) return;
+		try { freezeOwnedData(model, new Set()); }
+		catch { return fail("the admitted SDK model data cannot be made immutable"); }
+		immutableModels.add(model);
 	};
 	// Pin existing definitions before startup. The SDK can discover/register new
 	// tools during startup (including MCP); no generation may run until the
@@ -102,6 +109,7 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 		if (toolNames("getActiveToolNames").some(name => !activeCeiling.has(name)) || toolNames("getCallableToolNames").some(name => !callableCeiling.has(name))) fail("the SDK tool loadout exceeded its selected ceiling");
 	};
 	const selected = metadata(selectedModel), requestedModel = key(selected);
+	pinModelData(selectedModel);
 	// Pin the SDK-owned concrete providers, not just catalogue model names or
 	// registry mutators. getProvider exposes live auth/dispatch objects. Virtual
 	// routes may pick any pre-existing concrete provider; pin all once, then
@@ -118,7 +126,7 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 			providerPins.set(provider.id, { reference: providers[index], data: snapshotMetadata(provider, { nodes: 1024, bytes: 65536 }, new Set(), 0, true) });
 		}
 		const frozen = new Set<object>();
-		for (const pinned of providerPins.values()) freezeProviderData(pinned.reference, frozen);
+		for (const pinned of providerPins.values()) freezeOwnedData(pinned.reference, frozen);
 		for (const [name, method] of [["getProvider", providerLookup], ["getProviders", providerList], ["getAuth", authLookup]] as const) {
 			Object.defineProperty(runtime, name, { value: method, writable: false, configurable: false });
 		}
@@ -145,7 +153,8 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 		try { lease.assertReady(); } catch (error) { fail(error instanceof Error ? error.message : String(error)); }
 		if (!session || session.sessionId !== sessionId) return fail("the SDK session/model identity changed or is not bound");
 		if (!startupComplete) fail("SDK startup tool/resource registration has not completed");
-		const current = metadata(session.model);
+		const selectedReference = session.model;
+		const current = metadata(selectedReference);
 		if (key(current) !== requestedModel) return fail("the SDK session/model identity changed or is not bound");
 		if (!isDeepStrictEqual(current, selected)) fail("the selected model metadata changed after exact SDK resolution");
 		assertTools();
@@ -163,6 +172,8 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 		}
 		const concrete = requested ?? selected;
 		if (concrete.api !== "pi-virtual") assertProvider(concrete.provider);
+		pinModelData(selectedReference!);
+		if (model) pinModelData(model);
 	};
 	const install = (name: string, wrap: (original: Method) => Method, required = false) => {
 		const method = target[name];
@@ -179,13 +190,15 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 			if (!isDeepStrictEqual(metadata(model), selected)) fail("routing requires the selected virtual model metadata");
 			const route = await original(model, messages, { ...options, signal });
 			assert(model, signal);
-			const physical = metadata(route?.model);
+			const routedModel = route?.model;
+			const physical = metadata(routedModel);
 			const catalogue = (physicalLookup as Method).call(runtime, physical.provider, physical.id);
 			if (physical.api === "pi-virtual" || !isDeepStrictEqual(physical, metadata(catalogue))) fail("the native route is not the physical SDK catalogue model");
 			assertProvider(physical.provider);
-			const previous = routed.get(route.model);
+			pinModelData(routedModel);
+			const previous = routed.get(routedModel);
 			if (previous && !isDeepStrictEqual(physical, previous)) fail("the native routed model metadata changed");
-			routed.set(route.model, physical);
+			routed.set(routedModel, physical);
 			return route;
 		}, true);
 	}

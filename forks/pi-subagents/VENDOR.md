@@ -527,3 +527,28 @@ paid latency/savings). Exact evidence/remaining raw model/private code/effective
 auth/transport/deployed/OS/Git/live-cost gates:docs/round-2-production-consumers.md.
 No live install/restart/session/config/policy/toggle/protected-content/runtime
 replacement/paid provider/push.
+
+## Raw model endpoint data changed between headers and the native backend
+
+Actual SDK delayed4-microtask red probe: the same native faux backend received
+https://changed.invalid (calls1/readiness0), before queued onResponse revocation.
+No real HTTP. Passive backend-input observer, not an alternative engine or a
+response-factory claim. Generalise validated provider-data freezing to admitted
+MODEL DATA: exact selection, equivalent session/request copies and catalogue-
+validated native physical references. Keep exact objects/aliases/nonenumerables;
+capture each validated getter/route reference once. WeakSet only skips redundant
+freezing, never existing per-action checks. No SDK/provider/transport/router/class/
+function-value replacement, tool-schema/function-object freeze or new authority
+API/wire/store. Native auth results/private state untouched. Caught ineffective
+assignments leave original authority valid; uncaught hook failures close normally.
+Actual delayed4/8 cases preserve original endpoint/2readycalls/Write/reset/cleanup;
+source/compiled/public-parent/default acceptance/structured output/native virtual
+routes pass.4added units,4373total4356pass17skip0fail443suites/types;39/39 per genuine
+SDK1.2/1.4,4graph/root gates. Sourcedf8360feed30a16f/artifact52fbadba145d6190,
+graph384/17/330/18/768. Synthetic baseline(pre-provider-pin)/current1000-event ranges
+191.0–201.0/196.7–199.2ms (~2.6us/event mean delta), NOT isolated freeze overhead or
+paid latency/savings. Model catalogue before first route, prepared auth/request
+values, private/global code/resources/lifecycle/cache-warmer/deployment/OS/Git/
+live-cost gates remain open;docs/round-2-production-consumers.md has exact scope.
+No live install/restart/session/config/policy/toggle/credential-audit-content/runtime
+replacement/paid provider/push.
