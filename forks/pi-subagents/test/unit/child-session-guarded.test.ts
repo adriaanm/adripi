@@ -4,8 +4,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { fauxProvider } from "@earendil-works/pi-ai";
-import { createChildAuthorityLease, withChildAuthority, type ChildAuthorityLease } from "../../src/runs/shared/child-authority.ts";
+import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
+import { acknowledgeChildAuthority, claimChildAuthority, createChildAuthorityLease, withChildAuthority, type ChildAuthorityLease } from "../../src/runs/shared/child-authority.ts";
 import { createDefaultChildSessionFactory, type ChildSessionLaunch, type PiCodingAgentModule } from "../../src/runs/shared/child-session.ts";
 
 function guarded<T>(cwd: string, run: (lease: ChildAuthorityLease) => Promise<T>): Promise<T> {
@@ -31,12 +31,12 @@ function sdk(options: {
 } = {}): PiCodingAgentModule {
 	return {
 		SettingsManager, DefaultResourceLoader,
-		ModelRuntime: { create: async () => ({ registerProvider: () => options.register?.(), refresh: async () => {} }) },
+		ModelRuntime: { create: async () => ({ stream: () => undefined, streamSimple: () => undefined, registerProvider: () => options.register?.(), refresh: async () => {} }) },
 		SessionManager: { inMemory: () => ({}) },
 		resolveCliModel: options.resolve ?? (() => ({ model: { provider: "trusted", id: "model" } })),
 		createAgentSession: async ({ resourceLoader, settingsManager }: { resourceLoader: DefaultResourceLoader; settingsManager: SettingsManager }) => {
 			options.onLoader?.(resourceLoader, settingsManager);
-			if (options.create) return { session: options.create() };
+			if (options.create) return { session: { sessionId: "fixture-session", ...options.create() as object } };
 			throw new Error("captured-before-session");
 		},
 	} as unknown as PiCodingAgentModule;
@@ -86,7 +86,7 @@ describe("guarded SDK child startup", () => {
 		const registrations: unknown[] = [];
 		const api = sdk({ onLoader: loader => assert.deepEqual(loader.getExtensions().extensions.map(e => e.path), [path.join(agent, "provider.ts")]) });
 		// Record registrations without initializing any provider auth/SDK model transport.
-		api.ModelRuntime.create = async () => ({ registerProvider: (_id: string, config: unknown) => registrations.push(config), refresh: async () => {} }) as never;
+		api.ModelRuntime.create = async () => ({ stream: () => undefined, streamSimple: () => undefined, registerProvider: (_id: string, config: unknown) => registrations.push(config), refresh: async () => {} }) as never;
 		const factory = createDefaultChildSessionFactory({ loadPiCodingAgent: async () => api });
 		await assert.rejects(() => guarded(cwd, () => factory.create(launch(cwd))), /captured-before-session/);
 		assert.deepEqual(registrations, [{ marker: "global" }]);
@@ -156,6 +156,46 @@ describe("guarded SDK child startup", () => {
 				assert.throws(() => lease.assertReady(), /ready|acknowledged|consumer/i);
 				assert.equal(child.messages.length, 0, "no model prompt was sent");
 			} finally { await child.dispose(); await factory.dispose(); }
+		});
+	});
+
+	it("blocks real SDK warming triggered by startup before either consumer acknowledges", async () => {
+		const pi = await import("@earendil-works/pi-coding-agent");
+		const faux = fauxProvider({ provider: "trusted", models: [{ id: "model" }] }); faux.setResponses([fauxAssistantMessage("must not dispatch")]);
+		const factory = createDefaultChildSessionFactory({ loadPiCodingAgent: async () => ({ ...pi,
+			createAgentSession: async options => {
+				const created = await pi.createAgentSession(options); const bind = created.session.bindExtensions.bind(created.session);
+				created.session.bindExtensions = async args => {
+					// A startup-triggered request through the actual SDK runtime, not the
+					// runner's normal first-prompt path. No consumer fixture acknowledges.
+					await options.modelRuntime!.completeSimple(faux.models[0], { messages: [] });
+					await bind(args);
+				};
+				return created;
+			},
+		}) });
+		try {
+			let failure: unknown;
+			try { await guarded(cwd, () => factory.create({ ...launch(cwd), hooks: [{ name: "fixture-provider", factory: api => api.registerProvider(faux.provider as never) }] })); }
+			catch (error) { failure = error; }
+			assert.equal(faux.state.callCount, 0, "startup SDK requests must not dispatch before consumer acknowledgment");
+			assert.match(String(failure), /generation refused.*not ready/i);
+		} finally { await factory.dispose(); }
+	});
+
+	it("dispatches the real SDK/faux provider only after both explicit barrier fixtures acknowledge", async () => {
+		const faux = fauxProvider({ provider: "trusted", models: [{ id: "model" }] }); faux.setResponses([fauxAssistantMessage("barrier ready")]);
+		const factory = createDefaultChildSessionFactory({ loadPiCodingAgent: () => import("@earendil-works/pi-coding-agent") });
+		await guarded(cwd, async lease => {
+			// Barrier fixtures, NOT actual production sandbox/Guardian consumers.
+			for (const id of lease.requiredConsumers) { claimChildAuthority(id, cwd); acknowledgeChildAuthority(id); }
+			const child = await factory.create({ ...launch(cwd), hooks: [{ name: "fixture-provider", factory: api => api.registerProvider(faux.provider as never) }] });
+			try {
+				await child.prompt("credential-free barrier fixture"); assert.equal(faux.state.callCount, 1);
+				assert.match(JSON.stringify(child.messages), /barrier ready/);
+				assert.equal((child.messages.at(-1) as { stopReason?: string }).stopReason, "stop");
+			}
+			finally { await child.dispose(); await factory.dispose(); }
 		});
 	});
 

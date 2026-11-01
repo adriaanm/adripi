@@ -13,7 +13,8 @@ import { pathToFileURL } from "node:url";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext, ToolCallEvent, ToolCallEventResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { CHILD_COMMAND_TOOL, createChildCommandRuntime } from "./child-commands.ts";
-import { hasChildAuthorityContext } from "./child-authority.ts";
+import { captureChildAuthorityLease, hasChildAuthorityContext } from "./child-authority.ts";
+import { guardChildGeneration } from "./child-generation-guard.ts";
 import { supervisorChannelDir } from "./child-tool-plan.ts";
 import { pinChildCacheRetention } from "../../shared/child-cache-retention.ts";
 import { getAgentDir, PI_CODING_AGENT_PACKAGE_ROOT_ENV } from "../../shared/utils.ts";
@@ -465,6 +466,8 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 			// authority adapters before the runner admits a first prompt.
 			const guarded = hasChildAuthorityContext();
 			const requestedModel = guarded ? requireGuardedModelReference(launch.model) : undefined;
+			const generationLease = guarded ? captureChildAuthorityLease(launch.cwd) : undefined;
+			let generation: ReturnType<typeof guardChildGeneration> | undefined;
 			const disposalsAtStart = disposals;
 			const pi = await loadPiCodingAgent();
 			const builtinMcpTools = launch.builtinMcpTools ?? [];
@@ -534,6 +537,7 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 			// extensions loaded into it (ambient extensions included) release their
 			// watchers, servers, and timers. Do the same, then dispose.
 			const shutdownSession = async (session: Awaited<ReturnType<PiCodingAgentModule["createAgentSession"]>>["session"]): Promise<void> => {
+				generation?.close();
 				try {
 					await commands?.shutdown();
 					const runner = session.extensionRunner;
@@ -585,7 +589,9 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 				if (guarded && (resolvedModel?.warning || !resolvedModel?.model || `${resolvedModel.model.provider}/${resolvedModel.model.id}` !== requestedModel)) {
 					throw new Error(`Guarded child model must resolve exactly to '${requestedModel}' without fallback${resolvedModel?.warning ? `: ${resolvedModel.warning}` : "."}`);
 				}
-				const { session } = await pi.createAgentSession({
+				if (generationLease) generation = guardChildGeneration(modelRuntime, generationLease, requestedModel!, launch.signal);
+				let created: Awaited<ReturnType<PiCodingAgentModule["createAgentSession"]>>;
+				try { created = await pi.createAgentSession({
 					cwd: launch.cwd,
 					agentDir,
 					modelRuntime,
@@ -597,7 +603,10 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 					sessionManager,
 					settingsManager,
 					sessionStartEvent: { type: "session_start", reason: "startup" },
-				});
+				}); } catch (error) { generation?.close(); throw error; }
+				const { session } = created;
+				try { generation?.bind(session); }
+				catch (error) { await shutdownSession(session); throw error; }
 				pinChildCacheRetention(session.agent);
 				// Pi reports handler failures through onError instead of throwing, so required startup failures must be collected here.
 				const requiredStartupErrors: string[] = [];
@@ -606,12 +615,13 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 					await session.bindExtensions({
 						mode: "print",
 						onError: (error) => {
+							if (guarded) generation?.close();
 							if (binding && (guarded || requiredPaths.has(error.extensionPath))) requiredStartupErrors.push(`${error.extensionPath} (${error.event}): ${error.error}`);
 							launch.onExtensionError?.({ extensionPath: error.extensionPath, event: error.event, error: error.error });
 						},
 					});
 				} catch (error) {
-					session.dispose();
+					await shutdownSession(session);
 					throw error;
 				} finally {
 					binding = false;

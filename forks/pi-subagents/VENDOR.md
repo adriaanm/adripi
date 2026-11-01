@@ -177,10 +177,51 @@ current verification and remaining production/runtime gates.
 pi-sbx now has the actual registered parent publisher, narrowing policy and shared
 Guardian/human adapter. The actual Guardian semantic child consumer now claims/
 acknowledges only its installed forwarding/lifecycle through that same public API;
-**pi-sbx's production native/Bash/SRT consumer remains unimplemented**. Combined
-readiness must still fail and no first model prompt is authorized. Real registered
-SDK/IPC composition is not replaced by the focused sandbox-ack fixture. These
+pi-sbx's actual native/Bash/SRT entry is now source-implemented (`19af0d2`), but
+**combined production SDK/IPC readiness is not accepted**. The separate component
+and acknowledgment fixtures do not authorize a first production model prompt.
+Real registered SDK/IPC composition is not replaced by a focused role fixture. These
 seams do not certify child containment, full headless,
 external worktrees or authenticated Git. No live installation/policy/restart/push
 was performed. See the [current wiring acceptance and payload handoff](../../docs/round-2-wiring-acceptance.md)
 and [component history](../../docs/round-2-child-authority.md).
+
+### SDK generation lifetime barrier (source prerequisite)
+
+The runner's first-prompt assertion missed SDK requests triggered during startup.
+The credential-free real-SDK/faux regression dispatched **one** request before
+both consumers acknowledged when only the new guard installation was disabled;
+with the guard, it dispatches **zero** and refuses startup. Evidence:
+`.local/goal-wiring-sdk/generation-{before,focused,full}.log`.
+
+The same default factory now captures its existing scoped opaque lease through an
+internal domain accessor (no public consumer/ack, registry, grant or transport),
+and fences its fresh SDK ModelRuntime's public stream/generation boundaries.
+The original provider/transport is retained. All required consumers must be ready;
+bound session/model identity and lease/caller cancellation are checked before
+requests and again after asynchronous public headers/payload/response/stream
+callbacks. The composed signal reaches the existing SDK transport, including
+summaries/cache warming. Physical virtual-model requests stay tied to the live
+SDK-routed agent model; no alternate router is added. Provider registration and
+refresh have finished at exact model resolution and cannot be replaced later
+behind the same ID. Generation dispatch cannot be overwritten. Extension errors
+close the guarded lifetime even after startup; teardown closes it before emitting
+supported shutdown/dispose. Auth needed for already-owned cancellation cleanup is
+not disabled by fencing generation. Ordinary unguarded behavior is unchanged.
+
+**19 boundary fixtures plus two actual SDK/faux cases** pass; all acknowledgments
+in these generation tests are explicit barrier fixtures, not production consumers.
+Full source: **4,275 total / 4,258 pass / 17 skip / zero fail**, **443 suites**,
+concurrency4; typecheck pass. A credential-free installed SDK **1.4.0** probe also
+refuses startup warming (zero calls) and finishes an acknowledged faux prompt
+(one call, normal stop); `.local/goal-wiring-sdk/generation-sdk14.{mjs,log}`. The
+fresh graph has **384 inputs / 17 exports / 330 compiled modules / 18 module-URL
+targets / 768 artifacts**, artifact `ff7fafc443439a30`; four graph tests prove
+compiled SDK lease capture shares bundle/compiled ALS without claiming/acking.
+pi-sbx remains **428 / 30 files** plus types; Guardian **213 non-headless**/types.
+Native stream iteration/result and async image/classifier results discard late
+identity/cancellation output without synthetic messages/usage. Complete
+bootstrap/dependency/provider-data provenance, actual virtual dispatch, policy-aware
+startup resources, selected-tool fidelity, registered production SDK/IPC composition
+and deployed/OS/Git/paid-cost/latency gates are still open. No live installation,
+restart, policy/toggle edit, credential/audit content access or push occurred.

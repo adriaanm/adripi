@@ -25,6 +25,8 @@ for (const [producer, consumer] of [[bundled, compiled], [compiled, bundled]]) {
 				await Promise.resolve();
 				assert.equal(producer.hasChildAuthorityContext(), true);
 				assert.equal(consumer.hasChildAuthorityContext(), true);
+				assert.equal(domain.captureChildAuthorityLease("/workspace/built"), handle.lease, "compiled SDK guard captures the same live scoped lease");
+				assert.throws(() => handle.lease.assertReady(), /pi-sbx/, "SDK capture must not claim or acknowledge a consumer");
 				const claimed = consumer.claimChildAuthority("pi-sbx", "/workspace/built");
 				assert.equal(claimed, handle.lease);
 				consumer.acknowledgeChildAuthority("pi-sbx");
@@ -34,6 +36,7 @@ for (const [producer, consumer] of [[bundled, compiled], [compiled, bundled]]) {
 			assert.equal(producer.hasChildAuthorityContext(), false);
 			assert.equal(consumer.hasChildAuthorityContext(), false);
 			assert.throws(() => consumer.claimChildAuthority("pi-sbx", "/workspace/built"), /active withChildAuthority/);
+			assert.throws(() => domain.captureChildAuthorityLease("/workspace/built"), /own live.*identity/);
 		} finally {
 			handle.lease.dispose();
 		}

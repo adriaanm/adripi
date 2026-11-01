@@ -587,6 +587,20 @@ export function withChildAuthority<T>(lease: ChildAuthorityLease, callback: () =
 	return leaseSlot().storage.run(lease, callback);
 }
 
+/** Internal SDK/runner fence: capture the SAME opaque lease without claiming or
+ * acknowledging an enforcement role. Never create a registry for missing intent.
+ * Public consumers still use claimChildAuthority and install their own fences. */
+export function captureChildAuthorityLease(cwd: string): ChildAuthorityLease {
+	const slot = (globalThis as Record<PropertyKey, unknown>)[CHILD_AUTHORITY_LEASE_SLOT_KEY];
+	if (!isLeaseSlot(slot)) throw new ChildAuthorityError("invalid-lease", "Guarded SDK startup requires the actual live child authority scope.");
+	const lease = slot.storage.getStore();
+	if (!lease || lease.version !== CHILD_AUTHORITY_PROVIDER_VERSION || lease.identity.cwd !== cwd || lease.signal.aborted) {
+		throw new ChildAuthorityError("invalid-lease", "Guarded SDK startup requires its own live child authority identity.");
+	}
+	requireClaim(lease);
+	return lease;
+}
+
 /**
  * Called by a required child extension while it is loaded inside `withChildAuthority`.
  *

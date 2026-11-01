@@ -488,6 +488,53 @@ No deployed identity, actual OS containment/Git workflow, paid accounting or
 representative live total cost/latency is certified. No deployment, restart,
 policy/toggle edit, protected-content access or push occurred.
 
+## SDK generation lifetime barrier (source prerequisite)
+
+A real SDK/faux request triggered inside startup bypassed the runner's ordinary
+first-prompt assertion. Disabling only the new generation guard reproduces **one
+native provider call before either consumer acknowledgment**; enabling it refuses
+with **zero calls**. No network/paid provider was involved. The regression uses
+the actual SDK runtime/session binding, not a substitute model engine; its separate
+positive case acknowledges explicit barrier fixtures and dispatches once.
+
+The default factory captures the SAME scoped opaque lease via an internal domain
+accessor, without creating another registry or claiming/acknowledging a consumer.
+Its fresh SDK runtime keeps the original public generation implementations and
+transport but fences stream/image/classifier/deferred requests, with mandatory
+stream/streamSimple support. Bound session/model and all consumers' readiness,
+lease/startup/request cancellation, and public asynchronous headers/payload/
+response/stream callback boundaries are checked before consuming results. Signals
+flow into the SDK transport. This includes SDK summaries/cache warming, not only
+normal prompt calls. The live SDK-routed physical agent model is required for
+virtual requests; this is not another model router. Post-resolution provider
+registry replacement/refresh or guarded dispatcher replacement refuses. Any
+reported extension error also closes the lifetime after startup. Supported
+shutdown/dispose closes generation while leaving owned cancellation auth usable.
+
+**19 boundary fixtures + two actual SDK/faux regressions**, **4,275 full subagents
+tests / 4,258 pass / 17 skip / zero failures / 443 suites**, concurrency4, and types
+pass; pi-sbx **428 / 30 files** and types pass. Evidence:
+`.local/goal-wiring-sdk/generation-{before,focused,full}.log`. Native stream
+iteration/result and async image/classifier results also reject late identity/
+cancellation, without inventing model messages or usage. An installed **SDK1.4.0**
+credential-free probe has zero calls before readiness, then one successful normal
+faux response with explicit role fixtures (`generation-sdk14.{mjs,log}`).
+
+The fresh verified graph has **384 inputs / 17 exports / 330 compiled modules /
+18 module-URL targets / 768 artifacts**, artifact `ff7fafc443439a30`; its four graph
+tests also prove compiled SDK capture shares the bundle/compiled opaque lease and
+does not itself claim/acknowledge a consumer. Guardian remains **213 non-headless**
+and types; `just check` (including 69 deployment fixtures), fresh verifier and
+`git diff --check` pass before the coherent source commit.
+
+This closes the demonstrated missing-readiness generation boundary, **not #14**.
+No generation fixture is both actual registered production consumers/Node IPC.
+Complete bootstrap/dependency/provider-data provenance, policy-aware startup
+resource delivery, actual virtual dispatch and selected-tool fidelity remain to
+be audited with the complete composition matrix. No deployed/OS/Git/paid-provider
+or live total-cost/latency result, installation, restart, policy/toggle edit,
+protected-content access or push is claimed.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the
