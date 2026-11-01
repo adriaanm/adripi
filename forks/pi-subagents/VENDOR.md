@@ -335,3 +335,25 @@ Two new negatives pass; full **4,305 total / 4,288 pass / 17 skip / zero fail /
 Evidence/scope: `docs/round-2-production-consumers.md` and
 `.local/goal-consumers/executable-*`. No live runtime/policy/config/toggle,
 install/restart/protected-content change or push.
+
+## Fabricated physical state did not prove native virtual routing
+
+Actual source and compiled SDK1.2 detached virtual cases failed: SDK retains the
+virtual selection, routing the request only. Replace the opaque physical-agent-state
+assumption with observation of its existing public `resolveModel`/physical catalogue.
+Preserve native output/reason/state/router/provider/auth/transport. Check readiness,
+selection and composed cancellation before/after async resolution, pin lookup and
+bounded metadata, require actual observed SDK-owned physical references and matching
+current catalogue data at generation/hooks/results. Native cache-warmer reference
+reuse remains possible, with fresh checks; weak observations are data, never grants.
+Copied/unknown references, changed metadata/catalogue and lookup replacement refuse.
+No new public API, protocol, permission store, provider or fallback router.
+
+Real virtual `user`/`continuation`/previous-response callbacks and physical provider
+identity/readiness/native writes/process drain pass in source AND full compiled
+CLI graph. **24 composition/4 graph**, full **4,310 /4,293 pass/17 skip/zero fail/
+443 suites**, types and root checks pass. Artifact `ab5e595679b5ef7e`, same384 inputs/
+17 exports/330 compiled/18 URLs/768 files. Evidence/scope and remaining SDK1.4,
+effective-auth/provider-code/dependency/cache-warming/live acceptance gates:
+`docs/round-2-production-consumers.md`. No deployment/restart/live policy/config/
+toggle/protected-content/runtime change or push.

@@ -132,9 +132,9 @@ const toolResults = report => report.result.messages.filter(message => message.r
 const scratch = f => readdirSync(f.child).filter(name => name.startsWith("pi-sbx-scratch-"));
 
 for (const [label, options] of [
-	["success", {}], ["unavailable runtime", { runtimeUnavailable: true }],
+	["success", {}], ["SDK virtual routing", { virtual: true }], ["unavailable runtime", { runtimeUnavailable: true }],
 	["broken Guardian", { brokenGuardian: true }], ["semantic terminal denial", { semanticDeny: true }],
-	["compiled graph success", { compiled: true }], ["compiled unavailable runtime", { compiled: true, runtimeUnavailable: true }],
+	["compiled graph success", { compiled: true }], ["compiled SDK virtual routing", { compiled: true, virtual: true }], ["compiled unavailable runtime", { compiled: true, runtimeUnavailable: true }],
 	["compiled broken Guardian", { compiled: true, brokenGuardian: true }], ["compiled terminal denial", { compiled: true, semanticDeny: true }],
 ]) {
 	test(`full detached bootstrap/default factory: ${label}, both actual consumers, observed process drain`, async () => {
@@ -146,8 +146,8 @@ for (const [label, options] of [
 import {fauxProvider,fauxAssistantMessage,fauxToolCall} from '@earendil-works/pi-ai';
 import {VERSION} from '@earendil-works/pi-coding-agent';
 import {captureChildAuthorityLease} from ${JSON.stringify(nativeAuthority)};
-export default function(api){const lease=captureChildAuthorityLease(${JSON.stringify(f.child)});const faux=fauxProvider({provider:'trusted',models:[{id:'model'}]});
-faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'detached.txt',content:${JSON.stringify(options.semanticDeny ? "FORBIDDEN" : "actual detached input 文🌍")}},{id:'detached-write'}),{stopReason:'toolUse'}),fauxAssistantMessage('Actual detached fixture completed.')].map(response=>()=>{lease.assertReady();appendFileSync(${JSON.stringify(generations)},JSON.stringify({ready:lease.requiredConsumers,sdk:VERSION})+'\\n');return response}));api.registerProvider(faux.provider);}`);
+export default function(api){const lease=captureChildAuthorityLease(${JSON.stringify(f.child)});const faux=fauxProvider({api:'fixture-faux',provider:'trusted',models:[{id:'model'}]});
+faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'detached.txt',content:${JSON.stringify(options.semanticDeny ? "FORBIDDEN" : "actual detached input 文🌍")}},{id:'detached-write'}),{stopReason:'toolUse'}),fauxAssistantMessage('Actual detached fixture completed.')].map(response=>(_context,_options,_state,model)=>{lease.assertReady();appendFileSync(${JSON.stringify(generations)},JSON.stringify({ready:lease.requiredConsumers,sdk:VERSION,physical:{provider:model.provider,id:model.id,api:model.api}})+'\\n');return response}));api.registerProvider(faux.provider);${options.virtual ? `api.registerVirtualModel({provider:'trusted',id:'virtual',name:'Fixture virtual',contextWindow:128000,maxTokens:2048,route:request=>{appendFileSync(${JSON.stringify(path.join(f.root, "routes.jsonl"))},JSON.stringify({selected:request.model.id,reason:request.reason,previous:request.previous?.model.id})+'\\n');return {model:faux.models[0],thinkingLevel:'off'};}});` : ""}}`);
 	const policy = createFilePolicy({ filesystem: { denyRead: [], allowRead: [], allowWrite: [f.parent], denyWrite: [] },
 		mandatoryDenyRead: [path.join(f.agentDir, "auth.json")], mandatoryDenyWrite: [f.agentDir] });
 	const publication = publishChildAuthority({ sessionId: "parent", agentDir: f.agentDir, configDirName: ".pi",
@@ -163,7 +163,7 @@ faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'detached.txt
 		await publication.ready;
 		const execute = options.compiled ? (await import(pathToFileURL(path.join(f.agentDir, "npm/node_modules/pi-subagents/src/runs/background/async-execution.js")).href)).executeAsyncSingle : executeAsyncSingle;
 		const launch = await execute(id, {
-			agent: "worker", task: "Run only the synthetic detached fixture.", agentConfig: makeAgent("worker", { model: "trusted/model", tools: ["read", "write", "edit", "bash", "ls", "grep", "find"] }),
+			agent: "worker", task: "Run only the synthetic detached fixture.", agentConfig: makeAgent("worker", { model: options.virtual ? "trusted/virtual" : "trusted/model", tools: ["read", "write", "edit", "bash", "ls", "grep", "find"] }),
 			ctx: { cwd: f.child, currentSessionId: "parent", projectTrusted: false, pi: { events: { emit(name, value) {
 				if (name === SUBAGENT_ASYNC_STARTED_EVENT && value.id === id) pid = value.pid;
 				if (name === SUBAGENT_PROCESS_TERMINAL_EVENT && value.runId === id) { observed = true; terminal(value); }
@@ -185,7 +185,8 @@ faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'detached.txt
 		if (!failedStartup && !options.semanticDeny) assert.equal(readFileSync(path.join(f.child, "detached.txt"), "utf8"), "actual detached input 文🌍");
 		const calls = existsSync(generations) ? readFileSync(generations, "utf8").trim().split("\n").map(line => JSON.parse(line)) : [];
 		assert.equal(calls.length, failedStartup ? 0 : options.semanticDeny ? 1 : 2);
-		for (const call of calls) { assert.deepEqual([...call.ready].sort(), ["pi-guardian", "pi-sbx"]); assert.equal(call.sdk, "1.2.0"); }
+		for (const call of calls) { assert.deepEqual([...call.ready].sort(), ["pi-guardian", "pi-sbx"]); assert.equal(call.sdk, "1.2.0"); assert.deepEqual(call.physical, {provider:"trusted",id:"model",api:"fixture-faux"}); }
+		if (options.virtual) assert.deepEqual(readFileSync(path.join(f.root, "routes.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line)), [{selected:"virtual",reason:"user"},{selected:"virtual",reason:"continuation",previous:"model"}]);
 		assert.deepEqual(f.readPrompts().map(prompt => prompt.action.tool_name), failedStartup ? [] : ["write"]);
 		if (!failedStartup) {
 			assert.ok(f.readPrompts()[0].directives.some(item => item.text.includes("Never deploy")));

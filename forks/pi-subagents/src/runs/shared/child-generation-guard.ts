@@ -5,7 +5,6 @@ interface ModelIdentity { provider: string; id: string; api?: string }
 interface BoundSession {
 	readonly sessionId: string;
 	readonly model: ModelIdentity | undefined;
-	readonly agent: { readonly state: { readonly model: ModelIdentity } };
 }
 type Method = (...args: any[]) => any;
 const key = (model: ModelIdentity | undefined) => model ? `${model.provider}/${model.id}` : undefined;
@@ -56,6 +55,12 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 		} catch { return fail("model metadata cannot be pinned as bounded accessor-free SDK data"); }
 	};
 	const selected = metadata(selectedModel), requestedModel = key(selected);
+	// Observed native router outputs, not decisions/grants or a substitute router.
+	// Exact SDK-owned references also cover its native cache warmer's reuse. Each
+	// operation still checks readiness, cancellation and all pinned model data.
+	const routed = new WeakMap<object, ModelIdentity>();
+	const physicalLookup = target.getPhysicalModel;
+	if (selected.api === "pi-virtual" && typeof physicalLookup !== "function") fail("this SDK lacks the public physical catalogue for virtual routing");
 	const assert = (model?: ModelIdentity, signal?: AbortSignal, requestMetadata?: ModelIdentity) => {
 		if (closed || lease.signal.aborted || startupSignal?.aborted || signal?.aborted) fail("the bound generation lifetime ended or was cancelled");
 		try { lease.assertReady(); } catch (error) { fail(error instanceof Error ? error.message : String(error)); }
@@ -66,11 +71,13 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 		const requested = model && metadata(model);
 		if (requestMetadata && !isDeepStrictEqual(requested, requestMetadata)) fail("the in-flight request model metadata changed");
 		if (requested && key(requested) === requestedModel && !isDeepStrictEqual(requested, selected)) fail("the request substituted metadata behind the selected provider/model name");
-		// SDK virtual routing remains the SDK's path, not a fallback selector here.
-		// Physical requests must be the live agent's current routed model. Complete
-		// virtual/provider provenance remains a separate composition acceptance gate.
-		if (requested && key(requested) !== requestedModel && !(current.api === "pi-virtual" && key(metadata(session.agent.state.model)) === key(requested))) {
-			fail("the requested provider/model is not the bound SDK selection");
+		if (selected.api === "pi-virtual" && target.getPhysicalModel !== physicalLookup) fail("the SDK physical catalogue lookup changed");
+		if (requested && key(requested) !== requestedModel) {
+			const observed = model && routed.get(model);
+			if (selected.api !== "pi-virtual" || !observed) fail("the requested provider/model is not the bound SDK selection or a native routed reference");
+			if (!isDeepStrictEqual(requested, observed)) fail("the native routed model metadata changed");
+			const catalogue = (physicalLookup as Method).call(runtime, requested.provider, requested.id);
+			if (!isDeepStrictEqual(metadata(catalogue), observed)) fail("the SDK physical catalogue no longer matches the native route");
 		}
 	};
 	const install = (name: string, wrap: (original: Method) => Method, required = false) => {
@@ -81,6 +88,22 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 		}
 		Object.defineProperty(runtime, name, { value: wrap(method.bind(runtime)), enumerable: true, writable: false, configurable: false });
 	};
+	if (selected.api === "pi-virtual") {
+		install("resolveModel", original => async (model: ModelIdentity, messages: unknown, options?: Record<string, unknown>) => {
+			const signal = AbortSignal.any([lease.signal, ...(startupSignal ? [startupSignal] : []), ...(options?.signal ? [options.signal as AbortSignal] : [])]);
+			assert(model, signal);
+			if (!isDeepStrictEqual(metadata(model), selected)) fail("routing requires the selected virtual model metadata");
+			const route = await original(model, messages, { ...options, signal });
+			assert(model, signal);
+			const physical = metadata(route?.model);
+			const catalogue = (physicalLookup as Method).call(runtime, physical.provider, physical.id);
+			if (physical.api === "pi-virtual" || !isDeepStrictEqual(physical, metadata(catalogue))) fail("the native route is not the physical SDK catalogue model");
+			const previous = routed.get(route.model);
+			if (previous && !isDeepStrictEqual(physical, previous)) fail("the native routed model metadata changed");
+			routed.set(route.model, physical);
+			return route;
+		}, true);
+	}
 	for (const name of ["stream", "streamSimple", "streamDeferred", "generateImages", "classify"]) {
 		install(name, original => (model: ModelIdentity, context: unknown, options?: Record<string, unknown>) => {
 			const signal = AbortSignal.any([lease.signal, ...(startupSignal ? [startupSignal] : []), ...(options?.signal ? [options.signal as AbortSignal] : [])]);

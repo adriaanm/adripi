@@ -764,6 +764,41 @@ graph tests and root checks pass. Graph384 inputs/17 exports/330 compiled/18 URL
 `.local/goal-consumers/executable-{before,full,composition,root}.log`.
 No live runtime/config/policy/toggle change, install, restart or push.
 
+## Real SDK virtual routes keep the selection virtual
+
+Two new actual source/compiled detached cases failed before the repair: SDK1.2
+keeps `session.model`/`agent.state.model` virtual, routing only an individual request.
+The previous opaque fixture fabricated a physical agent-state switch, so its passing
+result was not native virtual-route proof. That assumption is removed.
+
+The existing generation fence now observes **the same SDK `resolveModel`**, forwards
+its exact native result, composes cancellation and checks readiness/selection before
+and after the asynchronous router. The result must match the native physical
+catalogue; lookup identity is pinned. Later physical generation requires the exact
+SDK-owned reference, its independent bounded metadata snapshot and matching current
+catalogue data. Copied/unknown references, drift, cancellation and lookup replacement
+refuse. Weak metadata observations preserve native cache-warmer reference reuse;
+they are not approval decisions, scope grants or a fallback selector. Every action
+still checks current lifetime/readiness/data. Native routing/provider/auth/stream
+engines are not substituted, and cleanup auth remains usable after guard closure.
+
+The two actual cases now record real `user` then `continuation` route callbacks,
+selected virtual ID and prior physical response; actual provider callbacks see only
+`trusted/model`/`fixture-faux`, both consumer roles ready, exact native Unicode write,
+full parent directive/input, observed CLI process close/reset/no scratch leak.
+**24 composition + four graph** tests pass. Seven added unit cases and corrected
+fixture cover same-reference native reuse, invented/copied references, pre-readiness
+routing, asynchronous cancel, nested/endpoint drift, catalogue data/replacement and
+lookup identity. Full **4,310 / 4,293 pass / 17 skip / zero fail /443 suites** and types
+pass. Graph384 inputs/17 exports/330 compiled/18 URLs/768 files, source
+`a99282fe3ff5c9fb`, artifact `ab5e595679b5ef7e`. Evidence:
+`.local/goal-consumers/virtual-{before,focused,full,composition,root}.log`.
+
+This is actual SDK1.2 routing composition, not SDK1.4/live provider, effective-auth
+endpoint overrides, provider-code/dependency integrity or native cache-warming
+integration certification. Those remaining provenance/acceptance gates stay open;
+no live install/restart/config/policy/toggle/protected-content/runtime change or push.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

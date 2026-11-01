@@ -4,7 +4,7 @@ import { createChildAuthorityLease, withChildAuthority, captureChildAuthorityLea
 import { guardChildGeneration } from "../../src/runs/shared/child-generation-guard.ts";
 
 // Barrier/SDK-operation fixtures only, NOT production enforcement consumer acks.
-function fixture(ready = true, makeResult?: () => any, virtual = false, extra: Record<string, unknown> = {}) {
+function fixture(ready = true, makeResult?: () => any, virtual = false, extra: Record<string, unknown> = {}, route?: (...args: any[]) => any) {
 	const { lease } = createChildAuthorityLease({ leaseId: "generation", identity: { parentSessionId: "parent", runId: "run", agent: "worker", index: 0, cwd: process.cwd() }, payload: {}, requiredConsumers: ["pi-sbx", "pi-guardian"], send: () => false, cancel: () => {}, requestTimeoutMs: 100 });
 	if (ready) withChildAuthority(lease, () => {
 		for (const id of lease.requiredConsumers) { claimChildAuthority(id, process.cwd()); acknowledgeChildAuthority(id); }
@@ -13,10 +13,14 @@ function fixture(ready = true, makeResult?: () => any, virtual = false, extra: R
 	const session = { sessionId: "sdk-session", model, agent: { state: { model } } };
 	let calls = 0, options: any;
 	const native = (_model: unknown, _context: unknown, value: unknown) => { calls++; options = value; return makeResult ? makeResult() : "same-native-result"; };
+	const physical = { provider: "physical", id: "routed", api: "faux", baseUrl: "https://physical.invalid", headers: { trace: "original" } };
+	const catalogue = { model: physical };
 	const runtime = { stream: native, streamSimple: native, streamDeferred: native, generateImages: native, classify: native,
+		resolveModel: async (...args: any[]) => route ? route(...args) : { model: physical, thinkingLevel: "off" },
+		getPhysicalModel: (provider: string, id: string) => provider === catalogue.model.provider && id === catalogue.model.id ? catalogue.model : undefined,
 		registerProvider() {}, refresh() {}, getAuth: async () => "owned-cleanup-auth" };
 	const guard = guardChildGeneration(runtime, lease, model); guard.bind(session);
-	return { lease, runtime, guard, model, session, calls: () => calls, options: () => options };
+	return { lease, runtime, guard, model, physical, catalogue, session, calls: () => calls, options: () => options };
 }
 
 describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () => {
@@ -107,16 +111,56 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		await assert.rejects(() => f.runtime.streamSimple(f.model, {}, {}).result(), /metadata/);
 	});
 
-	it("keeps SDK virtual routing tied to the current live routed agent model", () => {
-		const f = fixture(true, undefined, true); const physical = { provider: "physical", id: "routed" };
-		f.session.agent.state.model = physical;
-		try { assert.equal(f.runtime.streamSimple(physical, {}, {}), "same-native-result"); }
-		finally { f.guard.close(); }
-	});
-	it("refuses a virtual request that is not the live SDK-routed physical model", () => {
+	it("preserves virtual selection while using only the actual native routed physical reference", async () => {
 		const f = fixture(true, undefined, true);
-		assert.throws(() => f.runtime.streamSimple({ provider: "physical", id: "unselected" }, {}, {}), /not the bound/);
+		try {
+			const result = await f.runtime.resolveModel(f.model, [], {});
+			assert.equal(result.model, f.physical); assert.equal(f.session.agent.state.model, f.model);
+			assert.equal(f.runtime.streamSimple(result.model, {}, {}), "same-native-result");
+			// The same SDK-owned reference may be reused by native cache warming.
+			assert.equal(f.runtime.streamSimple(result.model, {}, {}), "same-native-result");
+		} finally { f.guard.close(); }
+	});
+	it("does not invent route provenance from physical agent state or a known catalogue name", () => {
+		const f = fixture(true, undefined, true); f.session.agent.state.model = f.physical;
+		assert.throws(() => f.runtime.streamSimple(f.physical, {}, {}), /not the bound.*native routed reference/);
 		assert.equal(f.calls(), 0);
+	});
+	it("does not admit copied physical references merely because a native route was observed", async () => {
+		const f = fixture(true, undefined, true); await f.runtime.resolveModel(f.model, [], {});
+		assert.throws(() => f.runtime.streamSimple({ ...f.physical }, {}, {}), /native routed reference/); assert.equal(f.calls(), 0);
+	});
+	it("refuses native routing before readiness and forwards cancellation to the existing router", async () => {
+		let called = false;
+		const f = fixture(false, undefined, true, {}, () => { called = true; });
+		await assert.rejects(() => f.runtime.resolveModel(f.model, [], {}), /consumer|acknowledged|not ready/); assert.equal(called, false);
+		const caller = new AbortController();
+		const g = fixture(true, undefined, true, {}, (_model, _messages, options) => { caller.abort(); assert.equal(options.signal.aborted, true); return { model: g.physical }; });
+		await assert.rejects(() => g.runtime.resolveModel(g.model, [], { signal: caller.signal }), /cancelled|lifetime ended/); assert.equal(g.calls(), 0);
+	});
+	it("pins routed metadata across generation hooks and later router resolutions", async () => {
+		for (const phase of ["headers", "route"]) {
+			const f = fixture(true, undefined, true); await f.runtime.resolveModel(f.model, [], {});
+			if (phase === "headers") {
+				f.runtime.streamSimple(f.physical, {}, { transformHeaders: async () => { f.physical.headers.trace = "changed"; return {}; } });
+				await assert.rejects(() => f.options().transformHeaders({}), /metadata changed/);
+			} else {
+				f.physical.baseUrl = "https://changed.invalid";
+				await assert.rejects(() => f.runtime.resolveModel(f.model, [], {}), /metadata changed/); assert.equal(f.calls(), 0);
+			}
+			assert.equal(f.lease.signal.aborted, true);
+		}
+	});
+	it("rejects an old routed reference after the native catalogue data changes", async () => {
+		const f = fixture(true, undefined, true); await f.runtime.resolveModel(f.model, [], {});
+		f.catalogue.model = { ...f.physical, baseUrl: "https://catalogue-changed.invalid" };
+		assert.throws(() => f.runtime.streamSimple(f.physical, {}, {}), /catalogue no longer matches/); assert.equal(f.calls(), 0);
+	});
+	it("requires native route output to equal the physical catalogue data and pins lookup identity", async () => {
+		const f = fixture(true, undefined, true, {}, () => ({ model: { ...f.physical, baseUrl: "https://substituted.invalid" } }));
+		await assert.rejects(() => f.runtime.resolveModel(f.model, [], {}), /physical SDK catalogue/); assert.equal(f.calls(), 0);
+		const g = fixture(true, undefined, true); g.runtime.getPhysicalModel = () => g.physical;
+		await assert.rejects(() => g.runtime.resolveModel(g.model, [], {}), /catalogue lookup changed/); assert.equal(g.calls(), 0);
 	});
 	it("rejects a late native stream result after session drift", async () => {
 		let change: () => void = () => {};
