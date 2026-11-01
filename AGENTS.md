@@ -211,13 +211,15 @@ authority. See `docs/guardian-costs.md`; estimates are not provider invoices.
 
 - `just check` — shell syntax plus the config templates.
 - `just check-child-composition` — fresh third-fork build/graph and both actual
-  registered consumers through SDK/Node IPC. OS backend, provider, reviewer and
-  human answers are explicit source fixtures; not deployed/OS/live acceptance.
+  registered consumers through SDK/Node IPC, including source/compiled detached
+  launch/startup/CLI/default factory/drain and negative cases. OS backend,
+  provider, reviewer and human answers are explicit fixtures; not deployed/OS/live
+  acceptance. The test reuses upstream isolated HOME/temp/runtime-environment setup.
 - `cd forks/pi-sbx && npx vitest run && npx tsc --noEmit`
 - `cd forks/pi-guardian && npm test && npm run check` (`node --test`).
   `test/headless.test.ts` crashes macOS Node26 with an assertion in libuv
   (`env_->execution_async_id()`), also reproduced on a clean `HEAD`. The full
-  **178-test suite including HTTP headless passes on Linux/arm64 Node24.22.2**
+  **215-test suite including HTTP headless passes on Linux/arm64 Node24.22.2**
   in an explicitly authorized `container` VM; see
   `docs/guardian-container-verification.md` and `scripts/verify-guardian-vm.mjs`.
   That is not a host Node26 fix, deployed acceptance or standing VM permission.

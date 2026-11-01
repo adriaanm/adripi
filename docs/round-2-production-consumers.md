@@ -705,6 +705,49 @@ remains the Guardian-source gate (no Guardian source changed here). All remainin
 #14/deployment/OS/Git/live-accounting/latency boundaries stay open. No live startup
 environment/config/toggle/runtime was changed, and no install/restart/push occurred.
 
+## Actual detached source and compiled CLI pipeline
+
+The combined gate now runs the **actual `executeAsyncSingle` launch builder**, its
+private config/startup commit, real Node bootstrap CLI/heavy execution entry,
+existing host-created IPC/controller, default factory/resource loader, both actual
+consumers and normal session/storage/drain/finalization. It does not pass the
+launch-shaped input driver or inject a replacement child factory into these cases.
+Four cases run from source and the same four from the copied **complete verified
+compiled graph**: success, unavailable SRT backend, broken actual Guardian import
+and terminal parent semantic denial. The compiled path uses its real JS bootstrap
+and locked runtime dependencies, not a source overlay. SDK **1.2.0** is observed
+inside the genuine credential-free faux provider, not assumed from package names.
+
+Success writes exact Unicode content through the actual native tool; both real
+roles are ready at both model calls. Startup negatives have zero model dispatch,
+no task mutation/reviewer call/scratch leak. Terminal denial has one ready model
+call, full exact denied content/directives, no mutation or later generation, and a
+failed task status. All eight await actual process-terminal `observed` proof and
+match its runner instance to persisted status; the private config is consumed.
+If the controller initialized, final runtime reset and owned scratch disposal are
+checked. The test deadline terminates/awaits only its own runner. Existing upstream
+isolated-temp/HOME/test-environment setup prevents shared/live Pi inputs or global
+artifact cleanup. No fixture claims/acks for either consumer: the faux provider
+only captures the existing opaque lease during extension load and observes readiness
+later (streaming intentionally does not retain ambient ALS scope).
+
+**22/22 composition cases** and four graph identity tests pass, including the
+previous14 source-composition cases. Full subagents remain **4,303 / 4,286 pass /
+17 skip / zero fail**, types; graph remains artifact `0bdb7d1beead1157` (384 inputs,
+17 exports,330 compiled,18 module-URL targets,768 files). Evidence:
+`.local/goal-consumers/full-detached-{matrix,compiled,final,gate,root}.log`.
+Initial probe failures were corrected readiness-observer fixture placement, not
+an authority bypass or an invented alternative runner.
+
+This closes the previously untested supported detached **source/compiled CLI**
+composition. It does not prove live installed SDK1.4 composition, public parent SDK
+tool-event dispatch, all bootstrap/executable/dependency/provider/auth/resource
+provenance, actual virtual routing, selected-tool lifetime fidelity or every negative
+matrix case. OS SRT, model provider, semantic verdict/usage and human answers remain
+explicit doubles. Deployment/broker/actual OS/Git/paid-cost/latency acceptance and
+#14's remaining source audit stay open; no install/restart/live policy/toggle/
+protected-content/runtime replacement/push occurred.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

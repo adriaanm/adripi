@@ -2,6 +2,7 @@
 // it uses the complete verified build, not an API facade/source-only overlay.
 // Actual SDK/registered consumers/runner/IPC/parent services; explicit SRT backend,
 // provider, reviewer verdict/usage and human-answer fixtures. NOT OS/live acceptance.
+import "../forks/pi-subagents/test/support/isolated-temp-root.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, watch, writeFileSync } from "node:fs";
@@ -17,6 +18,9 @@ import { createFilePolicy } from "../forks/pi-sbx/src/path-policy.ts";
 import { createChildAuthorityController } from "../forks/pi-subagents/src/api/child-authority.ts";
 import { registerRequiredChildExtensions } from "../forks/pi-subagents/src/api/required-child-extensions.ts";
 import { verifyBuiltArtifact } from "../forks/pi-subagents/scripts/verify-build.mjs";
+import { executeAsyncSingle } from "../forks/pi-subagents/src/runs/background/async-execution.ts";
+import { SUBAGENT_ASYNC_STARTED_EVENT, SUBAGENT_PROCESS_TERMINAL_EVENT, getAsyncConfigPath } from "../forks/pi-subagents/src/shared/types.ts";
+import { makeAgent } from "../forks/pi-subagents/test/support/helpers.ts";
 
 const repo = fileURLToPath(new URL("../", import.meta.url));
 const subagents = path.join(repo, "forks/pi-subagents");
@@ -37,6 +41,12 @@ function install(f, options) {
 	}
 	for (const dep of ["minimatch", "typebox"]) {
 		symlinkSync(realpathSync(path.join(repo, "forks/pi-sbx/node_modules", dep)), path.join(modules, dep), "dir");
+	}
+	// The compiled detached entry uses its locked runtime dependencies too;
+	// don't replace their implementations or repair/upgrade the dependency graph.
+	for (const dep of ["@js-temporal/polyfill", "acorn", "jiti", "undici", "yaml"]) {
+		mkdirSync(path.dirname(path.join(modules, dep)), { recursive: true });
+		symlinkSync(realpathSync(path.join(subagents, "node_modules", dep)), path.join(modules, dep), "dir");
 	}
 	mkdirSync(path.join(f.agentDir, "extensions"));
 	writeFileSync(path.join(f.agentDir, "extensions/sandbox.json"), "poison root profile must never be loaded by child");
@@ -120,6 +130,76 @@ async function run(f, steps, options = {}) {
 }
 const toolResults = report => report.result.messages.filter(message => message.role === "toolResult");
 const scratch = f => readdirSync(f.child).filter(name => name.startsWith("pi-sbx-scratch-"));
+
+for (const [label, options] of [
+	["success", {}], ["unavailable runtime", { runtimeUnavailable: true }],
+	["broken Guardian", { brokenGuardian: true }], ["semantic terminal denial", { semanticDeny: true }],
+	["compiled graph success", { compiled: true }], ["compiled unavailable runtime", { compiled: true, runtimeUnavailable: true }],
+	["compiled broken Guardian", { compiled: true, brokenGuardian: true }], ["compiled terminal denial", { compiled: true, semanticDeny: true }],
+]) {
+	test(`full detached bootstrap/default factory: ${label}, both actual consumers, observed process drain`, async () => {
+	const f = fixture(), layout = install(f, options), id = `production-detached-${Date.now().toString(36)}`;
+	const generations = path.join(f.root, "detached-generations.jsonl");
+	const provider = path.join(f.agentDir, "extensions/faux-provider.ts");
+	const nativeAuthority = pathToFileURL(path.join(f.agentDir, "npm/node_modules/pi-subagents/src/runs/shared/child-authority.js")).href;
+	writeFileSync(provider, `import {appendFileSync} from 'node:fs';
+import {fauxProvider,fauxAssistantMessage,fauxToolCall} from '@earendil-works/pi-ai';
+import {VERSION} from '@earendil-works/pi-coding-agent';
+import {captureChildAuthorityLease} from ${JSON.stringify(nativeAuthority)};
+export default function(api){const lease=captureChildAuthorityLease(${JSON.stringify(f.child)});const faux=fauxProvider({provider:'trusted',models:[{id:'model'}]});
+faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'detached.txt',content:${JSON.stringify(options.semanticDeny ? "FORBIDDEN" : "actual detached input 文🌍")}},{id:'detached-write'}),{stopReason:'toolUse'}),fauxAssistantMessage('Actual detached fixture completed.')].map(response=>()=>{lease.assertReady();appendFileSync(${JSON.stringify(generations)},JSON.stringify({ready:lease.requiredConsumers,sdk:VERSION})+'\\n');return response}));api.registerProvider(faux.provider);}`);
+	const policy = createFilePolicy({ filesystem: { denyRead: [], allowRead: [], allowWrite: [f.parent], denyWrite: [] },
+		mandatoryDenyRead: [path.join(f.agentDir, "auth.json")], mandatoryDenyWrite: [f.agentDir] });
+	const publication = publishChildAuthority({ sessionId: "parent", agentDir: f.agentDir, configDirName: ".pi",
+		getBaseline: () => ({ cwd: f.parent, policy, allowUnsandboxedCommands: false, environmentDeny: [],
+			runtime: { network: { allowedDomains: [], deniedDomains: [] }, filesystem: { denyRead: [], allowRead: [], allowWrite: [f.parent], denyWrite: [] } } }),
+		getHuman: () => ({ ask: async () => ({ kind: "unavailable", reason: "no test UI" }) }),
+		requiredExtensions: layout.extensions, loadRegistration: async () => ({ registerRequiredChildExtensions }),
+	});
+	let pid, terminal, observed = false, timedOut = false;
+	const closed = new Promise(resolve => { terminal = resolve; });
+	const timer = setTimeout(() => { timedOut = true; if (pid) process.kill(pid, "SIGKILL"); }, 45_000);
+	try {
+		await publication.ready;
+		const execute = options.compiled ? (await import(pathToFileURL(path.join(f.agentDir, "npm/node_modules/pi-subagents/src/runs/background/async-execution.js")).href)).executeAsyncSingle : executeAsyncSingle;
+		const launch = await execute(id, {
+			agent: "worker", task: "Run only the synthetic detached fixture.", agentConfig: makeAgent("worker", { model: "trusted/model", tools: ["read", "write", "edit", "bash", "ls", "grep", "find"] }),
+			ctx: { cwd: f.child, currentSessionId: "parent", projectTrusted: false, pi: { events: { emit(name, value) {
+				if (name === SUBAGENT_ASYNC_STARTED_EVENT && value.id === id) pid = value.pid;
+				if (name === SUBAGENT_PROCESS_TERMINAL_EVENT && value.runId === id) { observed = true; terminal(value); }
+			} } } },
+			artifactConfig: { enabled: false, includeInput: false, includeOutput: false, includeJsonl: false, includeMetadata: false, cleanupDays: 7 },
+			shareEnabled: false, sessionRoot: path.join(f.child, "sessions"), maxSubagentDepth: 1, acceptance: false,
+		});
+		assert.notEqual(launch.isError, true, JSON.stringify(launch));
+		const proof = await closed;
+		assert.equal(timedOut, false); assert.equal(proof.state, "observed");
+		const status = JSON.parse(readFileSync(path.join(launch.details.asyncDir, "status.json"), "utf8"));
+		assert.match(launch.details.launchContractDigest, /^[a-f0-9]{64}$/);
+		assert.equal(status.launchContractDigest, launch.details.launchContractDigest);
+		assert.equal(status.processTerminal.runnerProcessInstanceId, proof.runnerProcessInstanceId);
+		assert.equal(existsSync(getAsyncConfigPath(id)), false, "the native bootstrap must consume/unlink its private config");
+		const failedStartup = options.runtimeUnavailable || options.brokenGuardian;
+		assert.equal(status.state, failedStartup || options.semanticDeny ? "failed" : "complete", JSON.stringify(status));
+		assert.equal(existsSync(path.join(f.child, "detached.txt")), !failedStartup && !options.semanticDeny);
+		if (!failedStartup && !options.semanticDeny) assert.equal(readFileSync(path.join(f.child, "detached.txt"), "utf8"), "actual detached input 文🌍");
+		const calls = existsSync(generations) ? readFileSync(generations, "utf8").trim().split("\n").map(line => JSON.parse(line)) : [];
+		assert.equal(calls.length, failedStartup ? 0 : options.semanticDeny ? 1 : 2);
+		for (const call of calls) { assert.deepEqual([...call.ready].sort(), ["pi-guardian", "pi-sbx"]); assert.equal(call.sdk, "1.2.0"); }
+		assert.deepEqual(f.readPrompts().map(prompt => prompt.action.tool_name), failedStartup ? [] : ["write"]);
+		if (!failedStartup) {
+			assert.ok(f.readPrompts()[0].directives.some(item => item.text.includes("Never deploy")));
+			assert.equal(f.readPrompts()[0].action.input.content, options.semanticDeny ? "FORBIDDEN" : "actual detached input 文🌍");
+		}
+		if (layout.runtime().some(event => event.event === "initialize")) assert.equal(layout.runtime().at(-1).event, "reset");
+		assert.deepEqual(scratch(f), []);
+	} finally {
+		clearTimeout(timer);
+		if (pid && !observed) { try { process.kill(pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; } await closed; }
+		publication.dispose(); f.close();
+	}
+	});
+}
 
 test("both actual SDK consumers/real IPC: read/write/edit/Bash/output, full evidence, no duplicate held review, disposal", async () => {
 	const f = fixture();

@@ -298,3 +298,24 @@ pass. Graph **384 inputs / 17 exports / 330 compiled / 18 module-URL targets /
 OS/Git/live-cost gates in `docs/round-2-production-consumers.md`. Guardian source
 is unchanged since its current215/215 Node24 HTTP gate. No live startup/config/
 policy/toggle/runtime change, deployment, restart, protected-content access or push.
+
+## Real source/compiled detached CLI composition
+
+The root gate now adds eight actual detached launch cases: `executeAsyncSingle`
+through startup commit/native Node bootstrap/heavy runner/default SDK factory/both
+real consumers/real IPC/registered parent/drain/observed process finalization.
+Success, unavailable backend, broken Guardian and terminal denial run from source
+and the complete copied/verified compiled graph with its actual JS bootstrap and
+locked dependencies. No factory injection or fixture consumer claim/ack. The native
+faux provider observes SDK1.2/real role readiness using the lease retained at load.
+Config consumption, launch digest, runner-instance proof, exact content/directives,
+zero-dispatch startup failures, no mutation/next generation after denial, reset and
+scratch disposal are checked. Existing upstream isolated-temp/HOME setup is reused.
+
+Root composition **22/22** and four graph tests pass; source unit/types remain
+**4,303 / 4,286 pass / 17 skip / zero fail**; same artifact `0bdb7d1beead1157`.
+This is actual source/compiled CLI composition, not live installed SDK1.4/public
+parent SDK tool-event/complete bootstrap/resource/virtual/tool-lifetime/OS/deployed/
+paid-provider proof. Explicit doubles and outstanding gates/evidence are documented
+in `docs/round-2-production-consumers.md`. No live deployment/restart/config/toggle/
+protected-content/runtime change or push.
