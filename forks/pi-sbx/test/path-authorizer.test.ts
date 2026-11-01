@@ -107,6 +107,46 @@ describe("authorizePathAction", () => {
     expect(person.ask).not.toHaveBeenCalled();
   });
 
+  it("requires a current-parent decision for held delegated IO without synthesizing review metadata or a grant", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-auth-current-"));
+    const decide = vi.fn(async () => ({ kind: "allow" as const }));
+    const person = human({ kind: "allow", standing: false });
+    const result = await authorizePathAction({ surface: "write", target: join(root, "held"), reason: "held IO freshness" }, {
+      cwd: root, policy: policy(root), human: person, decide, requireCurrentDecision: true,
+    });
+    expect(result).toEqual({ kind: "allow", granted: false });
+    expect(decide).toHaveBeenCalledTimes(1); expect(person.ask).not.toHaveBeenCalled();
+  });
+
+  it("cannot consume a stale held allow after the current parent refuses", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-auth-stale-held-"));
+    const person = human({ kind: "allow", standing: false });
+    const result = await authorizePathAction({ surface: "read", target: join(root, "held"), reason: "held IO freshness" }, {
+      cwd: root, policy: policy(root), human: person, requireCurrentDecision: true,
+      decide: async () => ({ kind: "deny", reason: "the baseline changed" }),
+    });
+    expect(result).toEqual({ kind: "deny", reason: "the baseline changed" }); expect(person.ask).not.toHaveBeenCalled();
+  });
+
+  it("discards a pending current-parent held allow on cancellation", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-auth-cancel-held-"));
+    const cancel = new AbortController();
+    const result = await authorizePathAction({ surface: "read", target: join(root, "held"), reason: "held IO freshness" }, {
+      cwd: root, policy: policy(root), human: human({ kind: "allow", standing: false }), requireCurrentDecision: true, signal: cancel.signal,
+      decide: async () => { cancel.abort(); return { kind: "allow" }; },
+    });
+    expect(result.kind).toBe("cancelled");
+  });
+
+  it("keeps mandatory exclusions final before any forced current-parent request", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-sbx-auth-current-lock-")), target = join(root, "locked");
+    const decide = vi.fn(async () => ({ kind: "allow" as const }));
+    const result = await authorizePathAction({ surface: "read", target, reason: "held IO freshness" }, {
+      cwd: root, policy: policy(root, { mandatoryDenyRead: [target] }), human: human({ kind: "allow", standing: false }), decide, requireCurrentDecision: true,
+    });
+    expect(result.kind).toBe("deny"); expect(decide).not.toHaveBeenCalled();
+  });
+
   it("passes an allowed one-call request through the broker with its action context", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-sbx-auth-grant-"));
     const target = join(mkdtempSync(join(tmpdir(), "pi-sbx-auth-grant-out-")), "x");

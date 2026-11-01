@@ -1,4 +1,4 @@
-import { decideSandboxException } from "./broker.ts";
+import { decideSandboxException, type DecideOptions } from "./broker.ts";
 import type { HumanChannel, HumanRequest } from "./human-channel.ts";
 import { canRead, canWrite, matchesPolicyPath, type FilePolicy } from "./path-policy.ts";
 
@@ -53,8 +53,15 @@ export interface PathAuthorizationContext {
   human: Pick<HumanChannel, "ask">;
   /** The actual context signal for this event, not another call's signal. */
   signal?: AbortSignal;
-  /** Injected in tests; production asks the published Guardian broker. */
-  decide?: typeof decideSandboxException;
+  /** Root asks the published broker; a child injects its actual bound parent
+   * route. Only the terminal decision matters here; do not synthesize a review
+   * record or cost to adapt an already-held mechanical parent decision. */
+  decide?: (request: DecideOptions) => Promise<
+    { kind: "allow" } | { kind: "defer" } | { kind: "deny" | "deferred" | "cancelled"; reason: string }
+  >;
+  /** A delegated native/log action must verify the current parent even when
+   * held locally. This only removes the local fast-path, never admits scope. */
+  requireCurrentDecision?: boolean;
   /**
    * An immutable delegated ceiling. When present, an action must be admitted by
    * both `policy` and `ceiling` to skip review; the ceiling can only narrow.
@@ -151,7 +158,8 @@ export async function authorizePathAction(
     const feasibility = pathGrantFeasibility(action, context.cwd, context.ceiling);
     if (!feasibility.ok) return { kind: "deny", reason: `${feasibility.reason} in the delegated child policy` };
   }
-  if (pathActionAllowed(action, context.cwd, context.policy) && admittedByCeiling(action, context)) {
+  const held = pathActionAllowed(action, context.cwd, context.policy) && admittedByCeiling(action, context);
+  if (held && !context.requireCurrentDecision) {
     return { kind: "allow", granted: false };
   }
   const feasibility = pathGrantFeasibility(action, context.cwd, context.policy);
@@ -170,8 +178,8 @@ export async function authorizePathAction(
     agentName: action.agentName,
   });
   if (context.signal?.aborted) return cancelled();
-  if (decision.kind === "deny") return { kind: "deny", reason: decision.reason };
-  if (decision.kind === "allow" && context.admission !== "always") return { kind: "allow", granted: true };
+  if (decision.kind === "deny" || decision.kind === "deferred" || decision.kind === "cancelled") return { kind: decision.kind, reason: decision.reason };
+  if (decision.kind === "allow" && context.admission !== "always") return { kind: "allow", granted: !held };
 
   const request: HumanRequest = {
     surface: action.surface,

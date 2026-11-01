@@ -1,6 +1,10 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { deriveChildPolicy } from "../src/child-authority.ts";
+import { createChildAuthorityLease, withChildAuthority } from "../../pi-subagents/src/runs/shared/child-authority.ts";
+import * as childApi from "../../pi-subagents/src/api/child-authority.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BashOperations, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
@@ -993,6 +997,98 @@ describe("registered bash tool as one execution seam", () => {
       .rejects.toThrow(/excludedCommands is retired/);
     expect(state.localCalls).toHaveLength(0);
     expect(broker.review).not.toHaveBeenCalled();
+  });
+});
+
+describe("registered production child sandbox entry (actual API/SDK backends, mocked SRT and Guardian acknowledgment)", () => {
+  async function childFixture(run: (fixture: { tool: BashTool; ctx: ExtensionContext; tools: FakePi["tools"]; requests: Array<{ surface: string; target: string }>; handlers: FakePi["handlers"] }) => Promise<void>, options: { available?: boolean } = {}) {
+    const keys = [Symbol.for("pi-subagents.child-authority-lease.v1"), Symbol.for("pi-subagents.child-authority-runner.v1")];
+    const globals = globalThis as Record<PropertyKey, unknown>;
+    const saved = keys.map(key => Object.getOwnPropertyDescriptor(globals, key)); keys.forEach(key => delete globals[key]);
+    const { root: fixtureRoot, agentDir } = setup();
+    const root = join(fixtureRoot, "child"); mkdirSync(root); projectRoot = root;
+    const launcher = join(agentDir, "npm/node_modules/pi-subagents"); mkdirSync(launcher, { recursive: true });
+    writeFileSync(join(launcher, "package.json"), JSON.stringify({ type: "module", exports: { "./child-authority": "./authority.js" } }));
+    writeFileSync(join(launcher, "authority.js"), `export * from ${JSON.stringify(new URL("../../pi-subagents/src/api/child-authority.ts", import.meta.url).href)};`);
+    // Real child dispatch must not consult this ambient profile at all.
+    writeFileSync(join(agentDir, "extensions/sandbox.json"), "poison ambient root profile");
+    const baseline = { cwd: root, allowUnsandboxedCommands: true, environmentDeny: ["SYNTHETIC_SECRET"],
+      runtime: { network: { allowedDomains: [], deniedDomains: [] }, filesystem: { allowWrite: [root], denyRead: [], allowRead: [], denyWrite: [] } },
+      policy: { allowWrite: [root], denyRead: [], allowRead: [], denyWrite: [], mandatoryDenyRead: [join(agentDir, "auth.json")], mandatoryDenyWrite: [agentDir] } };
+    const payload = deriveChildPolicy({ agentDir, configDirName: ".pi", identity: { cwd: root }, baseline }).payload;
+    const requests: Array<{ surface: string; target: string }> = [];
+    const handle = createChildAuthorityLease({ leaseId: "registered-entry", identity: { parentSessionId: "parent", runId: "run", agent: "worker", index: 0, cwd: root }, payload,
+      requiredConsumers: ["pi-sbx", "pi-guardian"], requestTimeoutMs: 1000, cancel() {},
+      send(id, action) { requests.push(action); queueMicrotask(() => handle.deliverDecision(id, { outcome: "allow" })); return true; } });
+    const extension = fakeExtension({ "no-sandbox": true, "trust-sandbox-config": true });
+    const owner = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+    (extension.pi as any).getAllTools = () => extension.tools.map(tool => ({ ...tool, sourceInfo: { path: owner } }));
+    const ctx = context({ hasUI: false });
+    state.realSdkTools = true; state.sandboxAvailable = options.available ?? true;
+    try {
+      await withChildAuthority(handle.lease, async () => {
+        await sandboxExtension(extension.pi);
+        expect(extension.pi.registerFlag).not.toHaveBeenCalled(); expect(extension.commands.size).toBe(0);
+        childApi.claimChildAuthority("pi-guardian", root); childApi.acknowledgeChildAuthority("pi-guardian"); // Explicit fixture, not composition.
+        if (!state.sandboxAvailable) {
+          await expect(extension.handlers.get("session_start")!({ type: "session_start" }, ctx)).rejects.toThrow(/unavailable/);
+          expect(handle.lease.signal.aborted).toBe(true); return;
+        }
+        await extension.handlers.get("session_start")!({ type: "session_start" }, ctx);
+        expect(() => handle.lease.assertReady()).not.toThrow();
+        await run({ tool: extension.tools.find(tool => tool.name === "bash") as unknown as BashTool, ctx, tools: extension.tools, requests, handlers: extension.handlers });
+      });
+    } finally {
+      await extension.handlers.get("session_shutdown")?.({ type: "session_shutdown" }); handle.lease.dispose();
+      keys.forEach((key, index) => { if (saved[index]) Object.defineProperty(globals, key, saved[index]!); else delete globals[key]; });
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  }
+
+  it("claims/acks actual installed adapters without root config, flags, command or local reviewer", async () => {
+    await childFixture(async ({ tools, requests, ctx }) => {
+      expect(tools.map(tool => tool.name).sort()).toEqual(["bash", "edit", "find", "grep", "ls", "read", "write"]);
+      const write = tools.find(tool => tool.name === "write") as unknown as BashTool;
+      await write.execute("write", { path: "native.txt", content: "actual SDK" }, undefined, undefined, ctx);
+      expect(readFileSync(join(projectRoot, "native.txt"), "utf8")).toBe("actual SDK");
+      expect(requests.map(request => request.surface)).toEqual(["write"]);
+    });
+  });
+  it("uses the real SDK Bash and independent output-file parent admission while ignoring no-sandbox flags", async () => {
+    await childFixture(async ({ tool, ctx, requests }) => {
+      const result = await invoke(tool, ctx, "child-capture", { command: "printf child-native", output_file: "child.log" });
+      expect(readFileSync(join(projectRoot, "child.log"), "utf8")).toBe("child-native");
+      expect(details(result).outputCapture).toMatchObject({ complete: true, exitCode: 0 });
+      expect(state.sandboxCalls).toHaveLength(1); expect(requests.map(request => request.surface)).toEqual(["write"]);
+    });
+  });
+  it("keeps scoped grants in one SRT snapshot and never lends them to native tools", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "sbx-child-scoped-"));
+    try { await childFixture(async ({ tool, ctx, requests }) => {
+      const baseline = state.runtimeCurrent;
+      await invoke(tool, ctx, "scope", { command: "printf scoped-child", sandbox_permissions: "with_additional_permissions", justification: "one directory", additional_permissions: { file_system: { write: [outside] } } });
+      expect(state.runtimeCurrent).toEqual(baseline);
+      expect(requests).toEqual([expect.objectContaining({ surface: "write", target: canonicalizeTarget(outside, ctx.cwd) })]);
+    }); } finally { rmSync(outside, { recursive: true, force: true }); }
+  });
+  it("delegates exact host admission without publishing a local broker or saving a standing rule", async () => {
+    await childFixture(async ({ tool, ctx, requests }) => {
+      const result = await invoke(tool, ctx, "host", escalateHost("printf host-child"));
+      expect(contentText(result)).toContain("host-child");
+      expect(requests).toEqual([expect.objectContaining({ surface: "command", target: "printf host-child" })]);
+      expect(state.sandboxCalls).toHaveLength(0);
+    });
+  });
+  it("refuses unavailable runtime without acknowledging or taking the host fallback", async () => {
+    await childFixture(async () => { throw new Error("unavailable child ran"); }, { available: false });
+    expect(state.sandboxCalls).toHaveLength(0); expect(state.localCalls).toHaveLength(0);
+  });
+  it("blocks unknown tools and unreviewed user_bash even after adapter activation", async () => {
+    await childFixture(async ({ handlers, ctx }) => {
+      expect(await handlers.get("tool_call")!({ toolName: "unsafe_mcp" }, ctx)).toMatchObject({ block: true });
+      expect(await handlers.get("user_bash")!({ command: "printf forbidden" }, ctx)).toMatchObject({ result: { exitCode: 1 } });
+      expect(state.sandboxCalls).toHaveLength(0);
+    });
   });
 });
 

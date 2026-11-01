@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { Type } from "typebox";
-import type { AgentToolResult, BashToolDetails, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, BashOperations, BashToolDetails, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   CONFIG_DIR_NAME,
   createBashToolDefinition,
@@ -9,6 +9,10 @@ import {
   hasTrustRequiringProjectResources,
 } from "@earendil-works/pi-coding-agent";
 import { SandboxRuntimeConfigSchema, type NetworkHostPattern } from "@anthropic-ai/sandbox-runtime";
+import { mayHaveChildAuthorityContext } from "./child-consumer-api.ts";
+import { registerChildSandbox, type ChildSandbox } from "./child-sandbox.ts";
+import { registerChildNativeTools } from "./child-native-tools.ts";
+import { childExecutionEnvironment } from "./child-config.ts";
 import { decideWithParentRoute } from "./action-authorizer.ts";
 import { createSandboxedBashOperations } from "./bash-operations.ts";
 import {
@@ -44,7 +48,7 @@ import { HumanChannel } from "./human-channel.ts";
 import { registerFileGate } from "./file-gate.ts";
 import { buildHardeningPaths } from "./hardening.ts";
 import { SandboxController, RuntimeSandboxManager } from "./manager.ts";
-import { authorizePathAction } from "./path-authorizer.ts";
+import { authorizePathAction, type PathAction } from "./path-authorizer.ts";
 import { canonicalizeTarget, createFilePolicy, resolveTarget, type FilePolicy } from "./path-policy.ts";
 import { createScratchpad, SCRATCH_ENV, sweepScratchpads, withScratchpad, type Scratchpad } from "./scratch.ts";
 import { SandboxSettingsComponent, type RuleKind, type SandboxSettingId } from "./settings-ui.ts";
@@ -132,17 +136,23 @@ function mandatoryRules(kind: RuleKind, active: EffectiveSandboxConfig): string[
 type ToolResult = AgentToolResult<unknown>;
 
 export default function sandboxExtension(pi: ExtensionAPI) {
-  pi.registerFlag("no-sandbox", {
-    description: "Disable OS-level command sandboxing for this process",
-    type: "boolean",
-    default: false,
-  });
-  pi.registerFlag("trust-sandbox-config", {
-    description: "Allow project .pi/sandbox.json in non-interactive mode",
-    type: "boolean",
-    default: false,
-  });
+  if (mayHaveChildAuthorityContext()) return registerChildSandbox(pi, () => installSandbox(pi), child => installSandbox(pi, child));
+  return installSandbox(pi);
+}
 
+function installSandbox(pi: ExtensionAPI, child?: ChildSandbox) {
+  if (!child) {
+    pi.registerFlag("no-sandbox", {
+      description: "Disable OS-level command sandboxing for this process",
+      type: "boolean",
+      default: false,
+    });
+    pi.registerFlag("trust-sandbox-config", {
+      description: "Allow project .pi/sandbox.json in non-interactive mode",
+      type: "boolean",
+      default: false,
+    });
+  }
   const controller = new SandboxController();
   const violations = new ViolationTracker();
   // One bash execution at a time: a scoped command installs a temporary policy
@@ -164,7 +174,11 @@ export default function sandboxExtension(pi: ExtensionAPI) {
 
   const policyPath = () => getProjectPolicyService()?.path
     ?? join(currentContext?.cwd ?? process.cwd(), CONFIG_DIR_NAME, "guardian.json");
-  let humanChannel = new HumanChannel(() => currentContext, policyPath);
+  let humanChannel = child ? undefined : new HumanChannel(() => currentContext, policyPath);
+  const rootHuman = (): HumanChannel => {
+    if (!humanChannel) throw new Error("a child cannot create or borrow a local human permission channel");
+    return humanChannel;
+  };
 
   /**
    * The baseline native-file policy. Both the native gate and command-scoped
@@ -212,6 +226,11 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     if (signal?.aborted) return false;
     const hostname = host.host.includes(":") && !host.host.startsWith("[") ? `[${host.host}]` : host.host;
     const target = `${hostname}:${host.port ?? "*"}`;
+    if (child) {
+      if (!currentContext || !host.port) return false;
+      try { return (await child.request({ surface: "network", target, reason: "Admit this one delegated sandbox connection" }, currentContext, signal)).outcome === "allow"; }
+      catch { return false; }
+    }
     const rule = projectPolicyRule("network", target);
     // Snapshot the standing rule only if this connection actually reaches the
     // human, and still before the prompt.
@@ -226,7 +245,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
         prepared = prepareStandingRule(rule);
         return prepared.ok ? rule : undefined;
       },
-    }, { cwd: currentContext?.cwd ?? process.cwd(), human: humanChannel, signal });
+    }, { cwd: currentContext?.cwd ?? process.cwd(), human: rootHuman(), signal });
     if (route.kind === "allow") {
       if (route.standing && prepared) saveStandingRule(prepared);
       return true;
@@ -397,18 +416,31 @@ export default function sandboxExtension(pi: ExtensionAPI) {
   };
 
   function localTool(cwd: string, capture?: OutputCapture) {
+    if (child) {
+      const backend = createLocalBashOperations({ shellPath: child.shell(currentContext!) });
+      const operations: BashOperations = { exec: async (...args) => {
+        child.assertActive(currentContext!);
+        const result = await backend.exec(...args);
+        child.assertActive(currentContext!);
+        return result;
+      } };
+      return createBashToolDefinition(cwd, { operations: capture ? capture.wrap(operations) : operations, exposeSessionEnvironment: false,
+        spawnHook: context => ({ ...context, env: childExecutionEnvironment(context.env, config!.environment.deny) }) });
+    }
     return createBashToolDefinition(cwd, capture ? { operations: capture.wrap(createLocalBashOperations()) } : undefined);
   }
 
   function sandboxedTool(cwd: string, capture?: OutputCapture) {
-    const operations = createSandboxedBashOperations();
+    const operations = createSandboxedBashOperations(child ? { shellPath: child.shell(currentContext!), assertAuthority: () => child.assertActive(currentContext!) } : undefined);
     return createBashToolDefinition(cwd, {
       exposeSessionEnvironment: false,
       operations: capture ? capture.wrap(operations) : operations,
       // Tell sandboxed commands where they may write without an exception.
       spawnHook: (context) => ({
         ...context,
-        env: { ...context.env, ...(scratchpad ? { [SCRATCH_ENV]: scratchpad.dir } : {}) },
+        env: child
+          ? childExecutionEnvironment({ ...context.env, ...(scratchpad ? { [SCRATCH_ENV]: scratchpad.dir } : {}) }, config!.environment.deny)
+          : { ...context.env, ...(scratchpad ? { [SCRATCH_ENV]: scratchpad.dir } : {}) },
       }),
     });
   }
@@ -458,6 +490,13 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     if (!activeConfig.allowUnsandboxedCommands) {
       return refusal("unsandboxed commands are disabled by sandbox policy (allowUnsandboxedCommands is false)");
     }
+    if (child) {
+      if (plan.prefixRule) return refusal("a delegated host action cannot save a standing permission");
+      const decision = await child.request({ surface: "command", target: plan.command.command, reason: plan.justification }, ctx, signal);
+      if (decision.outcome !== "allow") return refusal(decision.rationale ?? `parent host decision: ${decision.outcome}`);
+      child.assertActive(ctx);
+      return localTool(ctx.cwd, capture).execute(id, { command: plan.command.command, timeout: params.timeout }, signal, onUpdate, ctx);
+    }
     const standingRule = plan.prefixRule ? projectPolicyRule("command", plan.prefixRule) : undefined;
     const prepared = standingRule ? prepareStandingRule(standingRule) : undefined;
     const route = await decideWithParentRoute({
@@ -467,7 +506,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       reason: plan.justification,
       command: plan.command.command,
       offerStandingRule: () => (prepared?.ok ? standingRule : undefined),
-    }, { cwd: ctx.cwd, human: humanChannel, signal });
+    }, { cwd: ctx.cwd, human: rootHuman(), signal });
     // A human refusal stays attributed to the human; only a rule/reviewer refusal
     // is Guardian's.
     if (route.kind === "deny") {
@@ -481,7 +520,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       standingApproved = route.standing;
     } else if (standingRule) {
       // Guardian allowed this call; saving a rule is still the human's decision.
-      if (prepared?.ok) standingApproved = await humanChannel.confirmStanding(standingRule, signal);
+      if (prepared?.ok) standingApproved = await rootHuman().confirmStanding(standingRule, signal);
       else if (prepared) ctx.ui.notify(`Standing permission not saved: ${prepared.reason}`, "warning");
     }
     if (signal?.aborted) return refusal("the command was cancelled before it started");
@@ -499,6 +538,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       // If rollback itself fails, no later command may use a possibly widened
       // singleton. Poison dispatch before attempting cleanup, even if reset fails.
       configError = `Scoped sandbox policy could not be restored: ${error instanceof Error ? error.message : String(error)}`;
+      child?.poison(configError);
       await controller.reset();
       throw new Error(configError);
     }
@@ -535,7 +575,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       // Decide the path the operation will actually address; the lexical spelling
       // is still checked for mandatory locks.
       const { resolved, canonical } = requested;
-      const authorization = await authorizePathAction({
+      const action: PathAction = {
         surface: requested.surface,
         target: canonical,
         aliases: resolved === canonical ? [] : [resolved],
@@ -543,7 +583,9 @@ export default function sandboxExtension(pi: ExtensionAPI) {
         origin: "tool",
         command: params.command,
         violation: "the command-local sandbox profile does not include this path",
-      }, { cwd: ctx.cwd, policy, human: humanChannel, signal });
+      };
+      const authorization = child ? await child.authorizePath(action, ctx, signal ?? child.signal)
+        : await authorizePathAction(action, { cwd: ctx.cwd, policy, human: rootHuman(), signal });
       if (authorization.kind === "allow") continue;
       if (authorization.kind === "deferred") return deferred(authorization.reason);
       if (authorization.kind === "cancelled") return refusal(authorization.reason);
@@ -592,6 +634,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     onUpdate: Parameters<typeof baseBash.execute>[3],
     ctx: ExtensionContext,
   ): Promise<ToolResult> => {
+    child?.assertActive(ctx);
     const unknown = Object.keys(params as unknown as Record<string, unknown>)
       .filter((key) => !CANONICAL_BASH_PARAMS.has(key));
     if (unknown.length > 0) {
@@ -610,17 +653,19 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       try { validateOutputFile(params.output_file); }
       catch (error) { return refusal(error instanceof Error ? error.message : String(error)); }
       if (configError || !config) return refusal("output capture requires a valid initialized baseline file policy");
-      capture = new OutputCapture(params.output_file, ctx.cwd);
-      const authorization = await authorizePathAction({
+      capture = new OutputCapture(params.output_file, ctx.cwd, child ? () => child.assertActive(ctx) : undefined);
+      const action: PathAction = {
         surface: "write", target: capture.target, aliases: [capture.alias],
         reason: "Capture this command's full output to one new file; this does not widen the command's sandbox",
         origin: "tool", command: params.command,
-      }, { cwd: ctx.cwd, policy: filePolicyFor(config), human: humanChannel, signal });
+      };
+      const authorization = child ? await child.authorizePath(action, ctx, signal ?? child.signal)
+        : await authorizePathAction(action, { cwd: ctx.cwd, policy: filePolicyFor(config), human: rootHuman(), signal });
       if (authorization.kind === "deferred") return deferred(authorization.reason);
       if (authorization.kind !== "allow") return refusal(`output_file was not authorized: ${authorization.reason}`);
     }
     const execute = async (): Promise<ToolResult> => {
-      if (Boolean(pi.getFlag("no-sandbox"))) {
+      if (!child && Boolean(pi.getFlag("no-sandbox"))) {
         const input = { command: params.command, timeout: params.timeout };
         return localTool(ctx.cwd, capture).execute(id, input, signal, onUpdate, ctx);
       }
@@ -628,6 +673,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       if (!config) throw new Error("Sandbox is not initialized yet; retry after session start");
       const activeConfig = config;
       if (!sessionEnabled) {
+        if (child) return refusal("the actual child sandbox is disabled; no local fallback is permitted");
         const input = { command: params.command, timeout: params.timeout };
         return localTool(ctx.cwd, capture).execute(id, input, signal, onUpdate, ctx);
       }
@@ -666,6 +712,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
       scratchpad
         ? `Write temporary files under ${scratchpad.dir} (also ${SCRATCH_ENV}); it is writable inside the sandbox and removed when the session ends.`
         : "Write temporary files inside the project; paths outside it may need an exception.",
+      ...(child ? ["Delegated exceptions use the actual parent authority. Do not supply prefix_rule or change local sandbox settings; a semantic allow never grants file, output-log or full-host scope."] : []),
       "When a command fails because of the sandbox, re-run the same bash call with the request attached: `sandbox_permissions: \"with_additional_permissions\"`, `additional_permissions.file_system.{read,write}`, and a `justification` (widened for that command only), or `sandbox_permissions: \"require_escalated\"` when it must run on the host (host credentials, host services). `prefix_rule` may propose a narrow standing rule such as [\"git\", \"push\"], but only the user can save it.",
       "There is no separate exception tool: network destinations are asked per connection by the proxy. Bash path/host exceptions belong to this bash call; native Read/Write/Edit keep their own tool and request exact-target authority through the same decision service. Never rewrite a denied native operation as Bash.",
       "Local git work (status, diff, log, commit, branch, merge, rebase, stash) runs sandboxed; only network git that authenticates with a remote (clone, fetch, pull, push, ls-remote, submodule --remote) and gh/ssh cannot. For those, re-run with `sandbox_permissions: \"require_escalated\"` and a `justification`, and never ask for read access to gh's config or ~/.ssh — permanently denied.",
@@ -683,9 +730,10 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     async execute(id, params, signal, onUpdate, ctx) {
       return executions.run(async () => {
         currentContext = ctx;
-        executionSignal = signal;
+        executionSignal = child ? AbortSignal.any([child.signal, ...(signal ? [signal] : []), ...(ctx.signal ? [ctx.signal] : [])]) : signal;
         try {
-          return await dispatch(id, params, signal, onUpdate, ctx);
+          child?.assertActive(ctx);
+          return await dispatch(id, params, executionSignal, onUpdate, ctx);
         } finally {
           executionSignal = undefined;
         }
@@ -693,13 +741,16 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     },
   });
 
+  if (child) registerChildNativeTools(pi, child);
+
   // Sandbox conventions are not trained knowledge; keep them in the prompt while
   // the sandbox is on, and leave it alone when the sandbox is off.
   pi.on("before_agent_start", (event) => {
     if (!sessionEnabled || configError) return;
     const section = sandboxGuidance({
       scratchDir: scratchpad?.dir,
-      projectPolicyPath: ".pi/guardian.json (project policy, user-owned)",
+      projectPolicyPath: child ? undefined : ".pi/guardian.json (project policy, user-owned)",
+      delegated: Boolean(child),
     });
     // Pi 1.x exposes structured `sections` (cache-friendly delta); older hosts
     // only have the append slot. Support both without narrowing the vendored types.
@@ -716,6 +767,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
   });
 
   pi.on("user_bash", (event, ctx) => {
+    if (child) return { result: { output: "Delegated user_bash is unavailable; no unreviewed command path is installed", exitCode: 1, cancelled: false, truncated: false } };
     if (Boolean(pi.getFlag("no-sandbox"))) return;
     if (!sessionStarted) {
       return {
@@ -787,12 +839,12 @@ export default function sandboxExtension(pi: ExtensionAPI) {
   // lives only in the SRT runtime for the duration of one serialized bash call,
   // so `write`/`edit`/`read` can never observe another execution's transient
   // widening. The event's own context decides cwd and cancellation.
-  registerFileGate(pi, {
+  if (!child) registerFileGate(pi, {
     getPolicy: (ctx) => {
       if (!config) return fallbackGatePolicy(ctx.cwd);
       return { policy: filePolicyFor(config), enabled: sessionEnabled };
     },
-    getHuman: () => humanChannel,
+    getHuman: () => rootHuman(),
   });
 
   /** A session without a stable host id cannot bind authority; publish nothing. */
@@ -848,7 +900,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
             environmentDeny: config.environment.deny,
           };
         },
-        getHuman: () => humanChannel,
+        getHuman: () => rootHuman(),
       });
       childAuthority = publication;
       void publication.ready.catch((error: unknown) => {
@@ -870,11 +922,32 @@ export default function sandboxExtension(pi: ExtensionAPI) {
   };
 
   pi.on("session_start", async (_event, ctx) => {
+    if (child) {
+      sessionStarted = false; currentContext = ctx;
+      try {
+        await executions.close(); executions = new ExecutionQueue();
+        if (!controller.isSupported() || controller.checkDependencies().errors.length) throw new Error("the actual child sandbox runtime/dependencies are unavailable");
+        await child.prepare(ctx);
+        if (!child.config || !child.scratchpad) throw new Error("child policy/scratch preparation is incomplete");
+        config = child.config; scratchpad = child.scratchpad; configError = undefined;
+        await controller.initialize(config, networkAsk);
+        if (!controller.canRunSandboxed()) throw new Error("the actual child sandbox controller did not become active");
+        sessionEnabled = true;
+        child.activate(ctx, controller.canRunSandboxed());
+        sessionStarted = true;
+      } catch (error) {
+        configError = error instanceof Error ? error.message : String(error); sessionEnabled = false;
+        child.poison(configError);
+        await controller.reset(); await scratchpad?.dispose();
+        throw error;
+      }
+      return;
+    }
     sessionStarted = false;
     // Already-running children must stop even if reinitialization fails before
     // reloadConfig (which would otherwise perform the eventual revocation).
     childAuthority?.revoke("the parent session is initializing; previous child authority is revoked");
-    humanChannel.shutdown();
+    humanChannel?.shutdown();
     sessionEnabledOverride = undefined;
     currentContext = ctx;
     ctx.ui.setStatus("sandbox", undefined);
@@ -902,9 +975,10 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     // Keep unavailable guard intent throughout asynchronous teardown. Removing
     // the slot/registration here would reopen bare launch while the queue drains.
     sessionStarted = false;
+    child?.close();
     childAuthority?.revoke("the parent session is shutting down");
     currentContext?.ui.setStatus("sandbox", undefined);
-    humanChannel.shutdown();
+    humanChannel?.shutdown();
     await executions.close();
     violations.stop();
     currentContext = undefined;
@@ -919,7 +993,7 @@ export default function sandboxExtension(pi: ExtensionAPI) {
     childAuthority = undefined;
   });
 
-  pi.registerCommand("sandbox", {
+  if (!child) pi.registerCommand("sandbox", {
     description: "Inspect and manage the command sandbox",
     handler: async (rawArgs, ctx) => {
       currentContext = ctx;

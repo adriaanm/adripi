@@ -1,6 +1,8 @@
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { pathGrantFeasibility } from "../src/path-authorizer.ts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { deriveChildPolicy } from "../src/child-authority.ts";
 import { CHILD_BOOTSTRAP_ENV_DENY, childExecutionEnvironment, compileChildConfig } from "../src/child-config.ts";
@@ -65,6 +67,29 @@ describe("child runtime compiler (data translation, not readiness/OS proof)", ()
     expect(canWrite(join(root, "sibling"), cwd, policy)).toBe(false);
     expect(canWrite(join(cwd, ".pi/guardian.json"), cwd, policy)).toBe(false);
     expect(canWrite(join(cwd, "blocked"), cwd, policy)).toBe(false);
+  });
+
+  it("also locks the actual SDK agent namespace when it differs from the parent's prepared agent directory", () => {
+    const actual = join(root, "different-agent"); mkdirSync(actual);
+    const config = compileChildConfig(payload, cwd, actual);
+    const policy = createFilePolicy({ filesystem: config.runtime.filesystem, credentialFiles: config.runtime.credentials?.files,
+      mandatoryDenyRead: config.hardening.denyRead, mandatoryDenyWrite: config.hardening.mandatoryDenyWrite });
+    for (const agent of [actual, agentDir]) {
+      expect(pathGrantFeasibility({ surface: "read", target: join(agent, "auth.json"), reason: "not grantable" }, cwd, policy).ok).toBe(false);
+      expect(pathGrantFeasibility({ surface: "write", target: join(agent, "settings.json"), reason: "not grantable" }, cwd, policy).ok).toBe(false);
+    }
+  });
+
+  it("never admits a write exception against the actual loaded enforcement package", () => {
+    const config = compileChildConfig(payload, cwd, agentDir);
+    const policy = createFilePolicy({ filesystem: config.runtime.filesystem, credentialFiles: config.runtime.credentials?.files,
+      mandatoryDenyRead: config.hardening.denyRead, mandatoryDenyWrite: config.hardening.mandatoryDenyWrite });
+    const ownCode = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+    expect(pathGrantFeasibility({ surface: "write", target: ownCode, reason: "not delegated" }, cwd, policy).ok).toBe(false);
+  });
+
+  it("refuses a relative actual agent directory rather than rebasing authority", () => {
+    expect(() => compileChildConfig(payload, cwd, "relative-agent")).toThrow(/absolute actual agent/);
   });
 
   it("carries only DENY environment names and removes shell bootstrap inputs before the outer backend", () => {

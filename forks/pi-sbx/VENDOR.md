@@ -170,9 +170,11 @@ routes in Git history are retired, not additional supported APIs.
     registered native-gate grant/deny/headless/cancellation/isolation coverage,
     helper/config/lifecycle and actual registered provider coverage, plus composed
     native-launch/real-IPC/controlled-consumer/broker/human tests. Current source:
-    **366 tests / 28 files**, typecheck/root checks pass, including six new scratch
-    scope/cleanup cases, four scoped
-    target/snapshot regressions, 12 child-config translation cases, seven installed
+    **428 tests / 30 files**, typecheck/root checks pass, including 24 actual-SDK
+    native fence cases, 21 real-API consumer binding cases, six registered entry
+    cases with SDK backends/mock SRT/Guardian acknowledgment, four held-current
+    path checks, four output-operation freshness cases, 15 compiler cases, six new scratch scope/cleanup cases, four scoped
+    target/snapshot regressions, seven installed
     API bridge cases, 22 capture
     regressions, 58 strict-policy/producer cases and the effective-HOME stamp
     regression (`.local/goal-child-policy/`). The scratch-exclusion fixture now records its actual allocation
@@ -219,6 +221,51 @@ routes in Git history are retired, not additional supported APIs.
     and prefix traversal. Root temp behavior remains default; child callers must
     validate held workspace scope and skip global sweeping. This is a prerequisite,
     not production child activation or hostile same-user atomic race immunity.
+
+22. **Actual sandbox child entry/adapters (source component, composition open):**
+    `src/index.ts` now dispatches via the SAME installed public detector before
+    registering root flags, loading root profiles, publishing authority or
+    sweeping/allocating global temp. `child-sandbox.ts` installs a blocking hook
+    before async API lookup; only public proof of inactive scope permits root.
+    It claims pi-sbx in the SDK lifecycle, strictly decodes/compiles, owns private
+    scratch in held workspace, checks actual SDK native source ownership and
+    pinned SDK shell/PATH/helper provenance, then acknowledges only after the
+    existing controller really reports active. Failure/rebind/revocation/shutdown
+    cannot reopen disabled/local/root fallback. No child settings/standing rule,
+    local broker/reviewer or independent human channel is installed.
+
+    The SAME Bash dispatcher/queue/SRT/local SDK backend handles sandboxed,
+    canonical scoped and exact parent-admitted host commands. Connection admission and every
+    held native/log write, scoped exception and host command use current
+    parent authority without a synthetic review/cost or reusable grant; a semantic
+    tool allow is separate. Outer environment strips bootstrap/options/functions
+    before the existing local backend starts; its actual public SDK-resolved
+    shell and named outer PATH helpers are pinned, not replaced by another engine.
+    Both caller and lease cancellation reach execution; rollback poisons on error.
+    Output capture checks bound authority and opened/named file identity before
+    actual writes; replacement/revocation/cancel stops writes and preview, keeps
+    prior bytes, closes the handle and cannot report a late success.
+
+    `child-native-tools.ts` retains real SDK schemas/builders with invocation-local
+    operations. Fences run AFTER asynchronous semantic hooks and before/after each
+    actual filesystem step, addressing only the admitted canonical target. Edit
+    needs both read and write authority, and its speculative render-time disk
+    preview is removed. Native process/device namespaces (/proc,/sys,/dev) cannot
+    expose the Node host or disabled TTY scope. ls never borrows recursive grants
+    or follows metadata outside its admitted tree. These SDK rg/fd implementations
+    lack a subprocess fence hook: native grep/find explicitly refuse, never run
+    unconfined or invoke a substitute search/shell engine. Actual agent auth and
+    this loaded enforcement/SDK package stay mandatory-locked even if agent-dir
+    metadata differs from the parent. Delegated prompt guidance states the limits.
+
+    428 tests/types and 213 non-headless Guardian tests/types pass. The six real
+    registered-entry cases still MOCK SRT and Guardian acknowledgment; binding
+    tests use the real opaque claim/ack API with explicit controller/Guardian
+    fixtures. They do NOT establish both production consumers in the actual SDK
+    factory/Node IPC or any OS containment. First SDK generation/lifetime model
+    provenance, complete bootstrap/dependency/trusted-code provenance, combined
+    startup/teardown, actual deployed runtime/OS/Git/live
+    accounting remain open. No deployment, restart, policy/toggle edit or push.
 
 ## Failure modes repaired in round 1
 

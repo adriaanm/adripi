@@ -27,6 +27,8 @@ async function annotateViolations(
 
 export function createSandboxedBashOperations(options: {
   shellPath?: string;
+  /** Actual child lifecycle/helper pins, not an alternate execution engine. */
+  assertAuthority?: () => void;
 } = {}): BashOperations {
   const local = createLocalBashOperations({ shellPath: options.shellPath });
   return {
@@ -38,19 +40,23 @@ export function createSandboxedBashOperations(options: {
         execOptions.onData(data);
       };
       try {
+        options.assertAuthority?.();
         const activeConfig = RuntimeSandboxManager.getConfig?.();
         const writeGlobOverride = process.platform === "linux" && activeConfig
           ? expandLinuxWriteGlobs(activeConfig, cwd)
           : undefined;
         const wrapped = await RuntimeSandboxManager.wrapWithSandbox(
           command,
-          undefined,
+          options.shellPath,
           writeGlobOverride,
           execOptions.signal,
           { commandId, commandText: command },
         );
+        options.assertAuthority?.();
         const result = await local.exec(wrapped, cwd, { ...execOptions, onData });
+        options.assertAuthority?.();
         await annotateViolations(commandId, captured, execOptions.onData, execOptions.signal);
+        options.assertAuthority?.();
         return result;
       } catch (error) {
         await annotateViolations(commandId, captured, execOptions.onData, execOptions.signal);

@@ -1,3 +1,6 @@
+import { isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { getPackageDir } from "@earendil-works/pi-coding-agent";
 import { SandboxRuntimeConfigSchema } from "@anthropic-ai/sandbox-runtime";
 import { decodeChildPolicy } from "./child-policy.ts";
 import { getConfigPaths, type EffectiveSandboxConfig } from "./config.ts";
@@ -18,6 +21,12 @@ export const CHILD_BOOTSTRAP_ENV_DENY = ["BASH_ENV", "ENV", "ZDOTDIR"] as const;
 export function compileChildConfig(value: unknown, cwd: string, agentDir: string): EffectiveSandboxConfig {
   const policy = decodeChildPolicy(value, cwd);
   const unique = (paths: readonly string[]) => [...new Set(paths)];
+  if (!isAbsolute(agentDir)) throw new Error("Child runtime requires an absolute actual agent directory");
+  // The SDK's actual agent directory can differ from the prepared parent's.
+  // Neither its auth file nor this loaded enforcement package may become a
+  // writable/readable credential capability through that metadata difference.
+  const mandatoryRead = unique([...policy.read.mandatoryDeny, join(agentDir, "auth.json")]);
+  const mandatoryWrite = unique([...policy.write.mandatoryDeny, agentDir, getPackageDir(), fileURLToPath(new URL("../", import.meta.url))]);
   const denyEnvironment = unique([...policy.environment.deny, ...CHILD_BOOTSTRAP_ENV_DENY]);
   if (denyEnvironment.some(name => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))) {
     throw new Error("Child runtime cannot safely express a denied environment variable name");
@@ -34,14 +43,14 @@ export function compileChildConfig(value: unknown, cwd: string, agentDir: string
     },
     filesystem: {
       disabled: false,
-      denyRead: unique([...policy.read.deny, ...policy.read.mandatoryDeny]),
+      denyRead: unique([...policy.read.deny, ...mandatoryRead]),
       allowRead: [...policy.read.allow],
       allowWrite: [...policy.write.allow],
-      denyWrite: unique([...policy.write.deny, ...policy.write.mandatoryDeny]),
+      denyWrite: unique([...policy.write.deny, ...mandatoryWrite]),
       allowGitConfig: false,
     },
     credentials: {
-      files: policy.read.mandatoryDeny.map(path => ({ path, mode: "deny" })),
+      files: mandatoryRead.map(path => ({ path, mode: "deny" })),
       envVars: denyEnvironment.map(name => ({ name, mode: "deny" })),
     },
     enableWeakerNestedSandbox: false,
@@ -59,9 +68,9 @@ export function compileChildConfig(value: unknown, cwd: string, agentDir: string
     environment: { deny: denyEnvironment },
     runtime,
     hardening: {
-      denyRead: [...policy.read.mandatoryDeny],
-      denyWrite: [...policy.write.mandatoryDeny],
-      mandatoryDenyWrite: [...policy.write.mandatoryDeny],
+      denyRead: mandatoryRead,
+      denyWrite: mandatoryWrite,
+      mandatoryDenyWrite: mandatoryWrite,
     },
     // Display/type-adapter metadata only. No file was read; root settings,
     // persistence and publisher handlers must not be installed in a child.

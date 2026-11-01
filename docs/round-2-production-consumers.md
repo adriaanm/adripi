@@ -335,8 +335,8 @@ Evidence: `.local/goal-child-bridge/`, `.local/goal-guardian-consumer/`.
 **This is partial source implementation, not combined production acceptance.**
 The focused tests' sandbox acknowledgment is explicitly a fixture. The real
 registered Guardian-entry test leaves pi-sbx unacknowledged and `assertReady`
-failing, rather than faking a first prompt. Actual pi-sbx native/Bash/SRT adapters
-remain unimplemented; full registered SDK + real IPC composition and startup
+failing, rather than faking a first prompt. At this milestone pi-sbx native/Bash/SRT
+adapters were unimplemented; full registered SDK + real IPC composition and startup
 model-generation gating remain required. The prior full Node24 HTTP result
 predates this follow-up; host Node26's known native assertion is not repaired.
 No deployment/restart/toggle, OS-containment, paid-provider or live-cost/latency
@@ -423,6 +423,70 @@ replacement directory and symlink preservation, terminal disposal and bad prefix
 Evidence: `.local/goal-child-runtime/scratch-full.log`. Actual child startup dispatch,
 controller activation/own acknowledgment and complete SDK/IPC composition remain
 unfinished; #14 and all later live acceptance gates remain open.
+
+## Actual pi-sbx child entry and SDK operation fences (source component)
+
+`index.ts` now selects the real installed public API **before** root flags,
+profile/trust/settings, publisher or global scratch sweep. An immediate blocking
+hook precedes asynchronous lookup. Only the actual public detector proving no
+child intent may register ordinary root behavior. The new `ChildSandbox` claims
+`pi-sbx` at SDK session start, validates complete v2 policy/identity/pins, allocates
+only held workspace scratch, verifies native owner provenance, and acknowledges
+only after the existing controller is actually active. Missing runtime, second
+startup/session, drift, transport loss and shutdown cannot reopen root or local
+fallback. Child has no local reviewer/broker, human channel or standing-rule UI.
+
+The shared Bash dispatcher, queue, canonical scoped snapshot and rollback remain
+one execution path. Child host and scoped exceptions and independent output-file
+writes route to the actual parent; static parent restrictions stay final. Held
+native/log IO also requests the **current** parent via the shared path authorizer,
+without pretending it is a new grant or fabricating review/cost records. Terminal
+parent unavailability/cancellation retain their kinds/reasons, not a local prompt.
+The existing output capture also checks bound authority at open/write boundaries,
+revalidates the admitted file identity on every chunk, and stops both writes and
+preview after replacement/revocation/cancellation. Four new real-file regressions
+retain preceding bytes but reject late success; cleanup always closes the handle.
+All connection admission stays parent-routed. Positive socket/local-bind/PTY bits
+remain disabled ceilings. `user_bash` and unowned/unsupported tools refuse.
+
+The existing local SDK backend receives stripped bootstrap/options/imported-function
+environment **before** its outer shell. The SDK-resolved shell, absolute PATH and
+named outer PATH-helper identities/metadata are pinned and rechecked at action/operation
+boundaries, including after awaits. Writable/relative helper namespaces refuse;
+existing helper edits are detected even without directory timestamp changes. This
+is not a replacement shell or hostile same-user atomic inode isolation.
+
+Real SDK Read/Edit/Write/Ls builders retain native schemas and result formatting;
+operation adapters check policy/authority/cancellation and alias identity before
+and after actual IO. Edit needs both read and write and cannot run its unfenced
+speculative disk-preview renderer. Writes target the admitted canonical file,
+including stable final symlinks and exact parent-directory admission. ls does not
+borrow recursive grants or expose symlink metadata beyond the admitted tree.
+Native `/proc`, `/sys`, `/dev` access cannot expose the unjailed Node host or turn
+TTY ceilings into authority. The SDK's native rg/fd builders have no helper-process
+fence hook: grep/find explicitly refuse without an operation, not an unconfined
+helper or substitute search/shell implementation. The actual SDK agent auth and
+enforcement/SDK packages also remain mandatory-locked if host metadata places them
+outside the prepared parent's agent namespace. This narrows, never grants scope.
+
+Verification: **428 pi-sbx tests / 30 files** and types; **213 non-headless Guardian
+tests** and types. New coverage includes 24 actual-SDK native cases, 21 binding
+cases using the real opaque public API, six registered pi-sbx-entry cases using
+real SDK IO/Bash and mocked SRT/Guardian acknowledgment, four shared-authorizer
+held-current regressions, four output-capture operation freshness cases and three
+additional compiler namespace exclusions.
+Evidence: `.local/goal-child-runtime/{sbx-full,registered-source}.log`.
+
+**#14 remains unfinished.** Those explicit controller/Guardian fixtures are not
+both real registered consumers inside the actual SDK factory/Node IPC. First SDK
+generation (including startup-triggered calls), lifetime model/provider/selected
+tool fidelity, complete bootstrap/dependency and trusted-global-code provenance,
+combined lifecycle/failure tests
+and the complete composition gates below still need proof. Grep/find remain
+explicitly unsupported in this SDK, not a claimed supported-helper OS result.
+No deployed identity, actual OS containment/Git workflow, paid accounting or
+representative live total cost/latency is certified. No deployment, restart,
+policy/toggle edit, protected-content access or push occurred.
 
 ## Source-proven gaps at the initial baseline
 

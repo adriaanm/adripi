@@ -132,6 +132,54 @@ describe("one-action output capture backend", () => {
     }
   });
 
+  it("checks child authority again before creating the admitted log", async () => {
+    const capture = new OutputCapture("revoked.log", root, () => { throw new Error("lease revoked"); });
+    const execute = vi.fn(async () => ({ exitCode: 0 }));
+    await expect(capture.run(async () => {
+      await capture.wrap(backend(execute)).exec("unchanged", root, { onData: () => {} }); return result;
+    })).rejects.toThrow("lease revoked");
+    expect(execute).not.toHaveBeenCalled(); expect(existsSync(join(root, "revoked.log"))).toBe(false);
+  });
+
+  it("stops both capture writes and preview at revocation, retaining earlier bytes", async () => {
+    let active = true;
+    const capture = new OutputCapture("revoked-stream.log", root, () => { if (!active) throw new Error("lease revoked"); });
+    const preview = vi.fn();
+    await expect(capture.run(async () => {
+      await capture.wrap(backend(async (_command, _cwd, options) => {
+        options.onData(Buffer.from("before")); active = false;
+        options.onData(Buffer.from("after")); expect(options.signal?.aborted).toBe(true);
+        return { exitCode: 0 };
+      })).exec("unchanged", root, { onData: preview }); return result;
+    })).rejects.toThrow("lease revoked");
+    expect(readFileSync(join(root, "revoked-stream.log"), "utf8")).toBe("before"); expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not keep writing an opened inode after its admitted name is moved and replaced", async () => {
+    const capture = new OutputCapture("moved-stream.log", root); const preview = vi.fn();
+    await expect(capture.run(async () => {
+      await capture.wrap(backend(async (_command, _cwd, options) => {
+        options.onData(Buffer.from("before"));
+        renameSync(join(root, "moved-stream.log"), join(root, "moved-stream.old")); writeFileSync(join(root, "moved-stream.log"), "replacement");
+        options.onData(Buffer.from("after")); expect(options.signal?.aborted).toBe(true);
+        return { exitCode: 0 };
+      })).exec("unchanged", root, { onData: preview }); return result;
+    })).rejects.toThrow("moved, replaced or retargeted");
+    expect(readFileSync(join(root, "moved-stream.old"), "utf8")).toBe("before");
+    expect(readFileSync(join(root, "moved-stream.log"), "utf8")).toBe("replacement"); expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops buffered output and late success after the caller cancels", async () => {
+    const controller = new AbortController(), preview = vi.fn();
+    const capture = new OutputCapture("cancelled-stream.log", root);
+    await expect(capture.run(async () => {
+      await capture.wrap(backend(async (_command, _cwd, options) => {
+        options.onData(Buffer.from("before")); controller.abort(); options.onData(Buffer.from("after")); return { exitCode: 0 };
+      })).exec("unchanged", root, { onData: preview, signal: controller.signal }); return result;
+    })).rejects.toThrow('"status":"cancelled"');
+    expect(readFileSync(join(root, "cancelled-stream.log"), "utf8")).toBe("before"); expect(preview).toHaveBeenCalledTimes(1);
+  });
+
   it("preserves structured SDK error flags as well as older SDK throw semantics", async () => {
     const capture = new OutputCapture("native-error.log", root);
     const value = await capture.run(async () => {
