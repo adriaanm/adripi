@@ -655,6 +655,21 @@ The full detached/bootstrap/resource/virtual/tool-lifetime/deployed/OS/Git/live-
 requirements above remain open. No install, restart, live config/toggle change,
 protected-content access, host-runtime replacement or push occurred.
 
+## Current-source full Guardian CLI/HTTP refresh
+
+The authorized unchanged Node24 VM recipe now verifies committed source
+`1e935e6b680d629a0a1abd6185e5ee67f0ed1617`: **215/215 Guardian tests, zero
+failures/skips**, including the real Pi CLI/HTTP headless test; the standalone
+HTTP test also passes without skipping. Guardian/pi-sbx types pass. Frozen
+provisioning leaves all seven manifest/lock hashes unchanged. This replaces the
+older178-test result as the latest full HTTP source evidence; the host Node26
+assertion remains neither fixed nor certified. The pinned guest uses only a
+read-only curated archive, synthetic HOME/agent/config/cache and credential-free
+local HTTP fixtures. Logs/inspection are retained, and its owned VM is removed.
+See `guardian-container-verification.md` for exact image/archive/driver hashes.
+This closes the stale-full-HTTP-evidence item above, not #14 or the separate
+bootstrap/virtual/resources/tool-lifetime/deployed/OS/Git/live-cost gates.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

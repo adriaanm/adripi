@@ -7,19 +7,30 @@ Operator-authorized Apple `container` **1.2.2**, Linux/arm64, **Node v24.22.2**:
 | Gate | Result |
 |---|---|
 | Standalone real Pi 1.0 CLI/HTTP JSON no-session test | **1 pass, zero skips**; status, nested codemode/bash assessments and fixed-rule denial |
-| Complete Guardian suite, including HTTP headless | **178 pass / 178 total, zero failures/skips**, 9.32s (recipe recheck) |
+| Complete Guardian suite, including HTTP headless | **215 pass / 215 total, zero failures/skips**, 9.81s (current-source refresh) |
 | Guardian and pi-sbx typechecks | Pass |
 | Package manifests and selected/secondary locks | Hashes unchanged before/after provisioning and tests |
 
-Tested source: `b81bd669f958a41842f83481740f8f59f01ae317`.
+Latest tested source: `1e935e6b680d629a0a1abd6185e5ee67f0ed1617`.
 Source archive SHA-256:
-`5faf0eb3695d77b892dbfe6b87240b6f9bb43e275854e5aa09d81e4a9cfd35db`.
+`3c56af8a26c0ef5a161ea5ba006abf99f424d057bb18d6d83e7ade47637f53ad`.
 The exact tested guest driver is preserved as
 [`scripts/verify-guardian-vm.mjs`](../scripts/verify-guardian-vm.mjs).
-Ignored evidence: `.local/guardian-container/recipe/{results.json,headless.log,guardian-full.log,guardian-types.log,sbx-types.log,driver-reentry.log}`;
-initial successful run also retained under `attempt2/` (178 tests in 9.53s).
-The driver refuses an existing guest work directory before altering evidence;
-that duplicate-invocation negative is checked in `driver-reentry.log`.
+Current ignored evidence: `.local/guardian-container/source-1e935e6b680d-results/`
+(`results.json`, `headless.log`, `guardian-full.log`, both typecheck logs), the
+sibling `source-1e935e6b680d-inspect.json` and `source-1e935e6b680d-input/` snapshot.
+Inspection confirms the pinned image, arm64, user `node`, four CPUs/4GiB, the sole
+read-only curated input mount, no published ports/sockets and no host environment.
+Logs were copied before stopping/deleting only `adripi-guardian-node24-1e935e6`;
+`container list` is empty afterward. All provisioning/test steps pass and all
+seven tracked manifest/lock hashes remain unchanged.
+
+Historical evidence remains under `recipe/` and `attempt2/`: source
+`b81bd669f958a41842f83481740f8f59f01ae317`, archive
+`5faf0eb3695d77b892dbfe6b87240b6f9bb43e275854e5aa09d81e4a9cfd35db`,
+**178/178**, 9.32s/9.53s. The unchanged driver refuses an existing guest work
+directory before altering evidence; that historical duplicate-invocation negative
+is retained in `recipe/driver-reentry.log`.
 
 The official image is pinned by OCI index digest:
 
@@ -64,8 +75,11 @@ the stale npm lock separately. First-attempt console/provenance are retained in
 This is a verification recipe, **not standing host permission or deployment
 authorization**. Use an existing approved `container` service; stop/report a
 service/admission failure rather than substituting another daemon or runner.
-Review the tracked archive before mounting: the tested repository has no tracked
-`.pi`, `.local` or `node_modules` entries. Do not mount the whole workspace/home.
+Review the tracked archive before mounting: no live workspace `.pi`, `.local`,
+installed `node_modules` or host data may enter it. The current archive's sole
+matching tracked path is the reviewed synthetic example
+`forks/pi-subagents/examples/typed-gate/.pi/agents/classifier.md` (a text external
+classifier definition, not policy/credentials). Do not mount the whole workspace/home.
 Use fresh container/output names; do not delete another session's container.
 
 From the repository root, stage the current committed source and driver:
@@ -126,7 +140,11 @@ assertion is not fixed or certified** by this Linux result. The historical
 Node26 failure remains a useful platform-specific caveat, not a reason to repeat
 that crash or silently switch the live runtime.
 
-Still separate: **#14** real production child consumers; **#29/#28** authorized
+The current-source refresh includes the real consumer source/unit changes through
+`1e935e6`, not merely the older178-test baseline. It does not extend the separate
+combined SDK/IPC composition to actual OS or full detached-launch verification.
+
+Still separate: **#14** full production child wiring acceptance; **#29/#28** authorized
 deployment/restart, loaded identities and actual broker lifecycle; **#15** actual
 OS/native/descendant/Git containment; **#24** live accounting/provider evidence;
 **#25** representative latency and total-spending measurements, including failed
