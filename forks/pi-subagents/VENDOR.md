@@ -458,3 +458,17 @@ graph384/17/330/18/768. See docs/round-2-production-consumers.md for explicit
 OS/provider/reviewer/usage/human doubles and remaining acceptance boundaries.
 No live install/restart/policy/config/toggle/protected-content/runtime replacement,
 paid-provider operation or push.
+
+## Factory disposal during SDK startup still returned a promptable child
+
+Recheck the existing factory disposal epoch and caller abort after SDK/MCP startup,
+before sealing/return. Normal shutdown cleans the stale session and creation
+rejects; no new runner/registry/timeout. Two controlled fixtures prove exactly-once
+cleanup/no returned child. This is not a claim that disposal interrupts or waits
+for a non-cooperative extension initializer; actual process ownership stays separate.
+Full4345/4328pass/17skip/0fail443suites (concurrency1), types;32/32 per genuineSDK1.2/
+1.4 and4graph tests. Unrelated concurrent npm PID-marker/viewer JSON races passed
+in isolation; no weakened assertions/timeouts. Sourcecfd3726816ece325/artifact
+bfceb9573fdad484, graph384/17/330/18/768. Exact evidence/remaining boundaries:
+docs/round-2-production-consumers.md. No live install/restart/policy/config/toggle/
+protected-content/runtime replacement/paid-provider operation/push.

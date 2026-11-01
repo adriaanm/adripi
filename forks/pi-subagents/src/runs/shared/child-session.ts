@@ -662,6 +662,10 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 				mcpWaits.set(cancel, ready);
 				try { await ready; } finally { mcpWaits.delete(cancel); }
 			}
+			if (disposals !== disposalsAtStart || launch.signal?.aborted) {
+				await shutdown();
+				throw new Error(disposals !== disposalsAtStart ? "The child session factory was disposed during SDK startup." : "The child launch was cancelled during SDK startup.");
+			}
 			// Session startup and native MCP registration are the SDK-owned discovery
 			// phase. Seal once before returning a promptable child, never on a request.
 			try { generation?.completeStartup(); } catch (error) { await shutdown(); throw error; }

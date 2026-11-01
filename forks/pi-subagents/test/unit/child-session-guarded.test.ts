@@ -113,6 +113,24 @@ describe("guarded SDK child startup", () => {
 		await assert.rejects(() => guarded(cwd, () => factory.create(launch(cwd))), /Guarded child extension failed to load.*provider-load-broken/);
 	});
 
+	for (const change of ["disposal", "cancellation"] as const) it(`does not return a promptable session after ${change} during SDK startup`, { timeout: 10_000 }, async () => {
+		let release!: () => void, entered!: () => void, disposed = 0;
+		const started = new Promise<void>(resolve => { entered = resolve; });
+		const startup = new Promise<void>(resolve => { release = resolve; });
+		const caller = new AbortController();
+		const factory = createDefaultChildSessionFactory({ loadPiCodingAgent: async () => sdk({ create: () => ({
+			agent: {}, model: { provider: "trusted", id: "model" },
+			bindExtensions: async () => { entered(); await startup; }, abort: async () => {},
+			extensionRunner: { hasHandlers: () => false }, dispose: () => { disposed++; },
+		}) }) });
+		try { await guarded(cwd, async () => {
+			const pending = factory.create({ ...launch(cwd), signal: caller.signal }); await started;
+			if (change === "disposal") await factory.dispose(); else caller.abort();
+			release(); await assert.rejects(pending, /disposed.*startup|cancelled|lifetime ended|startup lifetime/i);
+			assert.equal(disposed, 1);
+		}); } finally { release(); await factory.dispose(); }
+	});
+
 	it("rejects a non-required session_start failure and disposes the partially initialized SDK", async () => {
 		let disposed = 0;
 		const session = { agent: {}, model: { provider: "trusted", id: "model" },

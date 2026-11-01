@@ -986,6 +986,27 @@ policy/toggle/protected-content/runtime replacement, paid-provider operation or
 push. Remaining lifecycle/resource/executable/dependency/provider/effective-auth,
 deployment/loaded-broker/OS/Git/live accounting/total-latency gates stay open.
 
+## Startup cannot return a session from a disposed factory epoch
+
+A controlled SDK-startup regression found that disposing the factory while
+`bindExtensions` awaited still allowed `create` to return a promptable child after
+startup resumed. Before the startup seal/return, recheck the existing disposal
+epoch and caller signal; run normal session shutdown and reject stale/cancelled
+creation. Two controlled SDK fixtures prove exactly-once cleanup/no returned child.
+Guarded caller cancellation already refused at the seal; the explicit factory
+check also covers the unguarded factory lifecycle. No new runner/timeout/registry.
+This does not claim that factory disposal interrupts or awaits a non-cooperative
+in-flight extension initializer; owned native-process termination remains separate.
+
+Fresh **4,345 total /4,328 pass /17 skip /zero fail /443 suites**, types;32/32 on
+each genuine SDK1.2/1.4, four graph tests. Full units passed with concurrency1;
+earlier concurrent runs hit the existing500ms npm PID-marker scheduling race and
+an unrelated viewer fixture's early JSON read. Both files passed in isolation; no
+tests/timeouts were weakened. Source `cfd3726816ece325`, artifact `bfceb9573fdad484`,
+graph384/17/330/18/768. Evidence `.local/goal-consumers/startup-disposal-{before,
+full,npm-isolated,orca-isolated,composition,sdk14}.log`. Remaining gates and no-live-
+deployment/approval/billing boundaries are unchanged.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the
