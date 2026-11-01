@@ -4,18 +4,18 @@ import { createChildAuthorityLease, withChildAuthority, captureChildAuthorityLea
 import { guardChildGeneration } from "../../src/runs/shared/child-generation-guard.ts";
 
 // Barrier/SDK-operation fixtures only, NOT production enforcement consumer acks.
-function fixture(ready = true, makeResult?: () => any) {
+function fixture(ready = true, makeResult?: () => any, virtual = false, extra: Record<string, unknown> = {}) {
 	const { lease } = createChildAuthorityLease({ leaseId: "generation", identity: { parentSessionId: "parent", runId: "run", agent: "worker", index: 0, cwd: process.cwd() }, payload: {}, requiredConsumers: ["pi-sbx", "pi-guardian"], send: () => false, cancel: () => {}, requestTimeoutMs: 100 });
 	if (ready) withChildAuthority(lease, () => {
 		for (const id of lease.requiredConsumers) { claimChildAuthority(id, process.cwd()); acknowledgeChildAuthority(id); }
 	});
-	const model = { provider: "trusted", id: "model" };
+	const model = { provider: "trusted", id: "model", ...(virtual ? { api: "pi-virtual" } : {}), ...extra };
 	const session = { sessionId: "sdk-session", model, agent: { state: { model } } };
 	let calls = 0, options: any;
 	const native = (_model: unknown, _context: unknown, value: unknown) => { calls++; options = value; return makeResult ? makeResult() : "same-native-result"; };
 	const runtime = { stream: native, streamSimple: native, streamDeferred: native, generateImages: native, classify: native,
 		registerProvider() {}, refresh() {}, getAuth: async () => "owned-cleanup-auth" };
-	const guard = guardChildGeneration(runtime, lease, "trusted/model"); guard.bind(session);
+	const guard = guardChildGeneration(runtime, lease, model); guard.bind(session);
 	return { lease, runtime, guard, model, session, calls: () => calls, options: () => options };
 }
 
@@ -55,14 +55,66 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 			assert.equal(f.calls(), 0);
 		}
 	});
+	for (const [field, value] of [["api", "substituted-api"], ["baseUrl", "https://changed.invalid"], ["headers", { "x-changed": "endpoint" }], ["compat", { supportsDeveloperRole: false }]] as const) {
+		it(`rejects changed selected ${field} metadata even when provider/model names are unchanged`, () => {
+			const f = fixture(); Object.assign(f.model, { [field]: value });
+			assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /metadata|selection/);
+			assert.equal(f.calls(), 0); assert.equal(f.lease.signal.aborted, true);
+		});
+	}
+	it("compares non-enumerable model metadata rather than silently ignoring it", () => {
+		const f = fixture(); Object.defineProperty(f.model, "baseUrl", { value: "https://changed.invalid", enumerable: false });
+		assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /metadata/); assert.equal(f.calls(), 0);
+	});
+	it("refuses a same-name request with a substituted endpoint rather than treating its key as provenance", () => {
+		const f = fixture();
+		assert.throws(() => f.runtime.streamSimple({ ...f.model, baseUrl: "https://changed.invalid" }, {}, {}), /metadata|selection/);
+		assert.equal(f.calls(), 0);
+	});
+	it("rechecks model metadata after asynchronous headers without invoking accessors", async () => {
+		const f = fixture(); let reads = 0;
+		f.runtime.streamSimple(f.model, {}, { transformHeaders: async () => {
+			Object.defineProperty(f.model, "headers", { get() { reads++; return {}; } }); return {};
+		} });
+		await assert.rejects(() => f.options().transformHeaders({}), /metadata|accessor/);
+		assert.equal(reads, 0); assert.equal(f.lease.signal.aborted, true);
+	});
+
+	it("retains nested metadata independently rather than adopting a mutated header alias", () => {
+		const headers = { trace: "original" }, f = fixture(true, undefined, false, { headers });
+		headers.trace = "changed";
+		assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /metadata/); assert.equal(f.calls(), 0);
+	});
+	it("accepts an equivalent accessor-free SDK model copy without replacing native execution", () => {
+		const headers = { trace: "original" }, f = fixture(true, undefined, false, { headers });
+		try { assert.equal(f.runtime.streamSimple({ ...f.model, headers: { ...headers } }, {}, {}), "same-native-result"); }
+		finally { f.guard.close(); }
+	});
+	for (const [label, value] of [["cycle", (() => { const value: any = {}; value.self = value; return value; })()],
+		["oversized string", "x".repeat(65537)], ["sparse array length", new Array(1025)]]) {
+		it(`refuses ${label} metadata instead of truncating or iterating an unbounded shape`, () => {
+			assert.throws(() => fixture(true, undefined, false, { extra: value }), /metadata cannot be pinned/);
+		});
+	}
+	it("refuses proxy metadata without triggering its inspection traps", () => {
+		let traps = 0;
+		const proxy = new Proxy({}, { getPrototypeOf() { traps++; return Object.prototype; }, ownKeys() { traps++; return []; } });
+		assert.throws(() => fixture(true, undefined, false, { extra: proxy }), /metadata cannot be pinned/); assert.equal(traps, 0);
+	});
+	it("rejects stream results after nested metadata drift during native execution", async () => {
+		const headers = { trace: "original" };
+		const f = fixture(true, () => ({ result: async () => { headers.trace = "changed"; return "late"; } }), false, { headers });
+		await assert.rejects(() => f.runtime.streamSimple(f.model, {}, {}).result(), /metadata/);
+	});
+
 	it("keeps SDK virtual routing tied to the current live routed agent model", () => {
-		const f = fixture(); const physical = { provider: "physical", id: "routed" };
-		Object.assign(f.session.model, { api: "pi-virtual" }); f.session.agent.state.model = physical;
+		const f = fixture(true, undefined, true); const physical = { provider: "physical", id: "routed" };
+		f.session.agent.state.model = physical;
 		try { assert.equal(f.runtime.streamSimple(physical, {}, {}), "same-native-result"); }
 		finally { f.guard.close(); }
 	});
 	it("refuses a virtual request that is not the live SDK-routed physical model", () => {
-		const f = fixture(); Object.assign(f.session.model, { api: "pi-virtual" });
+		const f = fixture(true, undefined, true);
 		assert.throws(() => f.runtime.streamSimple({ provider: "physical", id: "unselected" }, {}, {}), /not the bound/);
 		assert.equal(f.calls(), 0);
 	});
@@ -110,7 +162,7 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 	});
 	it("refuses an SDK without the public generation boundary rather than wrapping another engine", () => {
 		const f = fixture();
-		assert.throws(() => guardChildGeneration({}, f.lease, "trusted/model"), /lacks the public stream/);
+		assert.throws(() => guardChildGeneration({}, f.lease, f.model), /lacks the public stream/);
 		assert.equal(f.lease.signal.aborted, true);
 	});
 });

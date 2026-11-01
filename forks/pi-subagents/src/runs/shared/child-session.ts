@@ -589,7 +589,7 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 				if (guarded && (resolvedModel?.warning || !resolvedModel?.model || `${resolvedModel.model.provider}/${resolvedModel.model.id}` !== requestedModel)) {
 					throw new Error(`Guarded child model must resolve exactly to '${requestedModel}' without fallback${resolvedModel?.warning ? `: ${resolvedModel.warning}` : "."}`);
 				}
-				if (generationLease) generation = guardChildGeneration(modelRuntime, generationLease, requestedModel!, launch.signal);
+				if (generationLease) generation = guardChildGeneration(modelRuntime, generationLease, resolvedModel!.model!, launch.signal);
 				let created: Awaited<ReturnType<PiCodingAgentModule["createAgentSession"]>>;
 				try { created = await pi.createAgentSession({
 					cwd: launch.cwd,

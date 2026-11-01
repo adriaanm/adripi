@@ -589,7 +589,7 @@ fallback endpoint or authority is invented. Four deterministic native-endpoint
 write-failure cases cover the parent late revoke and runner request/cancel/release;
 **31 IPC tests** pass. This is normal async error ownership, not a protocol change.
 
-Current verification: **13/13 composition**, **429 pi-sbx / 30 files** and types,
+Verification at that combined-consumer milestone: **13/13 composition**, **429 pi-sbx / 30 files** and types,
 **214 non-headless Guardian** and types, **4,279 subagents unit / 4,262 pass /
 17 skip / zero fail / 443 suites**, concurrency4, and types. Fresh graph:
 **384 inputs / 17 exports / 330 compiled modules / 18 module-URL targets /
@@ -612,6 +612,48 @@ runtime here. The earlier full Node24 HTTP result predates these consumer change
 Deployment/restart/live broker, actual OS/Git, paid-provider accounting and
 representative total cost/latency stay separate and open. No installation, restart,
 policy/toggle edit, protected-content access, host-runtime replacement or push.
+
+## Exact selected-model metadata, not just matching names
+
+The generation barrier still accepted changed API, endpoint, headers or compatibility
+metadata behind an unchanged provider/model name. Six regressions failed before
+this fix (`.local/goal-consumers/model-metadata-before.log`). The same SDK guard
+now snapshots the actual exactly resolved model **before SDK session creation**,
+without mutating the native model/provider. It compares all own data fields,
+including non-enumerable and nested metadata, at the existing generation/lifetime
+checks. Each invocation also retains its own metadata snapshot across asynchronous
+transport callbacks, stream iteration/results and image/classifier completion.
+Equivalent accessor-free SDK copies remain valid. Cancellation and readiness still
+come from the same lease; there is no new router, provider, grant or approval cache.
+
+Snapshots refuse accessors without invoking them, proxies without inspection traps,
+functions/symbols/custom prototypes, cycles and excessive shapes. Bounds are depth12,
+1,024 visited values/array length and 65,536 cumulative UTF-8 key/string bytes;
+excess refuses rather than truncating. No metadata/header values enter diagnostic
+messages. Provider auth resolution and transport stay on the native SDK path;
+this does **not** prove the provenance of their code/data or effective auth overrides.
+Virtual physical catalog/router provenance is still a separate open gate.
+
+The durable combined matrix now has **14 cases**, including a real SDK extension
+successfully mutating the model endpoint before generation (a marker proves the
+assignment ran), followed by **zero provider dispatch, no task-file mutation and no
+scratch leak**. The focused generation file adds **14 regressions** beyond its
+original19 cases. Full subagents: **4,293 total / 4,276 pass / 17 skip / zero fail /
+443 suites**, concurrency4, and types. Both real-consumer composition and all four
+built graph identity tests pass. pi-sbx **429 / 30 files** and types, Guardian **214
+non-headless** and types pass again. Fresh graph remains **384 inputs / 17 exports /
+330 compiled / 18 module-URL targets / 768 artifacts**, artifact `21e2e8d81e15401a`.
+A credential-free SDK **1.4.0** barrier/faux completion probe passes again (fixture
+acknowledgments, not the combined production-consumer gate).
+
+A local synthetic iterator with full native faux-model metadata took **119–126ms
+for10,000 guarded events**, versus **1.7–2.0ms** unguarded, approximately12µs/event
+for the whole guard on this machine. This bounds the observed ordinary hot-path
+cost, not live provider latency, paid costs or a before/after savings claim.
+Evidence: `.local/goal-consumers/model-metadata-{focused,full,composition,sdk14,bench}.log`.
+The full detached/bootstrap/resource/virtual/tool-lifetime/deployed/OS/Git/live-cost
+requirements above remain open. No install, restart, live config/toggle change,
+protected-content access, host-runtime replacement or push occurred.
 
 ## Source-proven gaps at the initial baseline
 

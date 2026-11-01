@@ -248,3 +248,32 @@ parent Guardian. SRT backend, provider, reviewer verdict/usage and human answers
 remain explicit doubles. This is not the complete detached-launch/bootstrap,
 virtual/resource provenance, deployed/OS/Git or paid-provider/latency gate. No live
 installation, restart, policy/toggle edit, protected-content access or push.
+
+## Matching model names did not pin generation metadata
+
+Six regressions reproduced API/baseUrl/headers/compatibility and asynchronous
+metadata substitution behind unchanged provider/model names. The same internal
+SDK guard now takes the actual exactly resolved model before session creation,
+retains an independent all-own-data snapshot (including non-enumerable/nested
+fields), and checks it at existing lifetime/generation boundaries. Per-invocation
+snapshots also reject drift after async hooks/native results. Equal SDK data copies
+remain valid; native provider/auth/transport and unguarded paths stay unchanged.
+No new registry/router/permission/cache or synthetic messages/usage.
+
+The snapshot refuses accessors/proxies without invoking them, code/symbol/custom
+prototype/cyclic shapes, depth>12, >1,024 visited values/array length and >65,536
+cumulative UTF-8 key/string bytes. Refusal never truncates or logs header values.
+These checks pin selected/request model data, not effective auth overrides or full
+virtual provider/catalog/code provenance. Those acceptance gates remain open.
+
+Fourteen additional unit regressions pass. Full unit **4,293 total / 4,276 pass /
+17 skip / zero fail / 443 suites**, concurrency4, and types pass. Root source
+composition **14/14** includes actual SDK pre-generation endpoint mutation with
+zero dispatch/mutation/scratch leak; four graph tests pass. Fresh graph **384 inputs /
+17 exports / 330 compiled / 18 module-URL targets / 768 artifacts**, artifact
+`21e2e8d81e15401a`. pi-sbx429/types, Guardian214 non-headless/types and the explicit
+credential-free SDK1.4 barrier/faux fixture pass again. Local synthetic iteration
+measured119–126ms per10,000 guarded events (~12µs/event total guard), not a live
+latency/billing or savings result. Evidence/scope in
+`docs/round-2-production-consumers.md` and `.local/goal-consumers/model-metadata-*`.
+No deployment/restart/live policy/toggle/protected-content/runtime replacement/push.
