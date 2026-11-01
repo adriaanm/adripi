@@ -215,6 +215,9 @@ authority. See `docs/guardian-costs.md`; estimates are not provider invoices.
   launch/startup/CLI/default factory/drain and negative cases. OS backend,
   provider, reviewer and human answers are explicit fixtures; not deployed/OS/live
   acceptance. The test reuses upstream isolated HOME/temp/runtime-environment setup.
+  Default locked SDK1.2; optional existing native-peer loader also verifies actual
+  SDK1.4 with matching peers, without installation. See reproduction/scope in
+  `docs/round-2-production-consumers.md`.
 - `cd forks/pi-sbx && npx vitest run && npx tsc --noEmit`
 - `cd forks/pi-guardian && npm test && npm run check` (`node --test`).
   `test/headless.test.ts` crashes macOS Node26 with an assertion in libuv

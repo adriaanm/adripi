@@ -4,19 +4,22 @@ import { createDefaultChildSessionFactory, type ChildHookExtension } from "../..
 import { bindRunnerChildAuthority } from "../../forks/pi-subagents/src/runs/shared/child-authority-launch.ts";
 import { runChildSession } from "../../forks/pi-subagents/src/runs/background/run-child-session.ts";
 import type { InProcessChildLaunch } from "../../forks/pi-subagents/src/runs/shared/child-launch.ts";
-import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "../../forks/pi-subagents/node_modules/@earendil-works/pi-ai/dist/index.js";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 interface Config {
 	cwd: string;
+	sdkRoot: string;
 	extensions: Array<{ id: string; path: string }>;
 	additionalExtensions: string[];
 	steps: Array<{ name: string; input: Record<string, unknown> }>;
 }
 const config = JSON.parse(process.argv[2]) as Config;
+const { fauxProvider, fauxAssistantMessage, fauxToolCall } = await import(pathToFileURL(path.join(path.dirname(config.sdkRoot), "pi-ai/dist/index.js")).href);
 const faux = fauxProvider({ provider: "trusted", models: [{ id: "model" }] });
 const factory = createDefaultChildSessionFactory({
-	// Pin the installed locked test SDK, not a fake factory/session/runtime.
-	loadPiCodingAgent: () => import("../../forks/pi-subagents/node_modules/@earendil-works/pi-coding-agent/dist/index.js"),
+	// Use the selected genuine SDK/peers in this synthetic layout; no fake runtime.
+	loadPiCodingAgent: () => import(pathToFileURL(path.join(config.sdkRoot, "dist/index.js")).href),
 });
 let authority: Awaited<ReturnType<typeof bindRunnerChildAuthority>>;
 const readyAtGenerations: string[][] = [];

@@ -21,9 +21,15 @@ import { verifyBuiltArtifact } from "../forks/pi-subagents/scripts/verify-build.
 import { executeAsyncSingle } from "../forks/pi-subagents/src/runs/background/async-execution.ts";
 import { SUBAGENT_ASYNC_STARTED_EVENT, SUBAGENT_PROCESS_TERMINAL_EVENT, getAsyncConfigPath } from "../forks/pi-subagents/src/shared/types.ts";
 import { makeAgent } from "../forks/pi-subagents/test/support/helpers.ts";
+import { findHostPeerPackageDir } from "../forks/pi-subagents/src/runs/background/runner-aliases.ts";
 
 const repo = fileURLToPath(new URL("../", import.meta.url));
 const subagents = path.join(repo, "forks/pi-subagents");
+// Optional existing native-peer-loader test input; never a production SDK fallback.
+const sdkRoot = realpathSync(process.env.PI_SUBAGENTS_NATIVE_PI_ROOT ?? path.join(subagents, "node_modules/@earendil-works/pi-coding-agent"));
+const sdkManifest = JSON.parse(readFileSync(path.join(sdkRoot, "package.json"), "utf8"));
+assert.equal(sdkManifest.name, "@earendil-works/pi-coding-agent");
+const sdkVersion = sdkManifest.version;
 before(() => verifyBuiltArtifact({ root: subagents }));
 
 function install(f, options) {
@@ -37,7 +43,9 @@ function install(f, options) {
 	verifyBuiltArtifact({ root: subagents, distDir: path.join(modules, "pi-subagents") });
 	mkdirSync(path.join(modules, "@earendil-works"));
 	for (const dep of ["pi-coding-agent", "pi-ai", "pi-tui", "pi-agent-core"]) {
-		symlinkSync(realpathSync(path.join(subagents, "node_modules/@earendil-works", dep)), path.join(modules, "@earendil-works", dep), "dir");
+		const source = findHostPeerPackageDir(sdkRoot, `@earendil-works/${dep}`);
+		assert.ok(source, `selected SDK lacks native peer ${dep}`);
+		symlinkSync(realpathSync(source), path.join(modules, "@earendil-works", dep), "dir");
 	}
 	for (const dep of ["minimatch", "typebox"]) {
 		symlinkSync(realpathSync(path.join(repo, "forks/pi-sbx/node_modules", dep)), path.join(modules, dep), "dir");
@@ -106,7 +114,7 @@ async function run(f, steps, options = {}) {
 			if (name === "started" && existsSync(f.started)) { watcher.close(); controller.dispose(); }
 		});
 		child = spawn(process.execPath, ["--experimental-strip-types", path.join(repo, "scripts/fixtures/production-consumer-runner.ts"),
-			JSON.stringify({ cwd: f.child, extensions: layout.extensions, additionalExtensions: layout.additionalExtensions, steps })], {
+			JSON.stringify({ cwd: f.child, sdkRoot: path.join(f.agentDir, "npm/node_modules/@earendil-works/pi-coding-agent"), extensions: layout.extensions, additionalExtensions: layout.additionalExtensions, steps })], {
 			cwd: f.child, env: { ...process.env, PI_CODING_AGENT_DIR: f.agentDir }, stdio: ["ignore", "pipe", "pipe", "ipc"],
 		});
 		child.stdout.on("data", chunk => { output += chunk; }); child.stderr.on("data", chunk => { error += chunk; });
@@ -185,7 +193,7 @@ faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'detached.txt
 		if (!failedStartup && !options.semanticDeny) assert.equal(readFileSync(path.join(f.child, "detached.txt"), "utf8"), "actual detached input 文🌍");
 		const calls = existsSync(generations) ? readFileSync(generations, "utf8").trim().split("\n").map(line => JSON.parse(line)) : [];
 		assert.equal(calls.length, failedStartup ? 0 : options.semanticDeny ? 1 : 2);
-		for (const call of calls) { assert.deepEqual([...call.ready].sort(), ["pi-guardian", "pi-sbx"]); assert.equal(call.sdk, "1.2.0"); assert.deepEqual(call.physical, {provider:"trusted",id:"model",api:"fixture-faux"}); }
+		for (const call of calls) { assert.deepEqual([...call.ready].sort(), ["pi-guardian", "pi-sbx"]); assert.equal(call.sdk, sdkVersion); assert.deepEqual(call.physical, {provider:"trusted",id:"model",api:"fixture-faux"}); }
 		if (options.virtual) assert.deepEqual(readFileSync(path.join(f.root, "routes.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line)), [{selected:"virtual",reason:"user"},{selected:"virtual",reason:"continuation",previous:"model"}]);
 		assert.deepEqual(f.readPrompts().map(prompt => prompt.action.tool_name), failedStartup ? [] : ["write"]);
 		if (!failedStartup) {

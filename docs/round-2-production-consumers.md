@@ -799,6 +799,42 @@ endpoint overrides, provider-code/dependency integrity or native cache-warming
 integration certification. Those remaining provenance/acceptance gates stay open;
 no live install/restart/config/policy/toggle/protected-content/runtime change or push.
 
+## Full source matrix on the genuine installed SDK1.4
+
+The same **24 cases pass on genuine SDK1.4.0 and its own peers**, not just the
+previous narrow readiness probe. This includes both actual consumer entries,
+source/compiled complete detached CLI pipelines, native IO/Bash/output, virtual
+routing, startup refusals, semantic termination, mechanical/host/network decisions,
+cancellation and drain. Native provider callbacks assert the real SDK's VERSION;
+root tests derive the expected version from the selected package manifest.
+
+Reuse the existing opt-in native peer loader and resolver rather than install,
+upgrade, inject a fake SDK or add a production SDK override. The default remains
+the locked SDK1.2.0; the test-only launch-shaped runner now receives the synthetic
+layout's exact SDK path and imports its matching pi-ai peer. Missing peers fail;
+there is no different-runtime/provider fallback. The ordinary detached cases still
+use the real factory/host-constructed runner aliases. Both24-case runs have zero
+failures/skips. Evidence `.local/goal-consumers/native-matrix-sdk{12,14}.log`.
+
+Reproduce after `just build-subagents`, selecting an already provisioned read-only
+SDK package directory (not its CLI executable):
+
+```sh
+PI_SUBAGENTS_NATIVE_PI_ROOT=/absolute/pi-coding-agent-package \
+  node --import ./forks/pi-subagents/test/support/isolated-temp-root.mjs \
+  --import ./forks/pi-subagents/test/support/native-peer-loader.mjs \
+  --test scripts/child-composition.test.mjs
+```
+
+Only synthetic HOME/agent/settings/model/session files and task-owned artifacts
+are used. This is source/API compatibility evidence with real SDK1.4, **not a live
+installation or OS/provider/reviewer/human/billing test**. The backend/verdict/usage/
+human/provider doubles stay explicit; trusted executable/dependency/provider-code/
+effective-auth/resource provenance and remaining public-parent/tool-lifetime gates
+remain under audit. Source units/types unchanged at4,310/4,293 pass/17 skip; build
+source/artifact still `a99282fe3ff5c9fb`/`ab5e595679b5ef7e`. No install/restart/live
+config/policy/toggle/protected-content/runtime replacement or push.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

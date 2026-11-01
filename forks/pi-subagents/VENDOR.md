@@ -357,3 +357,21 @@ CLI graph. **24 composition/4 graph**, full **4,310 /4,293 pass/17 skip/zero fai
 effective-auth/provider-code/dependency/cache-warming/live acceptance gates:
 `docs/round-2-production-consumers.md`. No deployment/restart/live policy/config/
 toggle/protected-content/runtime change or push.
+
+## Native SDK1.4 full matrix, without deployment
+
+Root source composition can use the existing `PI_SUBAGENTS_NATIVE_PI_ROOT` +
+`native-peer-loader.mjs` harness. Layout symlinks resolve the selected SDK's actual
+peer packages with the existing resolver; the narrower launch-shaped runner imports
+that same explicit layout SDK/pi-ai pair. Default remains locked1.2.0; missing
+peers fail, no production resolver change/dependency repair/fallback. Genuine
+provider callbacks assert SDK VERSION in the complete detached cases.
+
+All **24 actual consumer/source+compiled CLI/virtual/native IO/Bash/output/refusal/
+cancellation/drain cases pass on both SDK1.2.0 and genuine installed SDK1.4.0**, zero
+failures/skips. Synthetic HOME/agent/config/credentials/fixtures, explicit backend/
+provider/reviewer/human doubles; no deployed/OS/live billing or complete provenance
+claim. Source units/types/build unchanged (4,310/4,293 pass/17 skip; artifact
+`ab5e595679b5ef7e`). Reproduction and remaining gates:
+`docs/round-2-production-consumers.md`. No live install/restart/policy/config/toggle/
+protected-content/runtime replacement or push.
