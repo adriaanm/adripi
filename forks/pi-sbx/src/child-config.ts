@@ -1,9 +1,22 @@
-import { isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getPackageDir } from "@earendil-works/pi-coding-agent";
 import { SandboxRuntimeConfigSchema } from "@anthropic-ai/sandbox-runtime";
 import { decodeChildPolicy } from "./child-policy.ts";
 import { getConfigPaths, type EffectiveSandboxConfig } from "./config.ts";
+import { canonicalizeTarget } from "./path-policy.ts";
+
+/** SDK peers/lazy dependencies share the owning node_modules namespace, not
+ * merely the SDK package directory. npm/pnpm layouts may contain nested stores. */
+function dependencyNamespace(packageRoot: string): string {
+  let current = packageRoot, root = packageRoot;
+  while (true) {
+    if (basename(current) === "node_modules") root = current;
+    const parent = dirname(current);
+    if (parent === current) return root;
+    current = parent;
+  }
+}
 
 /** Shell bootstrap variables must not load workspace-writable code before the
  * SDK's local backend enters SRT. This only narrows inherited environment; no
@@ -26,7 +39,12 @@ export function compileChildConfig(value: unknown, cwd: string, agentDir: string
   // Neither its auth file nor this loaded enforcement package may become a
   // writable/readable credential capability through that metadata difference.
   const mandatoryRead = unique([...policy.read.mandatoryDeny, join(agentDir, "auth.json")]);
-  const mandatoryWrite = unique([...policy.write.mandatoryDeny, agentDir, getPackageDir(), fileURLToPath(new URL("../", import.meta.url))]);
+  const packages = [getPackageDir(), fileURLToPath(new URL("../", import.meta.url))];
+  const codeRoots = packages.flatMap(root => {
+    const canonical = canonicalizeTarget(root, cwd);
+    return [root, canonical, dependencyNamespace(canonical)];
+  });
+  const mandatoryWrite = unique([...policy.write.mandatoryDeny, agentDir, ...codeRoots, process.execPath, canonicalizeTarget(process.execPath, cwd)]);
   const denyEnvironment = unique([...policy.environment.deny, ...CHILD_BOOTSTRAP_ENV_DENY]);
   if (denyEnvironment.some(name => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))) {
     throw new Error("Child runtime cannot safely express a denied environment variable name");
@@ -72,7 +90,7 @@ export function compileChildConfig(value: unknown, cwd: string, agentDir: string
       denyWrite: mandatoryWrite,
       mandatoryDenyWrite: mandatoryWrite,
     },
-    // Display/type-adapter metadata only. No file was read; root settings,
+    // Display/type-adapter metadata only. No settings contents were read; root settings,
     // persistence and publisher handlers must not be installed in a child.
     globalConfigPath: paths.global,
     projectConfigPath: paths.project,

@@ -1,17 +1,27 @@
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { getPackageDir } from "@earendil-works/pi-coding-agent";
 import { fileURLToPath } from "node:url";
 import { pathGrantFeasibility } from "../src/path-authorizer.ts";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deriveChildPolicy } from "../src/child-authority.ts";
 import { CHILD_BOOTSTRAP_ENV_DENY, childExecutionEnvironment, compileChildConfig } from "../src/child-config.ts";
 import { canonicalizeTarget, canRead, canWrite, createFilePolicy } from "../src/path-policy.ts";
+
+// Policy-layout fixture only: keep the genuine SDK/schema/backend; select an
+// external package-directory metadata layout as in the real SDK composition.
+const sdkLayout = vi.hoisted(() => ({ packageDir: undefined as string | undefined }));
+vi.mock("@earendil-works/pi-coding-agent", async importOriginal => {
+  const actual = await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
+  return { ...actual, getPackageDir: () => sdkLayout.packageDir ?? actual.getPackageDir() };
+});
 
 let root: string, cwd: string, agentDir: string;
 let payload: ReturnType<typeof deriveChildPolicy>["payload"];
 const clone = (): any => JSON.parse(JSON.stringify(payload));
 beforeEach(() => {
+  sdkLayout.packageDir = undefined;
   root = mkdtempSync(join(tmpdir(), "sbx-child-config-"));
   cwd = join(root, "workspace"); agentDir = join(root, "agent");
   mkdirSync(join(cwd, ".pi"), { recursive: true });
@@ -86,6 +96,17 @@ describe("child runtime compiler (data translation, not readiness/OS proof)", ()
       mandatoryDenyRead: config.hardening.denyRead, mandatoryDenyWrite: config.hardening.mandatoryDenyWrite });
     const ownCode = fileURLToPath(new URL("../src/index.ts", import.meta.url));
     expect(pathGrantFeasibility({ surface: "write", target: ownCode, reason: "not delegated" }, cwd, policy).ok).toBe(false);
+  });
+
+  for (const name of ["current Node executable", "SDK peer implementation", "SDK dependency namespace", "SDK pnpm peer namespace"]) it(`never admits a write exception against the ${name}`, () => {
+    sdkLayout.packageDir = join(root, name.includes("pnpm") ? "external-runtime/node_modules/.pnpm/sdk@1/node_modules/@earendil-works/pi-coding-agent" : "external-runtime/node_modules/@earendil-works/pi-coding-agent"); mkdirSync(sdkLayout.packageDir, { recursive: true });
+    const target = name === "current Node executable" ? process.execPath : name.includes("pnpm") ? join(root, "external-runtime/node_modules/.pnpm/peer@1/node_modules/peer/index.js") : join(dirname(getPackageDir()), name === "SDK peer implementation" ? "pi-ai/dist/index.js" : "future-peer/index.js");
+    const input = clone(); input.write.allow.push(dirname(target));
+    input.anchor.paths.push({ spelled: dirname(target), canonical: canonicalizeTarget(dirname(target), cwd) });
+    const config = compileChildConfig(input, cwd, agentDir);
+    const policy = createFilePolicy({ filesystem: config.runtime.filesystem, mandatoryDenyWrite: config.hardening.mandatoryDenyWrite });
+    expect(pathGrantFeasibility({ surface: "write", target: canonicalizeTarget(target, cwd), reason: "semantic allow is not code maintenance" }, cwd, policy).ok).toBe(false);
+    expect(canRead(canonicalizeTarget(target, cwd), cwd, policy)).toBe(true);
   });
 
   it("refuses a relative actual agent directory rather than rebasing authority", () => {

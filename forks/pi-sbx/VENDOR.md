@@ -327,6 +327,21 @@ human doubles, not live OS/billing approval. See docs/round-2-production-consume
 Deployment/restart/policy/config/toggle/protected-content/runtime replacement and
 push were not performed; source acceptance remains bounded by the remaining gates.
 
+## A path exception could write the Node executable or external SDK peers
+
+Child compilation now makes spelled/canonical current Node and package paths plus
+the outermost owning node_modules namespace mandatory deny-write. The SDK package
+alone missed sibling/lazy dependencies and pnpm peer stores. This narrows local
+file/scoped/SRT paths, not public-code reads or explicit human host execution (not
+a jail). Parent/operator, not the child, maintains its running toolchain. No config
+knob, manifest/dependency/builder/runtime replacement or alternative path authorizer.
+Three valid anchored negative regressions previously admitted exceptions; four
+layout tests now cover executable/peer/future/pnpm paths with real schema/backend.
+434 tests/30 files +types,32 actual composition per genuine SDK1.2/1.4 +4graph pass.
+See docs/round-2-production-consumers.md for exact evidence and explicit path-policy
+versus code-content/hardlink/OS/host-writer/provider-auth boundaries. No live install/
+restart/policy/config/toggle/protected-content/runtime replacement/push.
+
 ## Deploy/update
 
 `install.sh` installs npm `pi-sbx@0.1.3` and mirrors this `src/` over the installed

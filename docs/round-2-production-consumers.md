@@ -1007,6 +1007,30 @@ graph384/17/330/18/768. Evidence `.local/goal-consumers/startup-disposal-{before
 full,npm-isolated,orca-isolated,composition,sdk14}.log`. Remaining gates and no-live-
 deployment/approval/billing boundaries are unchanged.
 
+## Child path grants cannot maintain their own runtime code namespace
+
+The compiler protected the SDK package but not an externally installed SDK's peer
+namespace or the current Node executable. Three valid anchored-policy regressions
+showed write exceptions were feasible for those paths. Add spelled/canonical Node
+executable and package paths plus the owning outermost `node_modules` namespace to
+local mandatory write denies. This covers sibling/lazy dependencies and nested pnpm
+stores rather than just the selected SDK directory. Existing enforcement-package/
+agent protection and credential read rules remain; public code stays readable.
+File/scoped/sandboxed-Bash policy cannot lend those paths through semantic or human
+path admission. Explicit human host execution is still not a filesystem jail.
+
+Four policy-layout tests (external SDK metadata only; genuine schema/backend)
+exercise Node, peer, future dependency and pnpm sibling paths. **434 pi-sbx tests /
+30 files**, types;32/32 actual composition per genuine SDK1.2/1.4 and4graph tests
+pass. Third-fork source/artifact remains `cfd3726816ece325`/`bfceb9573fdad484`.
+Evidence `.local/goal-consumers/code-namespace-{before,sbx,composition,sdk14}.log`.
+No dependency/manifests/builders/runtime selection were changed or installed.
+A child cannot update its own running toolchain's dependency namespace; that is
+parent/operator maintenance outside the child's scope. These are path-policy
+negative proofs, not certification of all lazy code/content, hardlink/OS aliasing,
+arbitrary trusted host changes or effective provider/auth provenance. Remaining
+acceptance and no-live-deployment/approval/billing boundaries stay open.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the
