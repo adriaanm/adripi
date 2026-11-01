@@ -170,7 +170,8 @@ routes in Git history are retired, not additional supported APIs.
     registered native-gate grant/deny/headless/cancellation/isolation coverage,
     helper/config/lifecycle and actual registered provider coverage, plus composed
     native-launch/real-IPC/controlled-consumer/broker/human tests. Current source:
-    **360 tests / 28 files**, typecheck/root checks pass, including four scoped
+    **366 tests / 28 files**, typecheck/root checks pass, including six new scratch
+    scope/cleanup cases, four scoped
     target/snapshot regressions, 12 child-config translation cases, seven installed
     API bridge cases, 22 capture
     regressions, 58 strict-policy/producer cases and the effective-HOME stamp
@@ -207,6 +208,17 @@ routes in Git history are retired, not additional supported APIs.
     check canonical scope in both positive and baseline-isolation negatives.
     This is asynchronous decision consistency, not hostile same-user atomic
     inode immunity or actual OS containment.
+
+21. **Scratch cleanup cannot adopt a replacement directory:** the existing
+    allocator accepts an already-held base and synchronous pre-creation policy
+    validator, uses exclusive UUID mkdir with mode0700, rejects path-like prefixes,
+    and pins bigint dev/inode/birthtime plus canonical identity. Dispose refuses
+    replacements/symlinks, never follows moved aliases, and is terminal/idempotent
+    after removal or ENOENT. Six regressions cover private held-base allocation,
+    refusal before mutation, replaced dirty directories/symlinks, terminal disposal
+    and prefix traversal. Root temp behavior remains default; child callers must
+    validate held workspace scope and skip global sweeping. This is a prerequisite,
+    not production child activation or hostile same-user atomic race immunity.
 
 ## Failure modes repaired in round 1
 

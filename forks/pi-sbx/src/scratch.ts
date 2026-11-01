@@ -1,4 +1,6 @@
-import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import type { BigIntStats } from "node:fs";
+import { lstat, mkdir, realpath, readdir, rm, stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,9 +8,10 @@ import { join } from "node:path";
  * A per-session scratchpad the sandbox always allows writes to.
  *
  * It is the one place the agent can create temporary files without asking for
- * an exception: it lives under the host temp tree, is unique per session, is
- * removed at shutdown, and stale directories from crashed sessions are swept
- * by age. Nothing else under the temp root becomes writable.
+ * an exception: by default it lives under host temp; a delegated caller supplies
+ * its already-held workspace and validates before exclusive creation. Ownership
+ * is pinned for shutdown cleanup. Only root sessions sweep stale temp entries;
+ * a child must never sweep parent/other-session scratch.
  */
 export const SCRATCH_PREFIX = "pi-sbx-scratch-";
 
@@ -22,12 +25,35 @@ export interface Scratchpad {
 	dispose(): Promise<void>;
 }
 
-export async function createScratchpad(prefix: string = SCRATCH_PREFIX): Promise<Scratchpad> {
-	const dir = await mkdtemp(join(tmpdir(), prefix));
+export async function createScratchpad(prefix: string = SCRATCH_PREFIX, options: {
+	/** A child supplies its already-held workspace, never parent temp/scratch. */
+	baseDir?: string;
+	/** Synchronous policy/pin check BEFORE exclusive creation, not a grant. */
+	validateBeforeCreate?: (candidate: string) => void;
+} = {}): Promise<Scratchpad> {
+	if (!prefix || /[\\/\\\\]/.test(prefix) || prefix === "." || prefix === "..") throw new Error("Scratch prefix must be one directory-name prefix");
+	const dir = join(options.baseDir ?? tmpdir(), `${prefix}${randomUUID()}`);
+	options.validateBeforeCreate?.(dir);
+	await mkdir(dir, { mode: 0o700 });
+	const owner = await lstat(dir, { bigint: true });
+	if (!owner.isDirectory() || owner.isSymbolicLink()) throw new Error("Scratch root changed during creation; refusing ownership");
+	const canonical = await realpath(dir);
+	let disposed = false;
 	return {
 		dir,
 		dispose: async () => {
+			if (disposed) return;
+			let current: BigIntStats;
+			try { current = await lstat(dir, { bigint: true }); }
+			catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") { disposed = true; return; } throw error; }
+			// Never delete a symlink, replacement directory or a different alias
+			// just because it reused our path. No hostile same-user atomicity claim.
+			if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== owner.dev || current.ino !== owner.ino ||
+				current.birthtimeNs !== owner.birthtimeNs || await realpath(dir) !== canonical) {
+				throw new Error(`Scratch ownership changed; refusing cleanup of ${dir}`);
+			}
 			await rm(dir, { recursive: true, force: true });
+			disposed = true;
 		},
 	};
 }

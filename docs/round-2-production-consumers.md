@@ -401,6 +401,29 @@ and asynchronous alias consistency, not hostile same-user atomic inode immunity,
 child consumer acknowledgment or actual OS containment. #14 runtime integration
 and the remaining composition/deployment/OS/live-accounting gates are still open.
 
+## Held-base scratch and dirty-preserving cleanup prerequisite
+
+The existing scratch allocator now accepts a held base directory plus a synchronous
+candidate validator **before** exclusive creation. The child adapter must supply
+its already-held workspace and the same policy/pin checks; the callback is not a
+permission grant. There is no second allocator or parent-temp inheritance. UUID
+creation is mode0700; prefix path traversal refuses before mutation. Root sessions
+keep their default temp base. Children must never call the global stale sweep.
+
+Cleanup previously recursively removed whatever reused the scratch pathname. It
+now checks bigint dev/inode/birthtime and canonical identity, refuses a replacement
+directory or symlink without touching its dirty files, and never adopts a later
+replacement after terminal disposal/ENOENT. Refusal is explicit rather than silently
+deleting or sweeping another root. This is between-operation consistency, **not**
+hostile same-user atomic inode immunity, full worktree cleanup or OS containment.
+
+**366 pi-sbx tests / 28 files**, types, and **213 non-headless Guardian tests**/types
+pass. Six new scratch cases cover held-base mode/validation, no mutation on refusal,
+replacement directory and symlink preservation, terminal disposal and bad prefixes.
+Evidence: `.local/goal-child-runtime/scratch-full.log`. Actual child startup dispatch,
+controller activation/own acknowledgment and complete SDK/IPC composition remain
+unfinished; #14 and all later live acceptance gates remain open.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the
