@@ -1,7 +1,7 @@
 import { isDeepStrictEqual, types } from "node:util";
 import { bindChildRuntimeToolInspector, hasChildStructuredOutputCode, type ChildAuthorityLease } from "./child-authority.ts";
 
-interface ModelIdentity { provider: string; id: string; api?: string }
+interface ModelIdentity { provider: string; id: string; api?: string; type?: string }
 interface BoundSession {
 	readonly sessionId: string;
 	readonly model: ModelIdentity | undefined;
@@ -65,9 +65,9 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 	let session: BoundSession | undefined, sessionId: string | undefined, closed = false, startupComplete = false;
 	const target = runtime as Record<string, unknown>;
 	const fail = (reason: string): never => { closed = true; lease.dispose(); throw new Error(`Guarded child generation refused: ${reason}`); };
-	const metadata = (model: ModelIdentity | undefined): ModelIdentity => {
+	const metadata = (model: ModelIdentity | undefined, budget = { nodes: 1024, bytes: 65536 }): ModelIdentity => {
 		try {
-			const data = snapshotMetadata(model) as ModelIdentity;
+			const data = snapshotMetadata(model, budget) as ModelIdentity;
 			if (!data || typeof data !== "object" || typeof Object.getOwnPropertyDescriptor(data, "provider")?.value !== "string" || typeof Object.getOwnPropertyDescriptor(data, "id")?.value !== "string") throw new Error("missing model identity");
 			return data;
 		} catch { return fail("model metadata cannot be pinned as bounded accessor-free SDK data"); }
@@ -131,6 +131,30 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 			Object.defineProperty(runtime, name, { value: method, writable: false, configurable: false });
 		}
 	} catch { fail("the SDK provider catalogue cannot be pinned as bounded accessor-free owned data"); }
+	// Provenance snapshots, NOT a resolver/permission registry. Native routing
+	// still chooses the physical reference. First-use mutable data is not a pin.
+	const cataloguePins = new Map<string, ModelIdentity>();
+	const catalogueKey = (model: ModelIdentity) => JSON.stringify([model.provider, model.id, model.type ?? "chat"]);
+	if (selected.api === "pi-virtual") {
+		try {
+			const lookup = target.getAllModels;
+			if (typeof lookup !== "function") throw new Error("missing native catalogue API");
+			const models = lookup.call(runtime);
+			if (!Array.isArray(models) || types.isProxy(models) || models.length > 8192) throw new Error("unbounded native catalogue");
+			const total = { nodes: 524288, bytes: 8388608 };
+			for (let index = 0; index < models.length; index++) {
+				const slot = Object.getOwnPropertyDescriptor(models, String(index));
+				if (!slot || !("value" in slot)) throw new Error("non-data catalogue slot");
+				const budget = { nodes: 1024, bytes: 65536 }, data = metadata(slot.value, budget);
+				total.nodes -= 1024 - budget.nodes; total.bytes -= 65536 - budget.bytes;
+				if (total.nodes < 0 || total.bytes < 0 || (data.type !== undefined && !["chat", "image", "classifier"].includes(data.type))) throw new Error("unbounded or unsupported catalogue data");
+				const name = catalogueKey(data);
+				if (cataloguePins.has(name)) throw new Error("ambiguous catalogue identity");
+				cataloguePins.set(name, data);
+			}
+			Object.defineProperty(runtime, "getAllModels", { value: lookup, writable: false, configurable: false });
+		} catch { fail("the initial SDK model catalogue cannot be pinned as bounded unambiguous owned data"); }
+	}
 	const assertProvider = (id: string) => {
 		const pinned = providerPins.get(id);
 		let current: unknown;
@@ -194,6 +218,7 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 			const physical = metadata(routedModel);
 			const catalogue = (physicalLookup as Method).call(runtime, physical.provider, physical.id);
 			if (physical.api === "pi-virtual" || !isDeepStrictEqual(physical, metadata(catalogue))) fail("the native route is not the physical SDK catalogue model");
+			if (!isDeepStrictEqual(physical, cataloguePins.get(catalogueKey(physical)))) fail("the physical model metadata changed or was absent at exact SDK resolution");
 			assertProvider(physical.provider);
 			pinModelData(routedModel);
 			const previous = routed.get(routedModel);

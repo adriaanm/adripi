@@ -1178,13 +1178,68 @@ measurement or representative dispatch/catalogue/paid latency/savings. Evidence
 `.local/goal-consumers/model-handoff-{before,focused,composition,sdk14,full,bench,
 root}.log` and committed regressions.
 
-Still open: provenance of physical catalogue data before its first route admission,
-SDK auth-resolved baseURL/header/env values and mutable prepared requests, private
+At that milestone, remaining audits included physical catalogue data before its
+first route admission (addressed below), SDK auth-resolved baseURL/header/env values
+and mutable prepared requests, private
 provider/base/global API and loaded code/resource/dependency ownership, complete
 initialiser drain and actual cache warming. No aggregate transport/consumer
 production acceptance or deployed/broker/OS/Git/paid-cost/total-latency claim.
 No live install/restart/session/config/policy/toggle/credential/audit-content/runtime
 replacement/paid-provider/push action.
+
+## A first virtual route adopted catalogue data changed after startup
+
+A genuine SDK regression changed `ctx.modelRegistry.getAll()`'s physical candidate
+in `before_agent_start`, while the selected virtual DTO remained unchanged. The
+native resolver and current catalogue agreed on the **already changed** endpoint,
+so both checks passed:2ready native faux calls used `https://changed.invalid`,
+exitCode0 and the native Write completed. The initial chat catalogue count was1556.
+Exact red: `.local/goal-consumers/catalogue-before.log`. No paid/native HTTP claim.
+
+For **virtual selections only**, capture the SDK's public `getAllModels()` data
+once at exact model resolution. Bounds:8192 entries,524288 aggregate nodes/8MiB
+key+string bytes, existing per-model1024nodes/64KiB/depth12 bounds. Read own data
+slots (not iterators/getters); reject proxy/sparse/accessor/unknown-kind/duplicate/
+unbounded or unavailable catalogues, never truncate/fallback. Key snapshots by
+provider/ID/kind so chat and image/classifier IDs cannot alias. Retain the same
+native `getAllModels` function as a nonreplaceable own property. First and later
+native route outputs must match the initial data **and** current native physical
+catalogue, plus all existing provider/readiness/signal checks before admission.
+
+These are private provenance snapshots, not a second model registry, selector,
+engine, SDK, role, API, permission store or allow cache. Native routing/auth remain
+responsible for selection and eligibility. Unselected candidate objects are not
+frozen; a mutation refuses at route admission, before dispatch. No catalogue scan
+per stream event and no catalogue work for plain model selections. Current code
+does not infer permission for auxiliary classifier/image model calls from catalogue
+membership. Native router classifier calls and actual cache-warmer integration still
+need explicit acceptance/refusal verification; normal native physical route/reuse
+proof must not stand in for those paths.
+
+Regression now has0backend calls/no Write/failed task/normal reset+cleanup.16added
+opaque tests cover api/URL/headers/future data before first use, async mutation,
+new identities, distinct model kinds, missing/proxy/accessor/sparse/duplicate/count/
+aggregate-byte/node refusals without traps. Both source/compiled native virtual
+positive paths still use the original SDK engine and reference semantics.
+**4,389 total /4,372 pass /17 skip /zero fail /443 suites**, types,
+**40/40 per genuine SDK1.2/1.4**, zero composition fail/skip;4graph/root/freshness.
+Source `bc552639d8d519a7`, artifact `bc846e76faa123c8`, graph384/17/330/18/768.
+
+Five constructor-only samples on native SDK catalogues, no network/config refresh,
+session, auth or model requests, synthetic non-requesting virtual DTO and injectable
+credentials whose every method throws: SDK1.2/1649models baseline0.51–1.38ms versus
+current16.32–20.36ms; SDK1.4/1713models baseline0.49–1.40ms/current16.34–22.63ms.
+The baseline is exactly the preceding `af8802f` guard. This measures extra startup
+work, not a permission/SDK routing proof, memory peak, production/paid cost or total
+latency. Evidence `.local/goal-consumers/catalogue-{before,focused,after,composition,
+sdk14,full,root,bench-sdk12,bench-sdk14}.log`, local benchmark source/baseline and
+committed regressions.
+
+Prepared auth/request values, raw registered provider/config/global API sources,
+loaded resource/code/dependency provenance, initializer drain, deployment/broker/
+OS/Git/paid accounting and total cost/latency gates remain open. No production
+acceptance or live install/restart/session/config/policy/toggle/protected-content/
+runtime replacement/paid-provider/push action.
 
 ## Source-proven gaps at the initial baseline
 

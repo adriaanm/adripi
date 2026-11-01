@@ -5,7 +5,7 @@ import registerSubagentPromptRuntime from "../../src/runs/shared/subagent-prompt
 import { guardChildGeneration } from "../../src/runs/shared/child-generation-guard.ts";
 
 // Barrier/SDK-operation fixtures only, NOT production enforcement consumer acks.
-function fixture(ready = true, makeResult?: () => any, virtual = false, extra: Record<string, unknown> = {}, route?: (...args: any[]) => any, startupComplete = true) {
+function fixture(ready = true, makeResult?: () => any, virtual = false, extra: Record<string, unknown> = {}, route?: (...args: any[]) => any, startupComplete = true, catalogueList?: (model: any, physical: any) => any) {
 	const { lease } = createChildAuthorityLease({ leaseId: "generation", identity: { parentSessionId: "parent", runId: "run", agent: "worker", index: 0, cwd: process.cwd() }, payload: {}, requiredConsumers: ["pi-sbx", "pi-guardian"], send: () => false, cancel: () => {}, requestTimeoutMs: 100 });
 	if (ready) withChildAuthority(lease, () => {
 		for (const id of lease.requiredConsumers) { claimChildAuthority(id, process.cwd()); acknowledgeChildAuthority(id); }
@@ -24,6 +24,7 @@ function fixture(ready = true, makeResult?: () => any, virtual = false, extra: R
 	const providers = ["trusted", "physical"].map(id => ({ id, auth: { resolve: () => undefined }, streamSimple: native }));
 	const runtime = { stream: native, streamSimple: native, streamDeferred: native, cancelDeferred: native, generateImages: native, classify: native,
 		resolveModel: async (...args: any[]) => route ? route(...args) : { model: physical, thinkingLevel: "off" },
+		getAllModels: () => catalogueList ? catalogueList(model, physical) : [model, physical],
 		getPhysicalModel: (provider: string, id: string) => provider === catalogue.model.provider && id === catalogue.model.id ? catalogue.model : undefined,
 		getProviders: () => [...providers], getProvider: (id: string) => providers.find(provider => provider.id === id),
 		registerProvider() {}, refresh() {}, getAuth: async () => "owned-cleanup-auth" };
@@ -226,6 +227,41 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		await assert.rejects(() => f.runtime.streamSimple(f.model, {}, {}).result(), /metadata/);
 	});
 
+	for (const field of ["api", "baseUrl", "headers", "futureMetadata"] as const) it(`pins physical ${field} data before its first native route`, async () => {
+		const f = fixture(true, undefined, true);
+		Object.assign(f.physical, { [field]: field === "headers" ? { trace: "changed" } : "changed" });
+		await assert.rejects(() => f.runtime.resolveModel(f.model, [], {}), /physical model metadata changed or was absent/);
+		assert.equal(f.calls(), 0); assert.equal(f.lease.signal.aborted, true);
+	});
+	it("does not adopt catalogue mutation while native routing awaits", async () => {
+		const f = fixture(true, undefined, true, {}, async () => { await Promise.resolve(); f.physical.baseUrl = "changed"; return { model: f.physical }; });
+		await assert.rejects(() => f.runtime.resolveModel(f.model, [], {}), /physical model metadata changed or was absent/); assert.equal(f.calls(), 0);
+	});
+	it("does not admit a newly appeared physical catalogue identity", async () => {
+		const f = fixture(true, undefined, true, {}, () => ({ model: f.catalogue.model }));
+		f.catalogue.model = { ...f.physical, id: "new" };
+		await assert.rejects(() => f.runtime.resolveModel(f.model, [], {}), /physical model metadata changed or was absent/); assert.equal(f.calls(), 0);
+	});
+	it("keys initial provenance by provider, ID and native model kind without choosing a route", async () => {
+		const f = fixture(true, undefined, true, {}, undefined, true, (_model, physical) => [physical, { ...physical, type: "image", api: "image-api" }]);
+		assert.equal((await f.runtime.resolveModel(f.model, [], {})).model, f.physical);
+		assert.throws(() => { f.runtime.getAllModels = () => []; }, TypeError); f.guard.close();
+	});
+	for (const shape of ["missing", "proxy", "slot accessor", "metadata accessor", "sparse", "duplicate", "too many", "aggregate bytes", "aggregate nodes"] as const) it(`refuses ${shape} initial catalogue data without a fallback`, () => {
+		let traps = 0;
+		assert.throws(() => fixture(true, undefined, true, {}, undefined, true, (_model, physical) => {
+			if (shape === "missing") return undefined;
+			if (shape === "proxy") return new Proxy([], { get() { traps++; }, ownKeys() { traps++; return []; } });
+			if (shape === "slot accessor") return Object.defineProperty([physical], "0", { get() { traps++; return physical; } });
+			if (shape === "metadata accessor") return [Object.defineProperty({ ...physical }, "extra", { get() { traps++; } })];
+			if (shape === "sparse") return new Array(2);
+			if (shape === "duplicate") return [physical, { ...physical }];
+			if (shape === "too many") return new Array(8193).fill(physical);
+			if (shape === "aggregate bytes") return Array.from({ length: 260 }, (_, id) => ({ ...physical, id: String(id), extra: "x".repeat(32768) }));
+			return Array.from({ length: 800 }, (_, id) => ({ ...physical, id: String(id), extra: Array(800).fill(0) }));
+		}), /initial SDK model catalogue cannot be pinned/);
+		assert.equal(traps, 0);
+	});
 	it("preserves virtual selection while using only the actual native routed physical reference", async () => {
 		const f = fixture(true, undefined, true);
 		try {

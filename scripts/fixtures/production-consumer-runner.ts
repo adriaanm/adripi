@@ -13,6 +13,7 @@ interface Config {
 	extensions: Array<{ id: string; path: string }>;
 	additionalExtensions: string[];
 	startupAfterReady?: boolean;
+	virtual?: boolean;
 	steps: Array<{ name: string; input: Record<string, unknown> }>;
 }
 const config = JSON.parse(process.argv[2]) as Config;
@@ -55,9 +56,13 @@ try {
 		toolPlan: { extensionArgs: [], requiredExtensions: config.extensions, configuredExtensions: [], runtimeExtensions: [], warnings: [] },
 		config: runtime,
 		session: {
-			cwd: config.cwd, model: "trusted/model", storage: { kind: "memory" },
+			cwd: config.cwd, model: config.virtual ? "trusted/virtual" : "trusted/model", storage: { kind: "memory" },
 			extensionPaths: config.startupAfterReady ? [...config.extensions.map(item => item.path), ...config.additionalExtensions] : [...config.additionalExtensions, ...config.extensions.map(item => item.path)], requiredExtensions: config.extensions,
-			ambientExtensions: false, hooks: [{ name: "fixture-provider", factory: (api: Parameters<ChildHookExtension["factory"]>[0]) => api.registerProvider(faux.provider) }],
+			ambientExtensions: false, hooks: [{ name: "fixture-provider", factory: (api: Parameters<ChildHookExtension["factory"]>[0]) => {
+				api.registerProvider(faux.provider);
+				if (config.virtual) api.registerVirtualModel({ provider: "trusted", id: "virtual", name: "Fixture virtual", contextWindow: 128000, maxTokens: 2048,
+					route: () => ({ model: faux.models[0], thinkingLevel: "off" }) });
+			} }],
 			tools: ["read", "write", "edit", "bash", "ls", "grep", "find"], noSkills: true, noContextFiles: true, runtime,
 		},
 		capture: { structuredOutput: () => ({ called: false, acceptanceReportProvided: false }), toolDiagnostic: () => undefined,

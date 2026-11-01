@@ -552,3 +552,26 @@ values, private/global code/resources/lifecycle/cache-warmer/deployment/OS/Git/
 live-cost gates remain open;docs/round-2-production-consumers.md has exact scope.
 No live install/restart/session/config/policy/toggle/credential-audit-content/runtime
 replacement/paid provider/push.
+
+## A first virtual route accepted catalogue metadata changed since startup
+
+ActualSDKred: before_agent_start mutated physicalgetAll()candidate, selectedvirtual
+unchanged. Native lookup agreed with alreadychanged metadata:2readyfauxbackendcalls
+at changed.invalid/exit0/nativeWrite. Capture virtual selections' getAllModels data
+at exact resolution, not firstuse; validate own slots/no getters/proxies/sparse/
+duplicate/unsupportedkind/fallback.8192entries/524288nodes/8MiBaggregatekey+strings,
+1024nodes/64KiB/depth12permodel. Key provider/ID/kind; retain exact readonly native
+getAllModels value. Native route must match initial AND current metadata before
+admission. No new selector/registry/engine/context/API/authority store; membership
+is not a dispatch grant. Unselected DTOs not frozen; plain selections and per-event
+hot paths do not scan catalogues. Auxiliary router classifier/image operations and
+actual cache warming remain separately unaccepted, not implied by route tests.
+16addedunits: firstuse/async/newidentity/kinds and9malformed/aggregate bounds;
+4389total4372pass17skip0fail443suites/types;40/40 per genuineSDK1.2/1.4,4graph/root.
+Sourcebc552639d8d519a7/artifactbc846e76faa123c8 graph384/17/330/18/768. Native ctor-only
+bench5samples, empty credentials(all methods throw), noauth/request/network/session:
+SDK1.2/1649models baseline0.51–1.38/current16.32–20.36ms;SDK1.4/1713models
+0.49–1.40/16.34–22.63ms. Prioraf8802fguard baseline; not wholepaidlatency or permission
+proof. docs/round-2-production-consumers.md exactred/scope/evidence/remaining gates.
+No live install/restart/session/config/policy/toggle/protected-content/runtime
+replacement/paid provider/push.
