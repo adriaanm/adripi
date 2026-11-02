@@ -1347,6 +1347,67 @@ prepared auth/env/options, deployment/broker/OS/Git/paid costs/total latency gat
 remain open. No live install/restart/session/config/policy/toggle/protected-content/
 runtime replacement/paid-provider/push action.
 
+## Resolved auth environment still shared its resolver's map
+
+Trace (locked SDK1.2): `resolveProviderAuth` returns native `apiKey.resolve` data;
+`Models.getAuth` may copy auth/model headers, and `ModelRuntime.getAuth(model)`
+copies `auth` and merges configured headers, but both retain `resolution.env`.
+`prepareRequest` waits for header hooks **before** spreading env into final options.
+Genuine red: a synthetic native resolver published a retained result; the header
+hook changed only its `PI_FIXTURE_ENV`. Both ready faux backend calls received
+`"changed"`, not resolved `"original"`, and completed Write. No real credentials,
+environment values, arbitrary headers or auth files were observed. Exact red:
+`.local/goal-consumers/auth-env-before.log`.
+
+The existing runtime now delegates `getAuth` to the **same original SDK method**,
+receiver and arguments exactly once, then transfers an independent completed data
+DTO using the existing bounded accessor/proxy/code-free snapshot (1024nodes/64KiB/
+depth12). Undefined/native errors retain their behavior; failed data transfer
+revokes with a value-free error. A small shared ownership-copy helper restores
+source enumerability recursively; header handoff uses it too, with every own
+header value checked, including hidden fields. Prototypes/arrays/null/undefined
+and nested string data remain native data, not JSON/coerced/truncated fields.
+This is not a new auth resolver/schema/transport/permission/registry/standing cache.
+It doesn't inspect token contents or choose endpoints/credentials, nor does it
+freeze reusable resolver, signing, refresh or native consumer maps.
+
+**Deliberate identity change:** unlike the earlier native API-slot-only seal,
+public `getAuth` is now an owned data-transfer wrapper, sealed/check-pinned as that
+same wrapper. The original native function is retained and invoked inside it;
+provider/composer/source/lookup functions and SDK auth implementation remain exact.
+The former blanket "all API function values unchanged" description is historical,
+not a claim about this now-proven data boundary. Unit tests prove receiver/args/
+result independence and native failure identity, not an alternate implementation.
+Existing prestartup/postclose getAuth behavior is preserved. Opaque cleanup calls
+are not proof that native SDK cleanup needs this behavior or that remote refresh/
+deferred-job lifecycle is accepted; those remain explicit audit gates. Signal and
+credential rotation/persistence semantics are the original SDK's (including its
+non-cancellable in-progress OAuth refresh), not a new cancellation algorithm.
+
+Actual regression on both SDKs: producer really changes its map, backend retains
+original resolved env,2readycalls/assignedWrite/reset/no scratch leak.8added opaque
+units: full nested DTO/receiver/args/native copy ownership; reusable refresh data;
+null-prototype/non-enumerable nested maps/null header values; undefined/native error/
+postclose delegation;4bad data graphs without traps/values in errors. Header13units
+and all earlier model/tool/provider/lifetime cases remain passing.
+**4,422 total /4,405 pass /17 skip /zero fail /443 suites**, types,
+**47/47 per genuine SDK1.2/1.4**, zero composition fail/skip;4graph/root/freshness.
+Source `7a2c471a04a973f8`, artifact `ac70ec10661dc53b`, graph384/17/330/18/768.
+Five-sample synthetic1000authDTO transfers vs exact preceding6ef52b5guard:
+baseline0.146–0.327ms/current4.271–6.292ms, mean+5.10µs/result; setup0.49–2.00ms/
+0.44–1.37ms. Constant fake resolution, seven real tool schemas/real faux provider
+metadata, synthetic fields only: **no real resolution, credential refresh, HTTP,
+provider dispatch, pricing, paid savings or total latency**. Evidence
+`.local/goal-consumers/auth-env-{before,focused,after,composition,sdk14,full,bench,
+root}.log`, local exact baseline/benchmark and committed regressions.
+
+Caller options/env/headers ownership at initial lazy dispatch, genuine SDK auth-
+prepared model DTOs during summarization, underlying config/global code/resources,
+auxiliary router/cache warmer/deferred jobs and initializer drain remain open.
+This closes a reproduced resolver-output alias only, not complete effective-auth
+or production consumer acceptance. No live install/restart/session/config/policy/
+toggle/protected-content/runtime replacement/paid-provider/push action.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

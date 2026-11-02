@@ -618,3 +618,26 @@ graph384/17/330/18/768. Synthetic1000completedcallbacks7realtools/3headers versu
 notperSSE. No auth/HTTP/paid/wholelatency proof. Docs record exact remaining auth/env/
 calleroptions/resources/lifecycle/live gates. No live install/restart/session/config/
 policy/toggle/protected-content/runtime replacement/paidprovider/push.
+
+## Resolved auth env retained a producer alias across header hooks
+
+SDKnativegetAuth copies auth/headers butretainsenv, thenprepareRequest awaitsheaders
+beforeenvspread. Genuinecredentialfree resolver/headerHookred: syntheticPI_FIXTURE_ENV
+changed2readybackendcalls/Write. NowgetAuth delegates exactoriginalfunction/receiver/
+args once, transferscompletedbounded accessor/proxy/code-free data1024nodes64KiBdepth12.
+Sharedcopyhelper restoresenumerability recursively (headertransfer usesit too and
+validatesall ownheaderfields). No JSON/coercion/truncation/alternateauth/provider/
+transport/permission/cache/registry. Producer/refresh/signing/nativeconsumermaps stay
+mutableandindependent. Originalundefined/errors/signals/credentialrotation semantics
+unchanged. PublicgetAuth isnowexplicitownedDTOwrapper, readonlypinned; priorclaimall
+APIfunctionidentitiesunchangedishistorical. Nativeoriginal/provider/lookupcode retained.
+Prestartup/postclose delegation preserved, notproofnativecleanupnecessity or refresh/
+deferredownership.8newunits receiver/args/nestedindependence/reuse/flags/null/default/
+error/cleanup4badgraphs/privacy. ActualSDKboth: producerchanged, backendoriginalenv,
+2readycalls/Write/reset/cleanup.4422total4405pass17skip0fail443suites/types;
+47/47 perSDK1.2/1.4/4graph/root. Source7a2c471a04a973f8/artifactac70ec10661dc53b,
+graph384/17/330/18/768. Synthetic1000DTOs vs6ef52b5:0.146–0.327msbaseline/4.271–6.292
+current,mean+5.1us/result; no realauth/refresh/HTTP/paid/wholelatency. Docsretain caller
+options,authpreparedsummarization,code/resources/auxiliary/deferred/initializer/live
+acceptancegates; effectiveAuthAcceptedfalse. No live install/restart/session/config/
+policy/toggle/protected-content/runtime replacement/paidprovider/push.

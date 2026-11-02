@@ -5,7 +5,7 @@ import registerSubagentPromptRuntime from "../../src/runs/shared/subagent-prompt
 import { guardChildGeneration } from "../../src/runs/shared/child-generation-guard.ts";
 
 // Barrier/SDK-operation fixtures only, NOT production enforcement consumer acks.
-function fixture(ready = true, makeResult?: () => any, virtual = false, extra: Record<string, unknown> = {}, route?: (...args: any[]) => any, startupComplete = true, catalogueList?: (model: any, physical: any) => any) {
+function fixture(ready = true, makeResult?: () => any, virtual = false, extra: Record<string, unknown> = {}, route?: (...args: any[]) => any, startupComplete = true, catalogueList?: (model: any, physical: any) => any, authLookup: (...args: any[]) => Promise<unknown> = async () => "owned-cleanup-auth") {
 	const { lease } = createChildAuthorityLease({ leaseId: "generation", identity: { parentSessionId: "parent", runId: "run", agent: "worker", index: 0, cwd: process.cwd() }, payload: {}, requiredConsumers: ["pi-sbx", "pi-guardian"], send: () => false, cancel: () => {}, requestTimeoutMs: 100 });
 	if (ready) withChildAuthority(lease, () => {
 		for (const id of lease.requiredConsumers) { claimChildAuthority(id, process.cwd()); acknowledgeChildAuthority(id); }
@@ -30,7 +30,7 @@ function fixture(ready = true, makeResult?: () => any, virtual = false, extra: R
 		getProviders: () => [...providers], getProvider: (id: string) => providers.find(provider => provider.id === id),
 		getRegisteredNativeProvider: (id: string) => sources.native[providers.findIndex(provider => provider.id === id)],
 		getRegisteredProviderConfig: (id: string) => sources.config[providers.findIndex(provider => provider.id === id)],
-		registerProvider() {}, refresh() {}, getAuth: async () => "owned-cleanup-auth" };
+		registerProvider() {}, refresh() {}, getAuth: authLookup };
 	const originalAPIs = { getProvider: runtime.getProvider, getProviders: runtime.getProviders, getAuth: runtime.getAuth, getRegisteredNativeProvider: runtime.getRegisteredNativeProvider, getRegisteredProviderConfig: runtime.getRegisteredProviderConfig };
 	const guard = guardChildGeneration(runtime, lease, model); guard.bind(session); if (startupComplete) guard.completeStartup();
 	return { lease, runtime, originalAPIs, native, guard, model, tools, active, callable, physical, catalogue, providers, sources, session, calls: () => calls, options: () => options };
@@ -190,6 +190,46 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		const f = fixture();
 		assert.throws(() => f.runtime.streamSimple({ ...f.model, baseUrl: "https://changed.invalid" }, {}, {}), /metadata|selection/);
 		assert.equal(f.calls(), 0);
+	});
+	it("delegates auth with the exact SDK receiver/arguments and transfers independent complete DTO data", async () => {
+		const input = { auth: { apiKey: "synthetic", baseUrl: "https://auth.invalid", headers: { trace: "auth" } }, env: { PI_FIXTURE_ENV: "original" } };
+		let receiver: unknown, args: unknown[];
+		const f = fixture(true, undefined, false, {}, undefined, true, undefined, async function(this: unknown, ...value) { receiver = this; args = value; return input; });
+		const options = { signal: new AbortController().signal }, copy: any = await f.runtime.getAuth(f.model, options);
+		assert.equal(receiver, f.runtime); assert.deepEqual(args!, [f.model, options]);
+		assert.notEqual(copy, input); assert.notEqual(copy.env, input.env); assert.notEqual(copy.auth, input.auth);
+		input.env.PI_FIXTURE_ENV = "late"; input.auth.baseUrl = "https://late.invalid";
+		assert.equal(copy.env.PI_FIXTURE_ENV, "original"); assert.equal(copy.auth.baseUrl, "https://auth.invalid");
+		copy.env.PI_FIXTURE_ENV = "native owned"; assert.equal(input.env.PI_FIXTURE_ENV, "late"); f.guard.close();
+	});
+	it("keeps reusable auth/refresh results live for subsequent reads, without freezing producer data", async () => {
+		const input = { auth: { apiKey: "synthetic-one" }, env: { PI_FIXTURE_ENV: "one" } };
+		const f = fixture(true, undefined, false, {}, undefined, true, undefined, async () => input);
+		const first: any = await f.runtime.getAuth(); input.auth.apiKey = "synthetic-two"; input.env.PI_FIXTURE_ENV = "two";
+		const second: any = await f.runtime.getAuth(); assert.equal(first.auth.apiKey, "synthetic-one"); assert.equal(second.auth.apiKey, "synthetic-two");
+		assert.equal(first.env.PI_FIXTURE_ENV, "one"); assert.equal(second.env.PI_FIXTURE_ENV, "two"); f.guard.close();
+	});
+	it("retains null prototypes and nested non-enumerable auth/env data without turning it into provider fields", async () => {
+		const env = Object.assign(Object.create(null), { PI_FIXTURE_ENV: "visible" });
+		Object.defineProperty(env, "hidden", { value: "not an env override", enumerable: false });
+		const input = { auth: { headers: { trace: null } }, env };
+		const f = fixture(true, undefined, false, {}, undefined, true, undefined, async () => input);
+		const copy: any = await f.runtime.getAuth(); assert.equal(Object.getPrototypeOf(copy.env), null);
+		assert.deepEqual(Object.keys(copy.env), ["PI_FIXTURE_ENV"]); assert.equal(copy.env.hidden, env.hidden); assert.equal(copy.auth.headers.trace, null); f.guard.close();
+	});
+	it("preserves native undefined/error auth results and delegates owned cleanup after closure", async () => {
+		let failure = false, calls = 0; const error = new Error("native auth failed");
+		const f = fixture(true, undefined, false, {}, undefined, true, undefined, async () => { calls++; if (failure) throw error; return undefined; });
+		f.guard.close(); assert.equal(await f.runtime.getAuth(), undefined); failure = true;
+		await assert.rejects(() => f.runtime.getAuth(), value => value === error); assert.equal(calls, 2);
+	});
+	for (const shape of ["accessor", "proxy", "code", "oversized"] as const) it(`refuses ${shape} auth DTO data without invoking traps or exposing values`, async () => {
+		let traps = 0;
+		const env = shape === "accessor" ? Object.defineProperty({}, "private", { get() { traps++; return "must not inspect"; } })
+			: shape === "proxy" ? new Proxy({}, { ownKeys() { traps++; return []; } }) : shape === "code" ? { private: () => { traps++; } } : { private: "x".repeat(65537) };
+		const f = fixture(true, undefined, false, {}, undefined, true, undefined, async () => ({ auth: {}, env }));
+		await assert.rejects(() => f.runtime.getAuth(), /SDK auth result cannot be transferred as bounded accessor-free owned data/);
+		assert.equal(traps, 0); assert.equal(f.lease.signal.aborted, true);
 	});
 	it("transfers completed headers as independent data, leaving producer and SDK maps usable", async () => {
 		const f = fixture(), headers = { trace: "original", remove: null };
@@ -441,9 +481,10 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 			assert.equal(f.calls(), 1); f.guard.close();
 		}
 	});
-	it("keeps native function/API identities while making only provider data immutable", () => {
+	it("keeps native provider/lookup function identities and delegates auth through owned-data transfer", () => {
 		const f = fixture(); assert.equal(f.providers[0]!.streamSimple, f.native);
-		for (const name of ["getProvider", "getProviders", "getAuth", "getRegisteredNativeProvider", "getRegisteredProviderConfig"] as const) assert.equal(f.runtime[name], f.originalAPIs[name]);
+		for (const name of ["getProvider", "getProviders", "getRegisteredNativeProvider", "getRegisteredProviderConfig"] as const) assert.equal(f.runtime[name], f.originalAPIs[name]);
+		assert.notEqual(f.runtime.getAuth, f.originalAPIs.getAuth, "native auth delegates through the owned-data transfer boundary");
 		assert.equal(Object.isFrozen(f.providers[0]), true); assert.equal(Object.isFrozen(f.providers[0]!.auth), true);
 		assert.equal(Object.isFrozen(f.native), false, "SDK function objects are not recursively frozen or replaced");
 		f.guard.close();

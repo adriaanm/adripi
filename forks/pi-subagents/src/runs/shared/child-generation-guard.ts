@@ -43,6 +43,20 @@ function snapshotMetadata(value: unknown, budget = { nodes: 1024, bytes: 65536 }
 	return result;
 }
 
+// Validation builds an independent bounded data graph. Preserve source
+// enumerability as well: comparison snapshots intentionally normalize it.
+function copyOwnedData(value: unknown): unknown {
+	const copy = snapshotMetadata(value);
+	const flags = (target: unknown, source: unknown): void => {
+		if (!target || typeof target !== "object") return;
+		for (const name of Reflect.ownKeys(target)) {
+			const descriptor = Object.getOwnPropertyDescriptor(source, name)!;
+			Object.defineProperty(target, name, { enumerable: descriptor.enumerable });
+			flags((target as Record<PropertyKey, unknown>)[name], descriptor.value);
+		}
+	};
+	flags(copy, value); return copy;
+}
 /** Only validated, bounded SDK-owned DATA reaches this function. Keep callable
  * values untouched. Immutable data closes async handoff gaps without replacing
  * the model/provider objects, SDK definitions or the native transport. */
@@ -114,8 +128,15 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 	// registry mutators. getProvider exposes live auth/dispatch objects. Virtual
 	// routes may pick any pre-existing concrete provider; pin all once, then
 	// inspect only the selected provider on each operation/callback/event.
-	const providerLookup = target.getProvider, providerList = target.getProviders, authLookup = target.getAuth;
-	if (typeof providerLookup !== "function" || typeof providerList !== "function" || typeof authLookup !== "function") fail("this SDK lacks the public provider provenance boundary");
+	const providerLookup = target.getProvider, providerList = target.getProviders, nativeAuthLookup = target.getAuth;
+	if (typeof providerLookup !== "function" || typeof providerList !== "function" || typeof nativeAuthLookup !== "function") fail("this SDK lacks the public provider provenance boundary");
+	const authLookup = async (...args: unknown[]) => {
+		// Keep native resolution/refresh/signals, including owned cleanup calls.
+		// Transfer its completed DTO, not a resolver's retained env/auth aliases.
+		const result = await (nativeAuthLookup as Method).apply(runtime, args);
+		try { return copyOwnedData(result); }
+		catch { return fail("the SDK auth result cannot be transferred as bounded accessor-free owned data"); }
+	};
 	const sourceLookups = [["getProvider", providerLookup], ["getRegisteredNativeProvider", target.getRegisteredNativeProvider], ["getRegisteredProviderConfig", target.getRegisteredProviderConfig]] as const;
 	if (sourceLookups.some(([, lookup]) => typeof lookup !== "function")) fail("this SDK lacks the public registered provider provenance boundary");
 	const providerPins = new Map<string, readonly unknown[]>();
@@ -255,12 +276,11 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 					finally { assert(model, signal, requestMetadata); }
 					if (callback === "transformHeaders") {
 						try {
-							const data = snapshotMetadata(value);
-							if (!data || typeof data !== "object" || Array.isArray(data) || Object.values(data).some(header => header !== null && typeof header !== "string")) throw new Error("unsupported SDK headers");
+							const data = copyOwnedData(value);
+							if (!data || typeof data !== "object" || Array.isArray(data) || Object.getOwnPropertyNames(data).some(name => { const header = (data as Record<string, unknown>)[name]; return header !== null && typeof header !== "string"; })) throw new Error("unsupported SDK headers");
 							// Transfer a bounded independent map, not the hook's retained
 							// alias. Preserve enumerable flags; do not freeze a producer's
 							// reusable/signing map or restrict native SDK request ownership.
-							for (const name of Object.keys(data)) Object.defineProperty(data, name, { enumerable: Object.getOwnPropertyDescriptor(value, name)!.enumerable });
 							value = data;
 						} catch { return fail("the completed SDK header hook did not return bounded accessor-free header data"); }
 					}
