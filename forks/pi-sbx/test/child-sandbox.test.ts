@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,7 @@ import { ChildSandbox, registerChildSandbox } from "../src/child-sandbox.ts";
 import { canonicalizeTarget } from "../src/path-policy.ts";
 import { deriveChildPolicy } from "../src/child-authority.ts";
 import * as api from "../../pi-subagents/src/api/child-authority.ts";
-import { createChildAuthorityLease, withChildAuthority, type ChildAuthorityLeaseHandle } from "../../pi-subagents/src/runs/shared/child-authority.ts";
+import { bindChildRuntimeCodePaths, createChildAuthorityLease, withChildAuthority, type ChildAuthorityLeaseHandle } from "../../pi-subagents/src/runs/shared/child-authority.ts";
 
 let root: string, cwd: string, agentDir: string;
 let handle: ChildAuthorityLeaseHandle;
@@ -26,7 +26,8 @@ const globals = globalThis as Record<PropertyKey, unknown>;
 const ctx = (): ExtensionContext => ({ cwd, hasUI: false, sessionManager: { getSessionId: () => sdkId } } as unknown as ExtensionContext);
 const pi = (): ExtensionAPI => ({ getAllTools: () => tools } as unknown as ExtensionAPI);
 const scope = <T>(callback: () => T): T => withChildAuthority(handle.lease, callback);
-const prepare = () => scope(() => binding.prepare(ctx()));
+let codeEntries: Array<{ path: string; resolvedPath: string; sourceInfo?: { origin: string; baseDir?: string } }>, codeBound: boolean;
+const prepare = () => scope(() => { if (!codeBound) { bindChildRuntimeCodePaths(handle.lease, codeEntries.map(entry => ({ ...entry, sourceInfo: entry.sourceInfo ?? { origin: "top-level" } }))); codeBound = true; } return binding.prepare(ctx()); });
 function acknowledgeGuardianFixture() { scope(() => { api.claimChildAuthority("pi-guardian", cwd); api.acknowledgeChildAuthority("pi-guardian"); }); }
 async function activateFixture() { await prepare(); acknowledgeGuardianFixture(); scope(() => binding.activate(ctx(), true)); }
 
@@ -34,7 +35,7 @@ beforeEach(() => {
   saved = keys.map(key => Object.getOwnPropertyDescriptor(globals, key)); keys.forEach(key => delete globals[key]);
   pathValue = process.env.PATH;
   root = mkdtempSync(join(tmpdir(), "sbx-child-binding-")); cwd = join(root, "project"); agentDir = join(root, "agent");
-  mkdirSync(cwd); mkdirSync(agentDir); sdkId = "child-sdk"; requests = []; beforeDelivery = undefined; verdict = { outcome: "allow" };
+  mkdirSync(cwd); mkdirSync(agentDir); codeEntries = []; codeBound = false; sdkId = "child-sdk"; requests = []; beforeDelivery = undefined; verdict = { outcome: "allow" };
   tools = ["read", "write", "edit", "bash", "grep", "find", "ls"].map(name => ({ name, sourceInfo: { path: fileURLToPath(new URL("../src/index.ts", import.meta.url)) } }));
   payload = deriveChildPolicy({ agentDir, configDirName: ".pi", identity: { cwd }, baseline: {
     cwd: root, allowUnsandboxedCommands: false, environmentDeny: ["SYNTHETIC_SECRET"],
@@ -86,6 +87,26 @@ describe("actual public lease sandbox binding (controller/Guardian fixtures, not
     await activateFixture();
     const result = await binding.authorizePath({ surface: "read", target: join(agentDir, "auth.json"), reason: "not grantable" }, ctx(), binding.signal);
     expect(result.kind).toBe("deny"); expect(requests).toHaveLength(0);
+  });
+  it("denies a loaded code alias's canonical workspace target without asking the parent to lift it", async () => {
+    const target = join(cwd, "live.ts"), alias = join(agentDir, "live.ts"); writeFileSync(target, "trusted code"); symlinkSync(target, alias);
+    codeEntries = [{ path: alias, resolvedPath: alias }]; await activateFixture();
+    expect((await binding.authorizePath({ surface: "write", target: canonicalizeTarget(target, cwd), reason: "not delegated" }, ctx(), binding.signal)).kind).toBe("deny");
+    expect(requests).toHaveLength(0);
+    expect((await binding.authorizePath({ surface: "write", target: join(cwd, "ordinary"), reason: "ordinary data" }, ctx(), binding.signal)).kind).toBe("allow");
+  });
+  for (const drift of ["alias", "bytes"]) it(`revokes loaded code ${drift} drift before an action or parent request`, async () => {
+    const target = join(cwd, "live.ts"), other = join(cwd, "other.ts"), alias = join(agentDir, "live.ts");
+    writeFileSync(target, "trusted code"); writeFileSync(other, "other code"); symlinkSync(target, alias);
+    codeEntries = [{ path: alias, resolvedPath: alias }]; await activateFixture();
+    if (drift === "alias") { unlinkSync(alias); symlinkSync(other, alias); } else writeFileSync(target, "changed code with different size");
+    expect(() => binding.assertActive(ctx())).toThrow(/loaded code provenance changed/);
+    expect(handle.lease.signal.aborted).toBe(true); expect(requests).toHaveLength(0);
+  });
+  it("cannot prepare without the actual factory's loaded code receipt", async () => {
+    codeBound = true;
+    await expect(prepare()).rejects.toThrow(/has not bound its loaded code/);
+    expect(readdirSync(cwd)).toEqual([]); expect(handle.lease.signal.aborted).toBe(true);
   });
   it("rejects a changed SDK identity before IO or a parent request", async () => {
     await activateFixture(); sdkId = "foreign-sdk";

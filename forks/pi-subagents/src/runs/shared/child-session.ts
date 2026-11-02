@@ -13,7 +13,7 @@ import { pathToFileURL } from "node:url";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext, ToolCallEvent, ToolCallEventResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { CHILD_COMMAND_TOOL, createChildCommandRuntime } from "./child-commands.ts";
-import { captureChildAuthorityLease, hasChildAuthorityContext } from "./child-authority.ts";
+import { bindChildRuntimeCodePaths, captureChildAuthorityLease, hasChildAuthorityContext } from "./child-authority.ts";
 import { guardChildGeneration } from "./child-generation-guard.ts";
 import { supervisorChannelDir } from "./child-tool-plan.ts";
 import { pinChildCacheRetention } from "../../shared/child-cache-retention.ts";
@@ -589,7 +589,10 @@ export function createDefaultChildSessionFactory(options: DefaultChildSessionFac
 				if (guarded && (resolvedModel?.warning || !resolvedModel?.model || `${resolvedModel.model.provider}/${resolvedModel.model.id}` !== requestedModel)) {
 					throw new Error(`Guarded child model must resolve exactly to '${requestedModel}' without fallback${resolvedModel?.warning ? `: ${resolvedModel.warning}` : "."}`);
 				}
-				if (generationLease) generation = guardChildGeneration(modelRuntime, generationLease, resolvedModel!.model!, launch.signal);
+				if (generationLease) {
+					bindChildRuntimeCodePaths(generationLease, loader.getExtensions().extensions);
+					generation = guardChildGeneration(modelRuntime, generationLease, resolvedModel!.model!, launch.signal);
+				}
 				let created: Awaited<ReturnType<PiCodingAgentModule["createAgentSession"]>>;
 				try { created = await pi.createAgentSession({
 					cwd: launch.cwd,

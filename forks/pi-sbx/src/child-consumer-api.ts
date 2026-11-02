@@ -28,6 +28,7 @@ export interface ChildConsumerApi {
   claimChildAuthority(consumerId: string, cwd: string): ChildConsumerLease;
   acknowledgeChildAuthority(consumerId: string): void;
   isChildRuntimeControlTool(lease: ChildConsumerLease, name: string): boolean;
+  getChildRuntimeCodePaths(lease: ChildConsumerLease): readonly string[];
 }
 
 /** Presence chooses a public-API lookup, NOT root/child authority. Even malformed
@@ -42,7 +43,7 @@ export function mayHaveChildAuthorityContext(): boolean {
 export async function loadInstalledChildConsumerApi(agentDir: string): Promise<ChildConsumerApi> {
   const loaded = await loadInstalledChildAuthorityModule(agentDir, "./child-authority");
   if (loaded.CHILD_AUTHORITY_PROVIDER_VERSION !== CHILD_AUTHORITY_PROVIDER_VERSION ||
-      ["hasChildAuthorityContext", "claimChildAuthority", "acknowledgeChildAuthority", "isChildRuntimeControlTool"].some(name => typeof loaded[name] !== "function")) {
+      ["hasChildAuthorityContext", "claimChildAuthority", "acknowledgeChildAuthority", "isChildRuntimeControlTool", "getChildRuntimeCodePaths"].some(name => typeof loaded[name] !== "function")) {
     throw new Error("the installed launcher public child-authority API is missing, malformed or incompatible; root fallback is forbidden");
   }
   return loaded as unknown as ChildConsumerApi;

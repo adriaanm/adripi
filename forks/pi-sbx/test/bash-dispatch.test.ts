@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveChildPolicy } from "../src/child-authority.ts";
-import { createChildAuthorityLease, withChildAuthority } from "../../pi-subagents/src/runs/shared/child-authority.ts";
+import { bindChildRuntimeCodePaths, createChildAuthorityLease, withChildAuthority } from "../../pi-subagents/src/runs/shared/child-authority.ts";
 import * as childApi from "../../pi-subagents/src/api/child-authority.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BashOperations, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -1041,6 +1041,8 @@ describe("registered production child sandbox entry (actual API/SDK backends, mo
     state.realSdkTools = true; state.sandboxAvailable = options.available ?? true;
     try {
       await withChildAuthority(handle.lease, async () => {
+        // Explicit factory-metadata fixture; the actual factory is covered by the SDK/IPC matrix.
+        bindChildRuntimeCodePaths(handle.lease, [{ path: owner, resolvedPath: owner, sourceInfo: { origin: "top-level" } }]);
         await sandboxExtension(extension.pi);
         expect(extension.pi.registerFlag).not.toHaveBeenCalled(); expect(extension.commands.size).toBe(0);
         childApi.claimChildAuthority("pi-guardian", root); childApi.acknowledgeChildAuthority("pi-guardian"); // Explicit fixture, not composition.

@@ -1,5 +1,6 @@
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { types } from "node:util";
 import { getPackageDir } from "@earendil-works/pi-coding-agent";
 import { SandboxRuntimeConfigSchema } from "@anthropic-ai/sandbox-runtime";
 import { decodeChildPolicy } from "./child-policy.ts";
@@ -31,7 +32,7 @@ export const CHILD_BOOTSTRAP_ENV_DENY = ["BASH_ENV", "ENV", "ZDOTDIR"] as const;
  * parent static/strict restrictions remain final in its existing decision path.
  * Broad Unix/local-binding/PTY ceilings are conservatively disabled, not lent.
  */
-export function compileChildConfig(value: unknown, cwd: string, agentDir: string): EffectiveSandboxConfig {
+export function compileChildConfig(value: unknown, cwd: string, agentDir: string, loadedCodePaths: readonly string[] = []): EffectiveSandboxConfig {
   const policy = decodeChildPolicy(value, cwd);
   const unique = (paths: readonly string[]) => [...new Set(paths)];
   if (!isAbsolute(agentDir)) throw new Error("Child runtime requires an absolute actual agent directory");
@@ -40,8 +41,19 @@ export function compileChildConfig(value: unknown, cwd: string, agentDir: string
   // writable/readable credential capability through that metadata difference.
   const mandatoryRead = unique([...policy.read.mandatoryDeny, join(agentDir, "auth.json")]);
   const packages = [getPackageDir(), fileURLToPath(new URL("../", import.meta.url))];
-  const codeRoots = packages.flatMap(root => {
+  // Factory-bound ResourceLoader metadata only. Additional immutable denies;
+  // never inferred from model/tool input or merged into transported authority.
+  const invalid = (): never => { throw new Error("Child runtime requires bounded literal absolute loaded code paths"); };
+  if (!Array.isArray(loadedCodePaths) || types.isProxy(loadedCodePaths) || loadedCodePaths.length > 256) invalid();
+  const loaded: string[] = []; let bytes = 0;
+  for (let index = 0; index < loadedCodePaths.length; index++) {
+    const path = Object.getOwnPropertyDescriptor(loadedCodePaths, String(index))?.value;
+    if (typeof path !== "string" || !isAbsolute(path) || Buffer.byteLength(path) > 4096 || /[\x00-\x1f\x7f*?{}\[\]\\]/.test(path)) invalid();
+    bytes += Buffer.byteLength(path); if (bytes > 65536) invalid(); loaded.push(path);
+  }
+  const codeRoots = [...packages, ...loaded].flatMap(root => {
     const canonical = canonicalizeTarget(root, cwd);
+    if (/[\x00-\x1f\x7f*?{}\[\]\\]/.test(canonical)) throw new Error("Child runtime cannot express a literal canonical code exclusion");
     return [root, canonical, dependencyNamespace(canonical)];
   });
   const mandatoryWrite = unique([...policy.write.mandatoryDeny, agentDir, ...codeRoots, process.execPath, canonicalizeTarget(process.execPath, cwd)]);

@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { getPackageDir } from "@earendil-works/pi-coding-agent";
@@ -90,6 +90,30 @@ describe("child runtime compiler (data translation, not readiness/OS proof)", ()
     }
   });
 
+  it("keeps declared loaded entries and owning node_modules namespaces read-only without closing ordinary workspace data", () => {
+    const code = join(cwd, "live.ts"), alias = join(agentDir, "live.ts"), pkg = join(cwd, "plugins/node_modules/plugin/index.ts");
+    writeFileSync(code, "trusted"); symlinkSync(code, alias);
+    const config = compileChildConfig(payload, cwd, agentDir, [alias, pkg]);
+    const policy = createFilePolicy({ filesystem: config.runtime.filesystem, mandatoryDenyRead: config.hardening.denyRead, mandatoryDenyWrite: config.hardening.mandatoryDenyWrite });
+    for (const target of [code, pkg, join(cwd, "plugins/node_modules/peer/lazy.js")]) expect(pathGrantFeasibility({ surface: "write", target: canonicalizeTarget(target, cwd), reason: "no code grant" }, cwd, policy).ok).toBe(false);
+    expect(canRead(code, cwd, policy)).toBe(true); expect(canWrite(canonicalizeTarget(join(cwd, "ordinary.txt"), cwd), cwd, policy)).toBe(true);
+    expect(config.runtime.filesystem.denyWrite).toContain(canonicalizeTarget(code, cwd));
+  });
+  it("refuses a canonical loaded-code filename whose glob syntax cannot be expressed as a literal exclusion", () => {
+    const code = join(cwd, "[live].ts"), alias = join(agentDir, "live.ts"); writeFileSync(code, "trusted"); symlinkSync(code, alias);
+    expect(() => compileChildConfig(payload, cwd, agentDir, [alias])).toThrow(/literal canonical code exclusion/);
+  });
+  for (const shape of ["relative", "glob", "proxy", "accessor", "sparse", "too many", "aggregate bytes"]) it(`refuses ${shape} loaded code input before invoking metadata code`, () => {
+    let traps = 0; let paths: any = [join(cwd, "live.ts")];
+    if (shape === "relative") paths = ["relative.ts"];
+    if (shape === "glob") paths = [join(cwd, "*.ts")];
+    if (shape === "proxy") paths = new Proxy([], { get() { traps++; return 0; } });
+    if (shape === "accessor") paths = Object.defineProperty([], "0", { get() { traps++; return "/private"; } });
+    if (shape === "sparse") paths = new Array(1);
+    if (shape === "too many") paths = new Array(257).fill(join(cwd, "live.ts"));
+    if (shape === "aggregate bytes") paths = new Array(30).fill("/" + "x".repeat(3000));
+    expect(() => compileChildConfig(payload, cwd, agentDir, paths)).toThrow(/bounded literal absolute loaded code paths/); expect(traps).toBe(0);
+  });
   it("never admits a write exception against the actual loaded enforcement package", () => {
     const config = compileChildConfig(payload, cwd, agentDir);
     const policy = createFilePolicy({ filesystem: config.runtime.filesystem, credentialFiles: config.runtime.credentials?.files,

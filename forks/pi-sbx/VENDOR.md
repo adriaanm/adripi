@@ -342,6 +342,31 @@ See docs/round-2-production-consumers.md for exact evidence and explicit path-po
 versus code-content/hardlink/OS/host-writer/provider-auth boundaries. No live install/
 restart/policy/config/toggle/protected-content/runtime replacement/push.
 
+## Loaded global entries escaped code protection through canonical workspace targets
+
+A genuine detached child overwrote the workspace target of its agentDir global
+provider symlink and reported complete. The child consumer now requires the
+factory-bound read-only loaded-code receipt on the existing launcher API. Feed
+native entry paths/resolved paths and declared package roots into existing
+mandatory write floors (spelled/canonical/owning node_modules); no review or scoped
+exception can reopen them. The existing action check pins canonical targets and
+file/directory stamps, refusing alias or metadata drift. Code reads and unrelated
+workspace writes remain available. No root config merge, new policy/grant store,
+loader, wire field, permission or approval channel; missing receipt/API fails closed.
+
+448/448 tests/30 files +types; actual source/compiled detached symlink and native
+local-package sibling regressions join 63/63 per SDK1.2/1.4 +4graph, subagents4464
+(17 skips), Guardian214 nonheadless +types/root/fresh graph. Registered-entry units
+explicitly supply metadata instead of pretending to run the SDK loader. Bounded
+snapshot/proxy/accessor/malformed/alias/byte-drift/normal-IO tests remain distinct
+from OS proof. Five synthetic binding samples quantify added checks (~154µs per
+assertion for 8 extra external entries, ~700µs for 32; one-time prepare overhead
+~58/250ms), not live latency or provider costs. See the full evidence and limits in
+`docs/round-2-production-consumers.md`: metadata is after-load, not pre-load or
+recursive loose-dependency/private-heap/hostile-writer containment. Package cache
+writes changing pinned directories conservatively revoke. No deploy/restart/live
+policy/config/toggle/protected-content/runtime replacement/paid provider/push.
+
 ## Deploy/update
 
 `install.sh` installs npm `pi-sbx@0.1.3` and mirrors this `src/` over the installed

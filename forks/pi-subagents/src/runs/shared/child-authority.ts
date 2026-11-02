@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
+import { types } from "node:util";
 import * as path from "node:path";
 import {
 	snapshotRequiredChildExtensions,
@@ -173,6 +174,46 @@ export interface ChildAuthorityLease {
 // host code is outside this boundary; a child shell cannot carry these references.
 const RUNTIME_TOOL_INSPECTOR = Symbol.for("pi-subagents.child-runtime-tool-inspector.v1");
 const STRUCTURED_OUTPUT_CODE = Symbol.for("pi-subagents.structured-output-code.v1");
+const RUNTIME_CODE_PATHS = Symbol.for("pi-subagents.child-runtime-code-paths.v1");
+
+/** Internal factory receipt from the genuine ResourceLoader, AFTER loading and
+ * BEFORE consumer startup. Only on-disk entries travel; synthetic entries name
+ * no file and confer no execution/tool permission. Never mutate SDK records. */
+export function bindChildRuntimeCodePaths(lease: ChildAuthorityLease, extensions: unknown): void {
+	const invalid = (): never => { throw new ChildAuthorityError("invalid-lease", "The SDK loaded code paths are missing, malformed, oversized or already bound."); };
+	if (lease.signal.aborted || Object.getOwnPropertyDescriptor(lease, RUNTIME_CODE_PATHS) || !Array.isArray(extensions) || types.isProxy(extensions) || extensions.length > 256) return invalid();
+	const paths = new Set<string>(); let bytes = 0;
+	const add = (value: unknown, synthetic = false): void => {
+		if (typeof value !== "string" || Buffer.byteLength(value) > 4096 || /[\x00-\x1f\x7f]/.test(value)) return invalid();
+		if (!path.isAbsolute(value)) {
+			if (synthetic && (value.startsWith("builtin:") || value.startsWith("<inline:") && value.endsWith(">"))) return;
+			return invalid();
+		}
+		// Native and SRT policy treat glob syntax as patterns, not filenames.
+		if (/[\*?{}\[\]\\]/.test(value)) invalid();
+		if (!paths.has(value)) { paths.add(value); bytes += Buffer.byteLength(value); }
+		if (paths.size > 256 || bytes > 65536) invalid();
+	};
+	for (let index = 0; index < extensions.length; index++) {
+		const entry = Object.getOwnPropertyDescriptor(extensions, String(index))?.value;
+		if (!entry || typeof entry !== "object" || types.isProxy(entry)) invalid();
+		for (const field of ["path", "resolvedPath"]) add(Object.getOwnPropertyDescriptor(entry, field)?.value, true);
+		const info = Object.getOwnPropertyDescriptor(entry, "sourceInfo")?.value;
+		if (!info || typeof info !== "object" || types.isProxy(info)) invalid();
+		const origin = Object.getOwnPropertyDescriptor(info, "origin")?.value;
+		if (origin === "package") add(Object.getOwnPropertyDescriptor(info, "baseDir")?.value);
+		else if (origin !== "top-level") invalid();
+	}
+	Object.defineProperty(lease, RUNTIME_CODE_PATHS, { value: Object.freeze([...paths]) });
+}
+/** Read-only local code provenance for ADDITIONAL DENIES, never a grant, wire
+ * policy or pre-load sandbox. Available before acknowledgment, in the same scope. */
+export function getChildRuntimeCodePaths(lease: ChildAuthorityLease): readonly string[] {
+	if (lease.signal.aborted || captureChildAuthorityLease(lease.identity.cwd) !== lease) throw new ChildAuthorityError("invalid-lease", "Loaded code provenance requires the current live SDK child lease.");
+	const paths = Object.getOwnPropertyDescriptor(lease, RUNTIME_CODE_PATHS)?.value;
+	if (!paths) throw new ChildAuthorityError("not-ready", "The SDK factory has not bound its loaded code paths; refusing consumer activation.");
+	return paths;
+}
 
 /** Internal producer proof. Only the no-path structured-output implementation uses it. */
 export function markChildStructuredOutputCode(lease: ChildAuthorityLease, execute: Function): void {

@@ -30,6 +30,7 @@ export class ChildSandbox implements ChildNativeAuthority {
   private shellPath?: string;
   private executionPathValue?: string;
   private executionPins: Array<{ path: string; canonical: string; stamp: string }> = [];
+  private codePins: Array<{ path: string; canonical: string; stamp: string }> = [];
   private executionStamp(path: string): string {
     try { const s = statSync(path, { bigint: true }); return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`; }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing"; throw error; }
@@ -75,7 +76,9 @@ export class ChildSandbox implements ChildNativeAuthority {
       this.cwd = ctx.cwd;
       this.sessionId = ctx.sessionManager.getSessionId();
       if (typeof this.sessionId !== "string" || !this.sessionId.trim()) throw new Error("the child SDK has no stable session identity");
-      this.config = compileChildConfig(this.policy, ctx.cwd, getAgentDir());
+      const codePaths = this.api.getChildRuntimeCodePaths(this.lease);
+      this.config = compileChildConfig(this.policy, ctx.cwd, getAgentDir(), codePaths);
+      this.codePins = codePaths.map(path => { const canonical = canonicalizeTarget(path, ctx.cwd); return { path, canonical, stamp: this.executionStamp(canonical) }; });
       this.abortListener = () => { if (this.phase !== "closed" && this.phase !== "failed") this.poison("parent authority was revoked or its transport ended"); };
       this.lease.signal.addEventListener("abort", this.abortListener, { once: true });
       this.phase = "prepared";
@@ -127,6 +130,9 @@ export class ChildSandbox implements ChildNativeAuthority {
     if (ctx.signal?.aborted || ctx.cwd !== this.cwd || ctx.sessionManager.getSessionId() !== this.sessionId) throw new Error("the child SDK action identity/cancellation changed");
     decodeChildPolicy(this.policy, ctx.cwd);
     if (this.shellPath && process.env.PATH !== this.executionPathValue) throw new Error("the SDK execution PATH changed");
+    for (const pin of this.codePins) {
+      if (canonicalizeTarget(pin.path, ctx.cwd) !== pin.canonical || this.executionStamp(pin.canonical) !== pin.stamp) throw new Error("the pinned SDK loaded code provenance changed");
+    }
     for (const pin of this.executionPins) {
       if (canonicalizeTarget(pin.path, ctx.cwd) !== pin.canonical || this.executionStamp(pin.canonical) !== pin.stamp) throw new Error("the pinned SDK shell/PATH helper provenance changed");
     }

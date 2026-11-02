@@ -721,3 +721,33 @@ types/root/freshness; prior4443 full subagents gate unchanged, same source/artif
 5c7cff725cc65042/d45901e5dbead14f. Detailed evidence/limits in consumer commission.
 No live install/restart/session/config/policy/toggle/protected-content/runtime
 replacement/paid-provider/push.
+
+## Loaded global code was writable through canonical workspace targets
+
+Real detached source/compiled launches now protect the actual ResourceLoader's
+loaded entry paths/resolved paths and declared package roots, including a provider
+symlink and a native local package's sibling helper. Private factory producer
+snapshots bounded own-data metadata after load, before consumer startup; existing
+public child-authority module exports only a same-live-lease read-only getter.
+Receipt is immutable/non-enumerable, not a serialized policy or grant; absent/
+malformed/oversized/proxy/accessor/foreign/rebound data refuses. Synthetic paths
+confer nothing. pi-sbx adds mandatory write floors and canonical/stamp freshness;
+ordinary reads/writes, exact semantic review and current readiness remain intact.
+No alternative loader/resolver/registry/approval transport, new role or wire field.
+21 units and both bundle/compiled directions prove ownership without implicit ack.
+Native continuations observe the genuine Write's mandatory deny error, retain
+original code/helper bytes, both real consumer acks, parent review, process drain
+and cleanup. This is one additional-deny invariant, not pre-load/private-heap/
+recursive loose-dependency/hostile-writer or complete resource certification.
+
+4464 total/4447 pass/17 skip/zero fail, types; pi-sbx448/30 files +types;
+Guardian214 nonheadless +types; matrix63/63 each SDK1.2/1.4, four graph/root/fresh
+build. Source1b8f05266328b683/artifact69166f0768e7fc4d; graph384/17/330/18/768.
+Five synthetic 200-assertion samples: baseline/current-empty means881.6/882.9ms;
+current8/32 extra external entries913.7/1022.9ms; one-time prepare51.4/51.2/109.4/
+300.8ms respectively. This quantifies metadata/path-check overhead, not actual
+SRT/provider/auth/HTTP/paid/whole latency. See docs/round-2-production-consumers.md
+for red evidence, reduction review, metadata bounds and remaining native deferred/
+OAuth/effective-auth/deployed/OS/Git/live gates. Aggregate acceptance still false.
+No live install/restart/session/config/policy/toggle/protected-content/runtime
+replacement/paid-provider/push.

@@ -27,6 +27,10 @@ for (const [producer, consumer] of [[bundled, compiled], [compiled, bundled]]) {
 				assert.equal(consumer.hasChildAuthorityContext(), true);
 				assert.equal(domain.captureChildAuthorityLease("/workspace/built"), handle.lease, "compiled SDK guard captures the same live scoped lease");
 				assert.throws(() => handle.lease.assertReady(), /pi-sbx/, "SDK capture must not claim or acknowledge a consumer");
+				domain.bindChildRuntimeCodePaths(handle.lease, [{ path: "/fixture/loaded.ts", resolvedPath: "/fixture/loaded.ts", sourceInfo: { origin: "top-level" } }]);
+				assert.deepEqual(consumer.getChildRuntimeCodePaths(handle.lease), ["/fixture/loaded.ts"]);
+				assert.equal(consumer.getChildRuntimeCodePaths(handle.lease), producer.getChildRuntimeCodePaths(handle.lease));
+				assert.equal(producer.bindChildRuntimeCodePaths, undefined, "only the internal factory can produce the receipt");
 				const claimed = consumer.claimChildAuthority("pi-sbx", "/workspace/built");
 				assert.equal(claimed, handle.lease);
 				consumer.acknowledgeChildAuthority("pi-sbx");

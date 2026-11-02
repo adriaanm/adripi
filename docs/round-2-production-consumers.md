@@ -1611,6 +1611,103 @@ Resource/code ownership and other aggregate/live acceptance gates remain open.
 No live install/restart/session/config/policy/toggle/protected-content/runtime
 replacement/paid-provider/push action.
 
+## Loaded global code could be written through its workspace target
+
+A real detached launch loaded its trusted global provider from an agent-directory
+symlink to `child/live-plugin.ts`. The normal native Write then overwrote the
+**canonical workspace target** with `actual detached input 文🌍`, and durable task
+state was `complete`. Denying only the agent-directory spelling and the SDK's own
+node_modules namespace did not protect this loaded entry. The red is retained in
+`.local/goal-consumers/resource-ownership-before.log`.
+
+The reduced fix carries only **local read-only provenance for additional denies**:
+
+- After the genuine ResourceLoader finishes loading, the default factory snapshots
+  its loaded extensions' own-data `path`, `resolvedPath` and, for package-origin
+  entries, declared `sourceInfo.baseDir`. It never mutates SDK records. Synthetic
+  builtins/inline entries name no disk file and grant nothing. Missing/unknown
+  origins, package roots, accessors/proxies, sparse arrays, relative/pattern/control
+  paths or excessive metadata fail closed (256 records/unique paths, 4096 UTF-8
+  bytes/path, 64KiB aggregate). This is **after-load** metadata, not a pre-load jail.
+- The producer is internal to the existing factory; the existing public
+  child-authority module exports only `getChildRuntimeCodePaths(lease)`. It reads
+  one immutable non-enumerable receipt on the same live ALS-scoped lease, before
+  acknowledgment if necessary. It cannot bind/rebind a receipt, claim/ack a role,
+  mutate transported v2 policy, grant IO or survive scope/lifetime replacement.
+  Missing producer receipt or installed getter refuses consumer startup.
+- pi-sbx feeds those paths into its existing compiler as mandatory write denies:
+  spelled and canonical entries/package roots and the outermost owning
+  node_modules namespace. Parent review, scoped path exceptions and static allows
+  cannot reopen them. Public code reads and unrelated workspace writes remain
+  available. No model/tool input or manifest supplies this provenance.
+- The existing action freshness check also pins loaded entries/package roots'
+  canonical target and dev/inode/size/mtime/ctime. Alias or stamp drift revokes the
+  lease. This is metadata freshness, not hashes, recursive dependency discovery,
+  hardlink immunity or hostile-same-user atomicity. Package data/cache writes that
+  change a pinned directory are conservatively incompatible with that lifetime.
+
+Reduction/adversarial review: the SDK ExtensionAPI/Context cannot expose the
+ResourceLoader list, and selected-tool metadata omits provider-only extensions.
+Protecting only agentDir demonstrably failed; disabling trusted global resources
+would remove legitimate providers, not express their ownership. A writable
+manifest, environment claim or new loader/registry would add unjustified trust.
+The new read-only getter is on the **existing lease/public subpath**, not a second
+provider, wire field, permission store or approval path. Only additional denies
+cross this seam; ordinary readiness, exact semantic review, host admission and
+single-background-child placement remain unchanged. The binder is absent from
+both public API copies; bundle→compiled and compiled→bundle tests share the same
+receipt. This is self-review plus adversarial regressions, not an independent
+reviewer acceptance.
+
+Committed coverage now includes:
+
+- 21 provenance units: immutable independent snapshot, no implicit ack, foreign
+  lease/scope, missing receipt, closed lifetime/rebinding, package and synthetic
+  records, bad bounds/proxy/accessor/sparse/origin/root cases without invoking traps.
+- pi-sbx compiler/binding tests: canonical code and future peer namespace floors,
+  no parent exception for mandatory code writes, ordinary writes/reads preserved,
+  canonical pattern refusal, alias/byte drift, and missing receipt/API refusal.
+  The older registered-entry unit fixture explicitly supplies factory metadata;
+  it is not misrepresented as real factory loading.
+- Four genuine detached regressions: source and full-compiled caller each load
+  (a) the symlinked global provider and (b) a global local package declared through
+  native settings/package discovery. The latter tries a **sibling helper**, not
+  just the entry file. The unchanged genuine continuation observes the native
+  Write's `isError:true` mandatory deny; original code/helper bytes survive, both
+  real consumers are ready, two real faux generations run, parent semantic review
+  is retained, and native process drain/private-config/scratch cleanup are proven.
+  Task `complete` here means the explicit fixture completed after a nonterminal
+  denied Write; it is **not** evidence that the requested overwrite succeeded.
+
+Verification: subagents **4464 total /4447 pass /17 skip /0 fail**, types;
+pi-sbx **448/448 in 30 files**, types; Guardian **214/214 nonheadless**, types;
+**63/63 per genuine SDK1.2/1.4**, four cross-build graph tests, root checks/diff
+checks and fresh complete graph. Source `1b8f05266328b683`, artifact
+`69166f0768e7fc4d` (384 inputs /17 exports /330 compiled modules /18 module URLs
+[14 bundle,4 compiled] /768 artifacts). Evidence is in
+`.local/goal-consumers/resource-code-{focused,build,native-focused,full,sbx,
+composition,sdk14,guardian,root}.log`.
+
+Performance evidence is deliberately narrow. Five interleaved synthetic binding
+samples each perform 200 action freshness assertions with explicit controller/
+Guardian-ack fixtures. Original HEAD versus current empty receipt means are
+881.6/882.9ms; current 8/32 extra external entry paths mean 913.7/1022.9ms
+(~154/700µs additional per assertion). One-time prepare means are 51.4ms baseline,
+51.2ms current-empty, 109.4ms for 8 and 300.8ms for 32 extra paths. This measures the
+existing compiler/path checks plus added canonical/stat checks, not real SRT,
+provider/auth/HTTP, paid usage or whole delegation latency. It makes the cost of
+extra protected entries explicit rather than claiming free provenance. Baseline
+code is exact HEAD with location-only imports redirected to the same genuine
+packages; Jiti transpiles both binding variants. Logs/driver/baseline are
+`.local/goal-consumers/resource-code-{bench.log,bench.mjs,baseline.ts}`.
+
+This closes the reproduced entry/package ownership gap, **not #14 aggregate
+acceptance**. Arbitrary loose imported files, privileged host JavaScript/private
+heaps, pre-load execution, remote deferred/OAuth ownership, effective auth/HTTP,
+deployment/loaded broker, actual OS/Git and live accounting/total latency remain
+separate gates. No live install/restart/policy/config/toggle/protected-content
+access/runtime replacement/paid provider/push occurred.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

@@ -5,7 +5,7 @@
 import "../forks/pi-subagents/test/support/isolated-temp-root.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, watch, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test, { before } from "node:test";
@@ -169,6 +169,8 @@ for (const [label, options] of [
 	["broken Guardian", { brokenGuardian: true }], ["semantic terminal denial", { semanticDeny: true }],
 	["compiled graph success", { compiled: true }], ["compiled SDK virtual routing", { compiled: true, virtual: true }], ["compiled unavailable runtime", { compiled: true, runtimeUnavailable: true }],
 	["compiled broken Guardian", { compiled: true, brokenGuardian: true }], ["compiled terminal denial", { compiled: true, semanticDeny: true }],
+	["loaded global provider symlink", { resourceSymlink: true }], ["compiled loaded global provider symlink", { compiled: true, resourceSymlink: true }],
+	["loaded local package namespace", { resourcePackage: true }], ["compiled loaded local package namespace", { compiled: true, resourcePackage: true }],
 	["noncooperative provider initializer", { noncooperativeStartup: true }], ["compiled noncooperative provider initializer", { compiled: true, noncooperativeStartup: true }],
 ]) {
 	test(`full detached bootstrap/default factory: ${label}, ${options.noncooperativeStartup ? "no prompt before consumers" : "both actual consumers"}, observed process drain`, async t => {
@@ -181,7 +183,18 @@ import {fauxProvider,fauxAssistantMessage,fauxToolCall} from '@earendil-works/pi
 import {VERSION} from '@earendil-works/pi-coding-agent';
 import {captureChildAuthorityLease} from ${JSON.stringify(nativeAuthority)};
 export default async function(api){const lease=captureChildAuthorityLease(${JSON.stringify(f.child)});${options.noncooperativeStartup ? `appendFileSync(${JSON.stringify(path.join(f.root, "initializer-held"))},JSON.stringify({pid:process.pid,sdk:VERSION})+'\\n');setInterval(()=>{},1000);await new Promise(()=>{});` : ""}const faux=fauxProvider({api:'fixture-faux',provider:'trusted',models:[{id:'model'}]});
-faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'detached.txt',content:${JSON.stringify(options.semanticDeny ? "FORBIDDEN" : "actual detached input 文🌍")}},{id:'detached-write'}),{stopReason:'toolUse'}),fauxAssistantMessage('Actual detached fixture completed.')].map(response=>(_context,_options,_state,model)=>{lease.assertReady();appendFileSync(${JSON.stringify(generations)},JSON.stringify({ready:lease.requiredConsumers,sdk:VERSION,physical:{provider:model.provider,id:model.id,api:model.api}})+'\\n');return response}));api.registerProvider(faux.provider);${options.virtual ? `api.registerVirtualModel({provider:'trusted',id:'virtual',name:'Fixture virtual',contextWindow:128000,maxTokens:2048,route:request=>{appendFileSync(${JSON.stringify(path.join(f.root, "routes.jsonl"))},JSON.stringify({selected:request.model.id,reason:request.reason,previous:request.previous?.model.id})+'\\n');return {model:faux.models[0],thinkingLevel:'off'};}});` : ""}}`);
+faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:${JSON.stringify(options.resourceSymlink ? path.join(f.child, 'live-plugin.ts') : options.resourcePackage ? path.join(f.child, 'live-package/sidecar.js') : 'detached.txt')},content:${JSON.stringify(options.semanticDeny ? "FORBIDDEN" : "actual detached input 文🌍")}},{id:'detached-write'}),{stopReason:'toolUse'}),fauxAssistantMessage('Actual detached fixture completed.')].map(response=>(_context,_options,_state,model)=>{lease.assertReady();appendFileSync(${JSON.stringify(generations)},JSON.stringify({ready:lease.requiredConsumers,sdk:VERSION,physical:{provider:model.provider,id:model.id,api:model.api}${options.resourceSymlink || options.resourcePackage ? `,toolResults:_context.messages.filter(message=>message.role==='toolResult').map(message=>({toolName:message.toolName,isError:message.isError,mandatoryDeny:message.content.some(part=>part.type==='text'&&part.text.includes('mandatory deny-write'))}))` : ""}})+'\\n');return response}));api.registerProvider(faux.provider);${options.virtual ? `api.registerVirtualModel({provider:'trusted',id:'virtual',name:'Fixture virtual',contextWindow:128000,maxTokens:2048,route:request=>{appendFileSync(${JSON.stringify(path.join(f.root, "routes.jsonl"))},JSON.stringify({selected:request.model.id,reason:request.reason,previous:request.previous?.model.id})+'\\n');return {model:faux.models[0],thinkingLevel:'off'};}});` : ""}}`);
+	const originalProvider = readFileSync(provider, "utf8");
+	if (options.resourceSymlink) {
+		writeFileSync(path.join(f.child, "live-plugin.ts"), originalProvider); unlinkSync(provider); symlinkSync(path.join(f.child, "live-plugin.ts"), provider);
+		writeFileSync(path.join(f.agentDir, "settings.json"), JSON.stringify({ extensions: [provider] }));
+	} else if (options.resourcePackage) {
+		const pkg = path.join(f.child, "live-package"); mkdirSync(pkg);
+		writeFileSync(path.join(pkg, "index.ts"), originalProvider); unlinkSync(provider);
+		writeFileSync(path.join(pkg, "sidecar.js"), "trusted package helper");
+		writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ name: "synthetic-global-plugin", version: "1.0.0", pi: { extensions: ["./index.ts"] } }));
+		writeFileSync(path.join(f.agentDir, "settings.json"), JSON.stringify({ packages: [pkg] }));
+	}
 	const policy = createFilePolicy({ filesystem: { denyRead: [], allowRead: [], allowWrite: [f.parent], denyWrite: [] },
 		mandatoryDenyRead: [path.join(f.agentDir, "auth.json")], mandatoryDenyWrite: [f.agentDir] });
 	const publication = publishChildAuthority({ sessionId: "parent", agentDir: f.agentDir, configDirName: ".pi",
@@ -224,10 +237,16 @@ faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'detached.txt
 			t.diagnostic(JSON.stringify({ initializer: "non-returning with live interval", pid, terminal: proof.instances, status: status.state }));
 		}
 		assert.equal(status.state, failedStartup || options.semanticDeny ? "failed" : "complete", JSON.stringify(status));
-		assert.equal(existsSync(path.join(f.child, "detached.txt")), !failedStartup && !options.semanticDeny);
-		if (!failedStartup && !options.semanticDeny) assert.equal(readFileSync(path.join(f.child, "detached.txt"), "utf8"), "actual detached input 文🌍");
+		assert.equal(existsSync(path.join(f.child, "detached.txt")), !failedStartup && !options.semanticDeny && !options.resourceSymlink && !options.resourcePackage);
+		if (options.resourceSymlink) {
+			assert.equal(readFileSync(path.join(f.child, "live-plugin.ts"), "utf8"), originalProvider);
+		} else if (options.resourcePackage) {
+			assert.equal(readFileSync(path.join(f.child, "live-package/index.ts"), "utf8"), originalProvider);
+			assert.equal(readFileSync(path.join(f.child, "live-package/sidecar.js"), "utf8"), "trusted package helper");
+		} else if (!failedStartup && !options.semanticDeny) assert.equal(readFileSync(path.join(f.child, "detached.txt"), "utf8"), "actual detached input 文🌍");
 		const calls = existsSync(generations) ? readFileSync(generations, "utf8").trim().split("\n").map(line => JSON.parse(line)) : [];
 		assert.equal(calls.length, failedStartup ? 0 : options.semanticDeny ? 1 : 2);
+		if (options.resourceSymlink || options.resourcePackage) assert.deepEqual(calls[1].toolResults, [{ toolName: "write", isError: true, mandatoryDeny: true }]);
 		for (const call of calls) { assert.deepEqual([...call.ready].sort(), ["pi-guardian", "pi-sbx"]); assert.equal(call.sdk, sdkVersion); assert.deepEqual(call.physical, {provider:"trusted",id:"model",api:"fixture-faux"}); }
 		if (options.virtual) assert.deepEqual(readFileSync(path.join(f.root, "routes.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line)), [{selected:"virtual",reason:"user"},{selected:"virtual",reason:"continuation",previous:"model"}]);
 		assert.deepEqual(f.readPrompts().map(prompt => prompt.action.tool_name), failedStartup ? [] : ["write"]);
