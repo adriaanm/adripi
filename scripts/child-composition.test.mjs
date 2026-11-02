@@ -60,7 +60,7 @@ function install(f, options) {
 	}
 	mkdirSync(path.join(f.agentDir, "extensions"));
 	writeFileSync(path.join(f.agentDir, "extensions/sandbox.json"), "poison root profile must never be loaded by child");
-	if (options.cacheWarming) writeFileSync(path.join(f.agentDir, "settings.json"), JSON.stringify({ cacheWarming: "streaming" }));
+	if (options.cacheWarming || options.compactionProbe) writeFileSync(path.join(f.agentDir, "settings.json"), JSON.stringify(options.compactionProbe ? { compaction: { keepRecentTokens: 0, reserveTokens: 1024 } } : { cacheWarming: "streaming" }));
 	if (options.configProvider === "overlay") writeFileSync(path.join(f.agentDir, "models.json"), JSON.stringify({ providers: { trusted: { baseUrl: "https://configured-faux.invalid" } } }));
 	const mock = path.join(modules, "@anthropic-ai/sandbox-runtime"), journal = path.join(f.root, "runtime.jsonl");
 	mkdirSync(mock, { recursive: true });
@@ -139,7 +139,7 @@ async function run(f, steps, options = {}) {
 			if (name === "started" && existsSync(f.started)) { watcher.close(); controller.dispose(); }
 		});
 		child = spawn(process.execPath, ["--experimental-strip-types", path.join(repo, "scripts/fixtures/production-consumer-runner.ts"),
-			JSON.stringify({ cwd: f.child, sdkRoot: path.join(f.agentDir, "npm/node_modules/@earendil-works/pi-coding-agent"), extensions: layout.extensions, additionalExtensions: layout.additionalExtensions, startupAfterReady: options.startupAfterReady, virtual: options.virtual, configProvider: options.configProvider, authEnvHandoff: options.authEnvHandoff, callerOptionsHandoff: options.callerOptionsHandoff, cacheWarming: options.cacheWarming, classifierRoute: options.classifierRoute, steps })], {
+			JSON.stringify({ cwd: f.child, sdkRoot: path.join(f.agentDir, "npm/node_modules/@earendil-works/pi-coding-agent"), extensions: layout.extensions, additionalExtensions: layout.additionalExtensions, startupAfterReady: options.startupAfterReady, virtual: options.virtual, configProvider: options.configProvider, authEnvHandoff: options.authEnvHandoff, callerOptionsHandoff: options.callerOptionsHandoff, cacheWarming: options.cacheWarming, classifierRoute: options.classifierRoute, compactionProbe: options.compactionProbe, steps })], {
 			cwd: f.child, env: { ...process.env, PI_CODING_AGENT_DIR: f.agentDir, ...(options.classifierRoute ? { TYPESAFE_API_KEY: "" } : {}) }, stdio: ["ignore", "pipe", "pipe", "ipc"],
 		});
 		child.stdout.on("data", chunk => { output += chunk; }); child.stderr.on("data", chunk => { error += chunk; });
@@ -153,7 +153,7 @@ async function run(f, steps, options = {}) {
 		const line = output.split("\n").find(line => line.startsWith("PRODUCTION_RESULT "));
 		assert.ok(line, output + error);
 		const report = JSON.parse(line.slice("PRODUCTION_RESULT ".length));
-		assert.equal(report.readyAtGenerations.length, report.calls, JSON.stringify({ delay: options.providerDelay, calls: report.calls, ready: report.readyAtGenerations, models: report.modelAtGenerations, replacementRan: existsSync(path.join(f.root, "provider-dispatched")), error: report.result.error }));
+		assert.equal(report.readyAtGenerations.length, report.calls, JSON.stringify({ delay: options.providerDelay, calls: report.calls, ready: report.readyAtGenerations, models: report.modelAtGenerations, replacementRan: existsSync(path.join(f.root, "provider-dispatched")), error: report.result?.error }));
 		for (const required of report.readyAtGenerations) assert.deepEqual([...required].sort(), ["pi-guardian", "pi-sbx"]);
 		return { ...report, wire, humans, runtime: layout.runtime(), output, error };
 	} finally {
@@ -384,6 +384,34 @@ for (const delay of [4, 8]) test(`actual raw model endpoint stays pinned ${delay
 		assert.equal(report.modelAtGenerations.length, 2);
 		assert.ok(report.modelAtGenerations.every(model => model.baseUrl === report.initialBaseUrl));
 		assert.equal(readFileSync(path.join(f.child, "authorized.txt"), "utf8"), "immutable model");
+		assert.deepEqual(scratch(f), []); assert.equal(report.runtime.at(-1).event, "reset");
+	} finally { f.close(); }
+});
+
+for (const virtual of [false, true]) for (const compactionProbe of ["plain", "auth-base-url"]) test(`native SDK compaction retains ${virtual ? "virtual" : "physical"} model/auth semantics with ${compactionProbe}`, async () => {
+	const f = fixture();
+	try {
+		const report = await run(f, [{ name: "write", input: { path: "authorized.txt", content: "before native compaction" } }], { compactionProbe, virtual });
+		assert.ok(report.compaction, JSON.stringify({ error: report.compactionError, calls: report.calls, models: report.modelAtGenerations, sdkErrors: report.error }));
+		assert.match(report.compaction.summary, /Native synthetic .*summary/); assert.ok(report.calls >= 3);
+		assert.equal(report.compactionEntry.type, "compaction"); assert.equal(report.compactionEntry.summary, report.compaction.summary);
+		assert.equal(typeof report.compactionEntry.id, "string");
+		assert.equal(report.wire.filter(action => action.surface === "tool").length, 1); assert.equal(report.humans.length, 0);
+		assert.equal(readFileSync(path.join(f.child, "authorized.txt"), "utf8"), "before native compaction");
+		if (compactionProbe === "auth-base-url") assert.ok(report.modelAtGenerations.every(model => model.baseUrl === "https://auth-fixture.invalid"));
+		assert.deepEqual(scratch(f), []); assert.equal(report.runtime.at(-1).event, "reset");
+	} finally { f.close(); }
+});
+
+for (const compactionProbe of ["auth-drop", "auth-change"]) test(`native compaction refuses ${compactionProbe} between SDK summary auth and dispatch`, async () => {
+	const f = fixture();
+	try {
+		const report = await run(f, [{ name: "write", input: { path: "authorized.txt", content: "before refused compaction" } }], { compactionProbe });
+		assert.equal(report.compaction, undefined); assert.equal(report.compactionEntry, undefined);
+		assert.equal(report.wire.filter(action => action.surface === "tool").length, 1); assert.equal(report.humans.length, 0);
+		assert.match(report.compactionError, /auth-prepared model endpoint did not match this operation's native auth resolution/);
+		assert.equal(report.calls, 2, "no summary backend dispatched after its auth provenance changed");
+		assert.equal(readFileSync(path.join(f.child, "authorized.txt"), "utf8"), "before refused compaction");
 		assert.deepEqual(scratch(f), []); assert.equal(report.runtime.at(-1).event, "reset");
 	} finally { f.close(); }
 });

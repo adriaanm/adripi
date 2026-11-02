@@ -1,6 +1,7 @@
 // Real runner/SDK/registered consumers and IPC; only the installed SRT backend
 // and parent's credential-free reviewer verdict are doubles. Never claim/ack here.
 import { createDefaultChildSessionFactory, type ChildHookExtension } from "../../forks/pi-subagents/src/runs/shared/child-session.ts";
+import { withChildAuthority } from "../../forks/pi-subagents/src/runs/shared/child-authority.ts";
 import { bindRunnerChildAuthority } from "../../forks/pi-subagents/src/runs/shared/child-authority-launch.ts";
 import { runChildSession } from "../../forks/pi-subagents/src/runs/background/run-child-session.ts";
 import type { InProcessChildLaunch } from "../../forks/pi-subagents/src/runs/shared/child-launch.ts";
@@ -20,6 +21,7 @@ interface Config {
 	callerOptionsHandoff?: boolean;
 	cacheWarming?: boolean;
 	classifierRoute?: boolean;
+	compactionProbe?: "plain" | "auth-base-url" | "auth-drop" | "auth-change";
 	steps: Array<{ name: string; input: Record<string, unknown> }>;
 }
 const config = JSON.parse(process.argv[2]) as Config;
@@ -27,13 +29,18 @@ const { fauxProvider, fauxAssistantMessage, fauxToolCall } = await import(pathTo
 const faux = fauxProvider({ provider: "trusted", models: [{ id: "model" }] });
 const initialBaseUrl = faux.getModel().baseUrl;
 if (config.cacheWarming) faux.models[0].promptCache = { short: 11 };
-if (config.authEnvHandoff) {
+let compacting = false, compactAuthReads = 0;
+if (config.authEnvHandoff || config.compactionProbe?.startsWith("auth-")) {
 	const nativeResolve = faux.provider.auth.apiKey.resolve;
 	faux.provider.auth.apiKey.resolve = async input => {
 		const resolution = await nativeResolve(input);
 		if (!resolution) return resolution;
-		const result = { ...resolution, env: { PI_FIXTURE_ENV: "original" } };
-		(globalThis as Record<symbol, unknown>)[Symbol.for("fixture.auth.result")] = result;
+		const changed = compacting && ++compactAuthReads > 1;
+		const baseUrl = changed && config.compactionProbe === "auth-drop" ? undefined : changed && config.compactionProbe === "auth-change" ? "https://changed-auth.invalid" : "https://auth-fixture.invalid";
+		const result = { ...resolution,
+			...(config.authEnvHandoff ? { env: { PI_FIXTURE_ENV: "original" } } : {}),
+			...(config.compactionProbe?.startsWith("auth-") ? { auth: { ...resolution.auth, baseUrl } } : {}) };
+		if (config.authEnvHandoff) (globalThis as Record<symbol, unknown>)[Symbol.for("fixture.auth.result")] = result;
 		return result;
 	};
 }
@@ -46,6 +53,8 @@ const readyAtGenerations: string[][] = [];
 const modelAtGenerations: Array<{ baseUrl: string; api: string; maxTokens?: number }> = [];
 const headerAtGenerations: Array<string | null | undefined> = [];
 const envAtGenerations: Array<string | undefined> = [];
+let compaction: unknown, compactionEntry: unknown;
+let compactionError: string | undefined;
 // Passive observation of the genuine faux backend input, before its queued
 // onResponse hook. The same native faux implementation still owns execution.
 const nativeStream = faux.provider.streamSimple;
@@ -61,6 +70,7 @@ faux.setResponses([
 		fauxToolCall(step.name, step.input, { id: `native-${index}` }), { stopReason: "toolUse" },
 	), ...(config.cacheWarming && !config.virtual && index === 0 ? [fauxAssistantMessage("Native cache warm response.")] : [])]),
 	fauxAssistantMessage("Fixture finished; inspect tool results for expected refusals."),
+	...(config.compactionProbe ? [fauxAssistantMessage("Native synthetic compaction summary."), fauxAssistantMessage("Native synthetic turn summary.")] : []),
 ].map(response => () => {
 	// Observes (and never creates) readiness on every actual native provider call.
 	authority!.lease.assertReady();
@@ -81,6 +91,15 @@ try {
 			cwd: config.cwd, model: config.virtual ? "trusted/virtual" : "trusted/model", storage: { kind: "memory" },
 			extensionPaths: config.startupAfterReady ? [...config.extensions.map(item => item.path), ...config.additionalExtensions] : [...config.additionalExtensions, ...config.extensions.map(item => item.path)], requiredExtensions: config.extensions,
 			ambientExtensions: false, hooks: [{ name: "fixture-provider", factory: (api: Parameters<ChildHookExtension["factory"]>[0]) => {
+				if (config.compactionProbe) api.registerCommand("fixture-compact", { description: "Synthetic native SDK compaction probe", handler: async (_args, ctx) => {
+					await ctx.waitForIdle(); compacting = true;
+					try { compaction = await new Promise((resolve, reject) => ctx.compact({ onComplete: resolve, onError: reject })); }
+					catch (error) { compactionError = error instanceof Error ? error.message : String(error); throw error; }
+					finally {
+						const entry = ctx.sessionManager.getEntries().findLast(entry => entry.type === "compaction");
+						compactionEntry = entry && { id: entry.id, type: entry.type, summary: entry.summary };
+					}
+				} });
 				if (config.configProvider === "overlay") api.registerProvider(faux.provider);
 				else if (config.configProvider) api.registerProvider("trusted", { api: faux.api, apiKey: "synthetic-fixture", baseUrl: faux.models[0].baseUrl, models: faux.models, streamSimple: faux.provider.streamSimple });
 				else api.registerProvider(faux.provider);
@@ -104,9 +123,19 @@ try {
 			runtimeAcknowledgedExtensions: () => undefined, finalDrainHeld: () => false },
 		launchResolvedExtensions: { version: 1 }, warnings: [],
 	} as unknown as InProcessChildLaunch;
-	const result = await runChildSession({ factory, launch, authority,
-		prompt: "Execute the credential-free source fixture only.", appendChildEvent() {}, writeOutputLine() {} });
-	console.log("PRODUCTION_RESULT " + JSON.stringify({ result, calls: faux.state.callCount, readyAtGenerations, modelAtGenerations, headerAtGenerations, envAtGenerations, initialBaseUrl }));
+	if (config.compactionProbe) {
+		// Sequence public child/SDK APIs, not fake history or a replacement SDK.
+		const child = await withChildAuthority(authority.lease, () => factory.create(launch.session));
+		try {
+			await child.prompt("Execute the credential-free source fixture only.");
+			await child.prompt("/fixture-compact");
+			console.log("PRODUCTION_RESULT " + JSON.stringify({ compaction, compactionEntry, compactionError, calls: faux.state.callCount, readyAtGenerations, modelAtGenerations, headerAtGenerations, envAtGenerations, initialBaseUrl }));
+		} finally { await child.dispose(); }
+	} else {
+		const result = await runChildSession({ factory, launch, authority,
+			prompt: "Execute the credential-free source fixture only.", appendChildEvent() {}, writeOutputLine() {} });
+		console.log("PRODUCTION_RESULT " + JSON.stringify({ result, calls: faux.state.callCount, readyAtGenerations, modelAtGenerations, headerAtGenerations, envAtGenerations, initialBaseUrl }));
+	}
 } catch (error) {
 	console.log("PRODUCTION_ERROR " + JSON.stringify({ message: error instanceof Error ? error.message : String(error), calls: faux.state.callCount, readyAtGenerations, modelAtGenerations, headerAtGenerations, envAtGenerations, initialBaseUrl }));
 	process.exitCode = 1;

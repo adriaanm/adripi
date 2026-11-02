@@ -1,7 +1,7 @@
 import { isDeepStrictEqual, types } from "node:util";
 import { bindChildRuntimeToolInspector, hasChildStructuredOutputCode, type ChildAuthorityLease } from "./child-authority.ts";
 
-interface ModelIdentity { provider: string; id: string; api?: string; type?: string }
+interface ModelIdentity { provider: string; id: string; api?: string; type?: string; baseUrl?: string }
 interface BoundSession {
 	readonly sessionId: string;
 	readonly model: ModelIdentity | undefined;
@@ -76,9 +76,9 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 	completeStartup(): void;
 	close(): void;
 } {
-	let session: BoundSession | undefined, sessionId: string | undefined, closed = false, startupComplete = false;
+	let session: BoundSession | undefined, sessionId: string | undefined, closed = false, startupComplete = false, refusal: string | undefined;
 	const target = runtime as Record<string, unknown>;
-	const fail = (reason: string): never => { closed = true; lease.dispose(); throw new Error(`Guarded child generation refused: ${reason}`); };
+	const fail = (reason: string): never => { refusal ??= reason; closed = true; lease.dispose(); throw new Error(`Guarded child generation refused: ${refusal}`); };
 	const metadata = (model: ModelIdentity | undefined, budget = { nodes: 1024, bytes: 65536 }): ModelIdentity => {
 		try {
 			const data = snapshotMetadata(model, budget) as ModelIdentity;
@@ -130,12 +130,25 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 	// inspect only the selected provider on each operation/callback/event.
 	const providerLookup = target.getProvider, providerList = target.getProviders, nativeAuthLookup = target.getAuth;
 	if (typeof providerLookup !== "function" || typeof providerList !== "function" || typeof nativeAuthLookup !== "function") fail("this SDK lacks the public provider provenance boundary");
+	// Per-operation data provenance, keyed by the newly composed signal. Never
+	// retain an endpoint as a future dispatch grant or share it between requests.
+	const authFrames = new WeakMap<AbortSignal, { model: ModelIdentity; data: ModelIdentity; canonical: ModelIdentity; canonicalData: ModelIdentity; baseUrl: string; matched: boolean }>();
 	const authLookup = async (...args: unknown[]) => {
 		// Keep native resolution/refresh/signals, including owned cleanup calls.
 		// Transfer its completed DTO, not a resolver's retained env/auth aliases.
+		const overrides = args[1] && typeof args[1] === "object" && !types.isProxy(args[1]) ? args[1] : undefined;
+		const signal = overrides && Object.getOwnPropertyDescriptor(overrides, "signal")?.value as AbortSignal | undefined;
+		const frame = signal && authFrames.get(signal);
+		const owned = frame && args[0] === frame.model;
 		const result = await (nativeAuthLookup as Method).apply(runtime, args);
-		try { return copyOwnedData(result); }
-		catch { return fail("the SDK auth result cannot be transferred as bounded accessor-free owned data"); }
+		try {
+			const copy = copyOwnedData(result);
+			if (owned) {
+				const auth = (copy as { auth?: { baseUrl?: unknown } } | undefined)?.auth;
+				frame.matched = Object.getOwnPropertyDescriptor(overrides!, "signal")?.value === signal && auth?.baseUrl === frame.baseUrl;
+			}
+			return copy;
+		} catch { return fail("the SDK auth result cannot be transferred as bounded accessor-free owned data"); }
 	};
 	const sourceLookups = [["getProvider", providerLookup], ["getRegisteredNativeProvider", target.getRegisteredNativeProvider], ["getRegisteredProviderConfig", target.getRegisteredProviderConfig]] as const;
 	if (sourceLookups.some(([, lookup]) => typeof lookup !== "function")) fail("this SDK lacks the public registered provider provenance boundary");
@@ -205,9 +218,15 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 	const routed = new WeakMap<object, ModelIdentity>();
 	const physicalLookup = target.getPhysicalModel;
 	if (selected.api === "pi-virtual" && typeof physicalLookup !== "function") fail("this SDK lacks the public physical catalogue for virtual routing");
-	const assert = (model?: ModelIdentity, signal?: AbortSignal, requestMetadata?: ModelIdentity) => {
+	const assert = (model?: ModelIdentity, signal?: AbortSignal, requestMetadata?: ModelIdentity, requireAuth = false) => {
 		if (closed || lease.signal.aborted || startupSignal?.aborted || signal?.aborted) fail("the bound generation lifetime ended or was cancelled");
 		try { lease.assertReady(); } catch (error) { fail(error instanceof Error ? error.message : String(error)); }
+		const authFrame = signal && authFrames.get(signal);
+		if (authFrame && model === authFrame.model) {
+			if (!isDeepStrictEqual(metadata(model), authFrame.data)) fail("the auth-prepared request model metadata changed");
+			if (requireAuth && !authFrame.matched) fail("the auth-prepared model endpoint did not match this operation's native auth resolution");
+			model = authFrame.canonical; requestMetadata = authFrame.canonicalData;
+		}
 		if (!session || session.sessionId !== sessionId) return fail("the SDK session/model identity changed or is not bound");
 		if (!startupComplete) fail("SDK startup tool/resource registration has not completed");
 		const selectedReference = session.model;
@@ -264,6 +283,26 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 		install(name, original => (model: ModelIdentity, context: unknown, options?: Record<string, unknown>) => {
 			const signal = AbortSignal.any([lease.signal, ...(startupSignal ? [startupSignal] : []), ...(options?.signal ? [options.signal as AbortSignal] : [])]);
 			const requestMetadata = metadata(model);
+			// Native summaries prepare an auth-baseUrl DTO before calling the same
+			// SDK stream. Only baseUrl may differ from a selected/already-routed
+			// model, and the CURRENT native auth call must attest it before hooks
+			// or dispatch. No earlier auth result is cached/reused as permission.
+			if (options && (Object.hasOwn(options, "apiKey") || Object.hasOwn(options, "headers")) && typeof requestMetadata.baseUrl === "string") {
+				const sameSelection = key(requestMetadata) === requestedModel;
+				const needsAlias = sameSelection ? !isDeepStrictEqual(requestMetadata, selected) : !routed.has(model);
+				if (needsAlias) {
+					const canonical = sameSelection ? selectedModel : selected.api === "pi-virtual" && target.getPhysicalModel === physicalLookup
+						? (physicalLookup as Method).call(runtime, requestMetadata.provider, requestMetadata.id) as ModelIdentity | undefined : undefined;
+					if (canonical && (sameSelection || routed.has(canonical))) {
+						const canonicalData = metadata(canonical), normalized = copyOwnedData(requestMetadata) as ModelIdentity;
+						if (Object.hasOwn(canonicalData, "baseUrl")) normalized.baseUrl = canonicalData.baseUrl; else delete normalized.baseUrl;
+						if (isDeepStrictEqual(normalized, canonicalData)) {
+							authFrames.set(signal, { model, data: requestMetadata, canonical, canonicalData, baseUrl: requestMetadata.baseUrl, matched: false });
+							pinModelData(model);
+						}
+					}
+				}
+			}
 			assert(model, signal, requestMetadata);
 			const bounded: Record<string, unknown> = { ...options, signal };
 			// Native preparation is lazy and awaits auth/hooks. Admit caller maps
@@ -283,10 +322,10 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 			for (const callback of ["transformHeaders", "onPayload", "onResponse", "onProviderStreamEvent"] as const) {
 				const previous = options?.[callback];
 				(bounded as Record<string, unknown>)[callback] = async (...args: unknown[]) => {
-					assert(model, signal, requestMetadata);
+					assert(model, signal, requestMetadata, true);
 					let value: unknown;
 					try { value = typeof previous === "function" ? await previous(...args) : callback === "transformHeaders" ? args[0] : undefined; }
-					finally { assert(model, signal, requestMetadata); }
+					finally { assert(model, signal, requestMetadata, true); }
 					if (callback === "transformHeaders") {
 						try {
 							const data = copyOwnedData(value);
@@ -301,19 +340,19 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 				};
 			}
 			const result = original(model, context, bounded);
-			if (name === "generateImages" || name === "classify" || name === "cancelDeferred") return Promise.resolve(result).finally(() => { assert(model, signal, requestMetadata); });
+			if (name === "generateImages" || name === "classify" || name === "cancelDeferred") return Promise.resolve(result).finally(() => { assert(model, signal, requestMetadata, true); });
 			// Preserve the SDK stream itself, its public iteration/result contract
 			// and native provider cancellation. Do not synthesize messages/usage.
 			if (result && typeof result === "object") return new Proxy(result, {
 				get(stream, property) {
 					const value = Reflect.get(stream, property, stream);
 					if (property === "result" && typeof value === "function") return async () => {
-						assert(model, signal, requestMetadata); const message = await value.call(stream); assert(model, signal, requestMetadata); return message;
+						assert(model, signal, requestMetadata); const message = await value.call(stream); assert(model, signal, requestMetadata, true); return message;
 					};
 					if (property === Symbol.asyncIterator && typeof value === "function") return async function* () {
 						assert(model, signal, requestMetadata);
-						for await (const event of { [Symbol.asyncIterator]: () => value.call(stream) }) { assert(model, signal, requestMetadata); yield event; }
-						assert(model, signal, requestMetadata);
+						for await (const event of { [Symbol.asyncIterator]: () => value.call(stream) }) { assert(model, signal, requestMetadata, true); yield event; }
+						assert(model, signal, requestMetadata, true);
 					};
 					return typeof value === "function" ? value.bind(stream) : value;
 				},

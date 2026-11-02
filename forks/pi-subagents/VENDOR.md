@@ -679,3 +679,29 @@ refused/rebuilt. No productionhotpath/performance/paid/economics/OS claim. Docs 
 authpreparedsummarization/resources/deferred/initializer/liveacceptancegates. No live
 install/restart/session/config/policy/toggle/protected-content/runtimereplacement/
 paidprovider/push.
+
+## Native compaction auth copies were mistaken for endpoint substitution
+
+Real SDK compaction passed without an auth override, but refused the SDK's own
+baseUrl-only model copy before summary dispatch. The existing guard now binds a
+pending data copy to one newly composed operation signal and requires that exact
+operation's native getAuth result to match its URL before hooks/dispatch. Other
+metadata and selected/already-observed native route, catalogue, provider, tool,
+session, readiness and cancellation checks remain. Original candidate/SDK method,
+auth receiver/arguments/count, engine and ownership are retained; own signal data
+is captured/rechecked across await. No endpoint cache, new ALS/public API/wire,
+permission registry, resolver, transport or extra auth call. First refusal survives
+SDK error-event/closed-lifetime checks. Nine units include concurrent same-model/
+same-caller-signal isolation, stale/missing/changed auth and signal ownership.
+Six real default-factory/IPC/consumer SDK command/compaction cases: physical/virtual
+with/without auth URL create native entries; dropped/changed current URL creates
+neither summary dispatch nor entry. No injected SDK state or loader/factory; not
+public-parent/detached compaction or live-session proof. 57/57 per SDK1.2/1.4;
+4443 total/4426 pass/17 skip/zero fail/443 suites, types/four graph/root/fresh build.
+Source5c7cff725cc65042/artifactd45901e5dbead14f; graph384/17/330/18/768.
+Synthetic 1000-event/seven-tool mean194.26ms baseline(edc6fd7)/191.50ms current;
+current auth-DTO197.21ms (~5.7us/event above current ordinary, noisy), not real auth,
+HTTP/paid/whole latency. Detailed scope and remaining resource/lifetime/live gates
+in docs/round-2-production-consumers.md; aggregate/effective-auth acceptance false.
+No live install/restart/session/config/policy/toggle/protected-content/runtime
+replacement/paid-provider/push.

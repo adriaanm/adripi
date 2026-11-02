@@ -17,8 +17,8 @@ function fixture(ready = true, makeResult?: () => any, virtual = false, extra: R
 	const session = { sessionId: "sdk-session", model, agent: { state: { model } },
 		getAllTools: () => tools.map(({ name, description, parameters }) => ({ name, description, parameters, sourceInfo: { path: "/owned/tool.ts" } })),
 		getToolDefinition: (name: string) => tools.find(tool => tool.name === name), getActiveToolNames: () => [...active], getCallableToolNames: () => [...callable] };
-	let calls = 0, options: any;
-	const native = (_model: unknown, _context: unknown, value: unknown) => { calls++; options = value; return makeResult ? makeResult() : "same-native-result"; };
+	let calls = 0, options: any, lastModel: unknown;
+	const native = (_model: unknown, _context: unknown, value: unknown) => { calls++; options = value; lastModel = _model; return makeResult ? makeResult() : "same-native-result"; };
 	const physical = { provider: "physical", id: "routed", api: "faux", baseUrl: "https://physical.invalid", headers: { trace: "original" } };
 	const catalogue = { model: physical };
 	const providers = ["trusted", "physical"].map(id => ({ id, auth: { resolve: () => undefined }, streamSimple: native }));
@@ -33,7 +33,7 @@ function fixture(ready = true, makeResult?: () => any, virtual = false, extra: R
 		registerProvider() {}, refresh() {}, getAuth: authLookup };
 	const originalAPIs = { getProvider: runtime.getProvider, getProviders: runtime.getProviders, getAuth: runtime.getAuth, getRegisteredNativeProvider: runtime.getRegisteredNativeProvider, getRegisteredProviderConfig: runtime.getRegisteredProviderConfig };
 	const guard = guardChildGeneration(runtime, lease, model); guard.bind(session); if (startupComplete) guard.completeStartup();
-	return { lease, runtime, originalAPIs, native, guard, model, tools, active, callable, physical, catalogue, providers, sources, session, calls: () => calls, options: () => options };
+	return { lease, runtime, originalAPIs, native, guard, model, tools, active, callable, physical, catalogue, providers, sources, session, calls: () => calls, options: () => options, lastModel: () => lastModel };
 }
 
 describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () => {
@@ -190,6 +190,63 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		const f = fixture();
 		assert.throws(() => f.runtime.streamSimple({ ...f.model, baseUrl: "https://changed.invalid" }, {}, {}), /metadata|selection/);
 		assert.equal(f.calls(), 0);
+	});
+	const authPrepared = (resolveAuth: (...args: any[]) => Promise<unknown>) => {
+		let f: ReturnType<typeof fixture>, candidate: any, backends = 0;
+		f = fixture(true, () => {
+			const options = f.options();
+			return { result: async () => { await f.runtime.getAuth(candidate, { signal: options.signal }); await options.transformHeaders({}); backends++; return "native prepared result"; } };
+		}, false, { api: "faux", baseUrl: "https://model.invalid" }, undefined, true, undefined, resolveAuth);
+		candidate = { ...f.model, baseUrl: "https://auth.invalid" };
+		return { ...f, candidate, backends: () => backends };
+	};
+	it("admits only a current auth-baseUrl DTO without replacing the model passed to the native method", async () => {
+		const f = authPrepared(async () => ({ auth: { baseUrl: "https://auth.invalid" } }));
+		const stream = f.runtime.streamSimple(f.candidate, {}, { apiKey: undefined });
+		assert.equal(f.lastModel(), f.candidate); assert.equal(Object.isFrozen(f.candidate), true);
+		assert.equal(await stream.result(), "native prepared result"); assert.equal(f.backends(), 1); f.guard.close();
+	});
+	for (const baseUrl of [undefined, "https://other.invalid"]) it(`refuses ${baseUrl ? "changed" : "missing"} current auth override before headers/backend`, async () => {
+		const f = authPrepared(async () => ({ auth: { baseUrl } })); let hooks = 0;
+		const stream = f.runtime.streamSimple(f.candidate, {}, { apiKey: undefined, transformHeaders: async headers => { hooks++; return headers; } });
+		await assert.rejects(() => stream.result(), /auth-prepared model endpoint did not match this operation's native auth resolution/);
+		assert.equal(f.backends(), 0); assert.equal(hooks, 0); assert.equal(f.lease.signal.aborted, true);
+		assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /auth-prepared model endpoint did not match/, "teardown retains the first refusal rather than overwriting its evidence");
+	});
+	it("does not attest a resolver call whose signal ownership changed while it ran", async () => {
+		const f = authPrepared(async (_model, options) => { options.signal = new AbortController().signal; return { auth: { baseUrl: "https://auth.invalid" } }; });
+		await assert.rejects(() => f.runtime.streamSimple(f.candidate, {}, { apiKey: undefined }).result(), /auth-prepared model endpoint did not match/);
+		assert.equal(f.backends(), 0);
+	});
+	it("does not reuse a prior standalone auth result as authorization for a later operation", async () => {
+		let baseUrl: string | undefined = "https://auth.invalid";
+		const f = authPrepared(async () => ({ auth: { baseUrl } })); await f.runtime.getAuth(f.model); baseUrl = undefined;
+		await assert.rejects(() => f.runtime.streamSimple(f.candidate, {}, { headers: undefined }).result(), /auth-prepared model endpoint did not match/);
+		assert.equal(f.backends(), 0);
+	});
+	for (const change of ["api", "headers", "future"]) it(`does not treat auth-baseUrl provenance as a ${change} metadata grant`, () => {
+		const f = authPrepared(async () => ({ auth: { baseUrl: "https://auth.invalid" } }));
+		const other = { ...f.candidate, [change]: change === "headers" ? { extra: "not admitted" } : "not admitted" };
+		assert.throws(() => f.runtime.streamSimple(other, {}, { apiKey: undefined }), /substituted metadata/);
+		assert.equal(f.calls(), 0); assert.equal(f.backends(), 0);
+	});
+	it("does not cross-borrow auth attestations between concurrent requests sharing a model and caller signal", async () => {
+		let f: ReturnType<typeof fixture>, candidate: any, count = 0, backends = 0, announce!: () => void, release!: () => void;
+		const started = new Promise<void>(resolve => { announce = resolve; }), held = new Promise<void>(resolve => { release = resolve; });
+		f = fixture(true, () => {
+			const options = f.options(), first = count++ === 0;
+			return { result: async () => {
+				await f.runtime.getAuth(candidate, { signal: options.signal, first });
+				if (first) { announce(); await held; }
+				await options.transformHeaders({}); backends++; return "native prepared result";
+			} };
+		}, false, { api: "faux", baseUrl: "https://model.invalid" }, undefined, true, undefined, async (_model, options) => ({ auth: options.first ? {} : { baseUrl: "https://auth.invalid" } }));
+		candidate = { ...f.model, baseUrl: "https://auth.invalid" }; const signal = new AbortController().signal;
+		const a = f.runtime.streamSimple(candidate, {}, { apiKey: undefined, signal }); const aSignal = f.options().signal;
+		const pending = a.result(); await started;
+		const b = f.runtime.streamSimple(candidate, {}, { apiKey: undefined, signal }); assert.notEqual(f.options().signal, aSignal);
+		assert.equal(await b.result(), "native prepared result"); release();
+		await assert.rejects(() => pending, /auth-prepared model endpoint did not match/); assert.equal(backends, 1);
 	});
 	it("admits independent caller header/env maps before lazy SDK work without freezing either owner", () => {
 		const f = fixture(), headers = { trace: "original", remove: null }, env = { REGION: "original", UNSET: undefined };
@@ -366,7 +423,7 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 			if (shape === "too many") return new Array(8193).fill(physical);
 			if (shape === "aggregate bytes") return Array.from({ length: 260 }, (_, id) => ({ ...physical, id: String(id), extra: "x".repeat(32768) }));
 			return Array.from({ length: 800 }, (_, id) => ({ ...physical, id: String(id), extra: Array(800).fill(0) }));
-		}), /initial SDK model catalogue cannot be pinned/);
+		}), shape === "metadata accessor" ? /model metadata cannot be pinned as bounded accessor-free SDK data/ : /initial SDK model catalogue cannot be pinned/);
 		assert.equal(traps, 0);
 	});
 	it("preserves virtual selection while using only the actual native routed physical reference", async () => {

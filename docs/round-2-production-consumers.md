@@ -1503,6 +1503,66 @@ ownership, deferred/initializer drain, deployment/broker/OS/Git and representati
 paid costs/latency remain open. No live install/restart/session/config/policy/toggle/
 protected-content/runtime replacement/paid-provider/push action.
 
+## Native auth-prepared compaction model copies
+
+A genuine SDK command/compaction probe exposed an over-refusal: ordinary native
+compaction succeeded, but `_getSummarizationRequestAuth`'s `{...model, baseUrl}`
+DTO was rejected as substituted metadata. The two ordinary faux generations and
+assigned Write had completed; **no summary backend dispatched**. Ignored evidence:
+`.local/goal-consumers/native-compaction-before.log`.
+
+The existing generation guard now recognizes only a base-URL-only copy of the
+selected model or an **already observed native routed reference**. All other
+metadata, current catalogue/provider/tool provenance, both consumers, session,
+cancellation and startup checks remain required. A private WeakMap ties this
+pending data association to the operation's **newly composed signal**, not a
+provider/model name, shared caller signal, cached endpoint or approval. The exact
+native `getAuth` method still runs once per existing SDK call, with its original
+receiver/arguments. Only its bounded completed result can attest the candidate
+URL; the same model reference and own-data signal must remain bound across the
+await. The guard requires that attestation before header/payload/provider hooks,
+stream events/results or nonstream completion. It passes the original candidate
+object to the original SDK method, rather than rewriting the model or selecting
+an endpoint. No extra resolver call, ALS, public API, wire field, permission
+registry, auth engine, HTTP implementation or reusable URL grant was added.
+First refusal evidence survives the SDK's subsequent error-event/closed-lifetime
+checks rather than being overwritten by a generic cancellation message.
+
+Nine units cover native-object retention, missing/changed current auth, changed
+signal ownership, no prior-result reuse, non-baseUrl metadata refusal and two
+concurrent requests sharing the same model/caller signal without cross-borrowing.
+Six genuine integrations run on **both SDK 1.2 and 1.4**: physical/virtual × plain/
+auth-URL compaction succeeds with a native SessionManager compaction entry;
+withdrawn/changed auth between SDK preparation and dispatch refuses with no entry
+and no summary backend call. All retain the earlier Write, one Guardian tool
+review/no human, both real consumers, reset and scratch cleanup. These probes
+sequence public child prompts and the SDK's actual extension command/compact API
+in a synthetic in-memory child through the default factory/real IPC. They do not
+inject SDK state/history, replace an SDK loader/factory or compact this live user
+session. They are **not** additional public-parent/detached-runner compaction proof;
+those existing paths remain independently covered by the full matrix.
+
+Verified: **4,443 total / 4,426 pass / 17 skip / zero fail / 443 suites**, types;
+**57/57 per SDK**, four graph tests, root checks and fresh build. Source prefix
+`5c7cff725cc65042`, artifact `d45901e5dbead14f`; graph remains 384 inputs / 17
+exports / 330 compiled modules / 18 module URLs / 768 artifact files. Evidence:
+`.local/goal-consumers/native-compaction-{full,composition,sdk14,build,root}.log`.
+
+Five synthetic 1,000-event/seven-native-tool samples against exact `edc6fd7`:
+ordinary path 188.9–208.6ms baseline / 188.0–196.8ms current, means 194.26/191.50ms;
+current auth-DTO path 193.6–207.1ms, mean 197.21ms (about **5.7µs/event more than
+current ordinary**, with noise). The stub models native preparation order but
+performs no real auth/request preparation/HTTP; these are guard-path timings,
+not paid savings or representative total latency.
+
+This closes the demonstrated native auth-prepared compaction gap only.
+`productionConsumersAccepted`, `providerTransportHandoffAccepted` and
+`effectiveAuthAccepted` remain **false**. Resource/code ownership, deferred and
+initializer drain, compatible-runtime gate refresh and separate deployment,
+broker, OS/Git and paid accounting/latency acceptance remain open. No live install,
+restart, session/config/policy/toggle/protected-content/runtime replacement,
+paid-provider or push action occurred.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the
