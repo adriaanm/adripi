@@ -16,6 +16,7 @@ interface Config {
 	virtual?: boolean;
 	configProvider?: boolean | "overlay";
 	authEnvHandoff?: boolean;
+	callerOptionsHandoff?: boolean;
 	steps: Array<{ name: string; input: Record<string, unknown> }>;
 }
 const config = JSON.parse(process.argv[2]) as Config;
@@ -51,6 +52,7 @@ faux.provider.streamSimple = (model, context, options) => {
 	return nativeStream.call(faux.provider, model, context, options);
 };
 faux.setResponses([
+	...(config.callerOptionsHandoff ? [fauxAssistantMessage("Auxiliary options probe completed.")] : []),
 	...config.steps.map((step, index) => fauxAssistantMessage(
 		fauxToolCall(step.name, step.input, { id: `native-${index}` }), { stopReason: "toolUse" },
 	)),

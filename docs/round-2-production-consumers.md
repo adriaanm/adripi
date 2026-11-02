@@ -1408,6 +1408,48 @@ This closes a reproduced resolver-output alias only, not complete effective-auth
 or production consumer acceptance. No live install/restart/session/config/policy/
 toggle/protected-content/runtime replacement/paid-provider/push action.
 
+## Caller maps changed before the native lazy request read them
+
+A genuine public `ctx.modelRegistry.streamSimple` call in `before_agent_start`
+retained caller `headers`/`env` maps. Changing headers immediately after stream
+creation, then env inside its awaited header callback, made both synthetic backend
+markers `"changed"` instead of their admitted `"original"`. This is separate from
+resolver-output and completed-hook aliases: those later boundaries cannot recover
+caller values already changed during native lazy preparation. Red
+`.local/goal-consumers/caller-options-before.log` records both changed values.
+The auxiliary call consumes one deliberately queued genuine faux response, followed
+by the ordinary assigned Write/final response; no private runtime access, fabricated
+SDK state, substitute loader/session/backend or consumer acknowledgment.
+
+At existing generation entry, copy only caller `headers`/`env` data through the
+same bounded ownership helper, before invoking the native method. Require records,
+string/null headers and string/undefined env (1024nodes/64KiB/depth12 each), reject
+code/accessor/proxy/array/invalid/oversized data without values in errors. Preserve
+prototype/enumerability/null deletion/undefined entries. No producer/native map
+freeze; no new option, engine, permission, context, registry or transport. Signals,
+callback function values, other SDK options, model and transcript remain native.
+
+12added opaque cases: entry ownership/native mutation/reuse/non-enumerable/null-
+prototype data;5invalid shapes for each field before any native invocation/traps.
+Actual SDK1.2/1.4 regression proves caller maps really changed but native auxiliary
+input keeps both original values;3readycalls/assignedWrite/reset/no scratch leak.
+**4,434 total /4,417 pass /17 skip /zero fail /443 suites**, types,
+**48/48 per genuine SDK1.2/1.4**, zero composition fail/skip;4graph/root/freshness.
+Source `79fb9702402c3c3f`, artifact `ac67359fa80701c1`, graph384/17/330/18/768.
+Five synthetic1000request-admission samples versus exactd6afd87guard,7real tools/
+real faux provider metadata/three header fields/two env fields: baseline196.5–213.4ms/
+current200.1–213.8ms, mean+0.66µs/admission (~0.3%); setup0.42–2.13/0.42–1.41ms.
+No native preparation/auth/refresh/provider dispatch/HTTP/paid/total latency measured.
+Evidence `.local/goal-consumers/caller-options-{before,focused,after,composition,
+sdk14,full,bench,root}.log`, local baseline/benchmark and committed regressions.
+
+The auth-prepared-model/summarization, auxiliary router/cache warming, deferred/
+initializer ownership, trusted code/resources, deployed broker/OS/Git and live
+cost/latency gates remain open. Aggregate/effective-auth acceptance remains false;
+these source cases do not certify arbitrary privileged host JS/private closure
+state or actual network/auth backends. No live install/restart/session/config/
+policy/toggle/protected-content/runtime replacement/paid-provider/push action.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

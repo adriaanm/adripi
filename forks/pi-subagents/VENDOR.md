@@ -641,3 +641,21 @@ current,mean+5.1us/result; no realauth/refresh/HTTP/paid/wholelatency. Docsretai
 options,authpreparedsummarization,code/resources/auxiliary/deferred/initializer/live
 acceptancegates; effectiveAuthAcceptedfalse. No live install/restart/session/config/
 policy/toggle/protected-content/runtime replacement/paidprovider/push.
+
+## Native lazy preparation read caller header/env maps after admission
+
+GenuinepublicModelRegistry.streamSimple red: callerchangedheadersaftercreation/env
+inawaitedhook, bothbackendmarkerschanged. Existingentry nowtransfersbounded independent
+headers/envrecords viaexistingcopyhelper,1024nodes64KiBdepth12each, string/nullheaders,
+string/undefinedenv; preservedprototype/enumerability/reuse/nativeownership/signals/
+otheroptions/functionvalues/model/transcript. No freeze/engine/option/registry/context/
+transport/permission.12opaqueunits independent/reuse/flags/null+5badshapesperfield
+beforeSDK/traps. ActualSDK1.2/1.4 auxiliaryrequest+normalWrite provesproducerchanged,
+backendbothoriginal/3readycalls/Write/reset/cleanup (queuedgenuineextraresponse,no
+privateAPI/fakeSDKstate).4434total4417pass17skip0fail443suites/types;48/48perSDK,
+4graph/root. Source79fb9702402c3c3f/artifactac67359fa80701c1 graph384/17/330/18/768.
+Synthetic1000admissions versusd6afd87 196.5–213.4baseline/200.1–213.8currentms,
+mean+0.66us/admission~0.3%; noauth/HTTP/paid/wholelatency. Docsrecordremainingnative
+authpreparedmodels/auxiliary/cache/deferred/initializer/resources/livegates; aggregate
+acceptedfalse. No liveinstall/restart/session/config/policy/toggle/protected-content/
+runtimereplacement/paidprovider/push.

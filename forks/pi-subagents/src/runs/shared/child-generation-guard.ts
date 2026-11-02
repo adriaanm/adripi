@@ -264,7 +264,19 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 			const signal = AbortSignal.any([lease.signal, ...(startupSignal ? [startupSignal] : []), ...(options?.signal ? [options.signal as AbortSignal] : [])]);
 			const requestMetadata = metadata(model);
 			assert(model, signal, requestMetadata);
-			const bounded = { ...options, signal };
+			const bounded: Record<string, unknown> = { ...options, signal };
+			// Native preparation is lazy and awaits auth/hooks. Admit caller maps
+			// once, without retaining aliases that can change before those reads.
+			for (const field of ["headers", "env"] as const) if (bounded[field] !== undefined) {
+				try {
+					const data = copyOwnedData(bounded[field]);
+					if (!data || typeof data !== "object" || Array.isArray(data) || Object.getOwnPropertyNames(data).some(name => {
+						const value = (data as Record<string, unknown>)[name];
+						return typeof value !== "string" && value !== (field === "headers" ? null : undefined);
+					})) throw new Error("unsupported SDK request map");
+					bounded[field] = data;
+				} catch { return fail("the caller SDK request maps cannot be transferred as bounded accessor-free owned data"); }
+			}
 			// These are public SDK transport callbacks. Recheck AFTER asynchronous
 			// headers/payload hooks too, rather than trusting an earlier stream call.
 			for (const callback of ["transformHeaders", "onPayload", "onResponse", "onProviderStreamEvent"] as const) {

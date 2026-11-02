@@ -191,6 +191,30 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		assert.throws(() => f.runtime.streamSimple({ ...f.model, baseUrl: "https://changed.invalid" }, {}, {}), /metadata|selection/);
 		assert.equal(f.calls(), 0);
 	});
+	it("admits independent caller header/env maps before lazy SDK work without freezing either owner", () => {
+		const f = fixture(), headers = { trace: "original", remove: null }, env = { REGION: "original", UNSET: undefined };
+		f.runtime.streamSimple(f.model, {}, { headers, env }); const admitted = f.options();
+		assert.notEqual(admitted.headers, headers); assert.notEqual(admitted.env, env);
+		headers.trace = "late"; env.REGION = "late"; assert.equal(admitted.headers.trace, "original"); assert.equal(admitted.env.REGION, "original");
+		assert.equal(admitted.headers.remove, null); assert.equal(Object.hasOwn(admitted.env, "UNSET"), true);
+		admitted.env.REGION = "native owned"; assert.equal(env.REGION, "late"); f.guard.close();
+	});
+	it("preserves caller map prototypes/non-enumerable keys and supports reuse in later requests", () => {
+		const f = fixture(), env = Object.assign(Object.create(null), { REGION: "one" });
+		Object.defineProperty(env, "hidden", { value: "not an env override", enumerable: false });
+		f.runtime.streamSimple(f.model, {}, { env }); const first = f.options().env; env.REGION = "two";
+		f.runtime.streamSimple(f.model, {}, { env }); const second = f.options().env;
+		assert.equal(first.REGION, "one"); assert.equal(second.REGION, "two"); assert.equal(Object.getPrototypeOf(first), null);
+		assert.deepEqual(Object.keys(first), ["REGION"]); assert.equal(first.hidden, env.hidden); f.guard.close();
+	});
+	for (const field of ["headers", "env"] as const) for (const shape of ["accessor", "proxy", "array", "bad value", "oversized"] as const) it(`refuses ${shape} caller ${field} before invoking the SDK without inspecting private values`, () => {
+		const f = fixture(); let traps = 0;
+		const value = shape === "accessor" ? Object.defineProperty({}, "private", { get() { traps++; return "must not read"; } })
+			: shape === "proxy" ? new Proxy({}, { ownKeys() { traps++; return []; } }) : shape === "array" ? []
+			: shape === "bad value" ? { private: field === "env" ? null : undefined } : { private: "x".repeat(65537) };
+		assert.throws(() => f.runtime.streamSimple(f.model, {}, { [field]: value }), /caller SDK request maps cannot be transferred as bounded accessor-free owned data/);
+		assert.equal(traps, 0); assert.equal(f.calls(), 0); assert.equal(f.lease.signal.aborted, true);
+	});
 	it("delegates auth with the exact SDK receiver/arguments and transfers independent complete DTO data", async () => {
 		const input = { auth: { apiKey: "synthetic", baseUrl: "https://auth.invalid", headers: { trace: "auth" } }, env: { PI_FIXTURE_ENV: "original" } };
 		let receiver: unknown, args: unknown[];
