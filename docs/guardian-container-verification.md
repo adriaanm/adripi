@@ -7,23 +7,33 @@ Operator-authorized Apple `container` **1.2.2**, Linux/arm64, **Node v24.22.2**:
 | Gate | Result |
 |---|---|
 | Standalone real Pi 1.0 CLI/HTTP JSON no-session test | **1 pass, zero skips**; status, nested codemode/bash assessments and fixed-rule denial |
-| Complete Guardian suite, including HTTP headless | **215 pass / 215 total, zero failures/skips**, 9.81s (current-source refresh) |
+| Complete Guardian suite, including HTTP headless | **215 pass / 215 total, zero failures/skips**, 9.78s (current-source refresh) |
 | Guardian and pi-sbx typechecks | Pass |
 | Package manifests and selected/secondary locks | Hashes unchanged before/after provisioning and tests |
 
-Latest tested source: `1e935e6b680d629a0a1abd6185e5ee67f0ed1617`.
+Latest tested source: `2070ca22a4795930868bc83606f9a32b64dfe4c9`.
 Source archive SHA-256:
-`3c56af8a26c0ef5a161ea5ba006abf99f424d057bb18d6d83e7ade47637f53ad`.
+`d6a06c4e72c2f5db046e7c280d5101e321229712b80725a87abcd96a13d4c5ba`.
 The exact tested guest driver is preserved as
 [`scripts/verify-guardian-vm.mjs`](../scripts/verify-guardian-vm.mjs).
-Current ignored evidence: `.local/guardian-container/source-1e935e6b680d-results/`
+Current ignored evidence: `.local/guardian-container/source-2070ca22a479-results/`
 (`results.json`, `headless.log`, `guardian-full.log`, both typecheck logs), the
-sibling `source-1e935e6b680d-inspect.json` and `source-1e935e6b680d-input/` snapshot.
+sibling `source-2070ca22a479-inspect.json` and `source-2070ca22a479-input/` snapshot.
+The driver SHA-256 remains
+`37f2b4cabd7b8f79b613b613c29c990ad4b420a97186f7aafbcd0f3058364e33`.
 Inspection confirms the pinned image, arm64, user `node`, four CPUs/4GiB, the sole
 read-only curated input mount, no published ports/sockets and no host environment.
-Logs were copied before stopping/deleting only `adripi-guardian-node24-1e935e6`;
-`container list` is empty afterward. All provisioning/test steps pass and all
+Logs were copied before stopping/deleting only `adripi-guardian-node24-2070ca2`;
+`container list --format json` is empty afterward. All provisioning/test steps pass and all
 seven tracked manifest/lock hashes remain unchanged.
+
+The previous current-source refresh at `1e935e6b680d` remains in its own
+`source-1e935e6b680d-{input,results}/` and inspection snapshot: **215/215**, 9.81s,
+archive `3c56af8a26c0ef5a161ea5ba006abf99f424d057bb18d6d83e7ade47637f53ad`.
+The latest run uses the identical driver, frozen dependencies and curated-only
+mount recipe, with a bounded 1,800s guest idle lifetime for evidence extraction.
+It includes the committed code through native auth-prepared child compaction;
+it does **not** rerun the subagents composition matrix in the guest.
 
 Historical evidence remains under `recipe/` and `attempt2/`: source
 `b81bd669f958a41842f83481740f8f59f01ae317`, archive
@@ -141,7 +151,7 @@ Node26 failure remains a useful platform-specific caveat, not a reason to repeat
 that crash or silently switch the live runtime.
 
 The current-source refresh includes the real consumer source/unit changes through
-`1e935e6`, not merely the older178-test baseline. It does not extend the separate
+`2070ca2`, not merely the older178-test or initial-consumer baseline. It does not extend the separate
 combined SDK/IPC composition to actual OS or full detached-launch verification.
 
 Still separate: **#14** full production child wiring acceptance; **#29/#28** authorized

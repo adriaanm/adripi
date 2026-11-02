@@ -1563,6 +1563,22 @@ broker, OS/Git and paid accounting/latency acceptance remain open. No live insta
 restart, session/config/policy/toggle/protected-content/runtime replacement,
 paid-provider or push action occurred.
 
+## Refreshed compatible-runtime Guardian gate after native compaction
+
+The authorized curated-input VM reran the unchanged guest driver at committed
+`2070ca22a4795930868bc83606f9a32b64dfe4c9`: **215/215 Guardian**, zero failures/
+skips, standalone CLI/HTTP **1/1**, Guardian/pi-sbx types, all seven manifest/lock
+hashes unchanged. Node24.22.2 Linux/arm64, pinned image, UID1000/4CPU/4GiB, sole
+read-only tracked-source archive mount; no host credentials/config/audits/modules/
+sockets/environment or published ports. Evidence copied before stopping/deleting
+only `adripi-guardian-node24-2070ca2`; container list empty afterward. Archive
+SHA256 `d6a06c4e72c2f5db046e7c280d5101e321229712b80725a87abcd96a13d4c5ba`.
+See `docs/guardian-container-verification.md` and ignored
+`.local/guardian-container/source-2070ca22a479-{input,results}/` plus inspect JSON.
+The earlier source gate at `1e935e6` is historical, not current. This refresh does
+not run the subagents matrix in the guest, fix host Node26, deploy anything or
+prove OS/Git containment, live accounting or representative total cost/latency.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the
