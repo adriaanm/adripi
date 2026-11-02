@@ -1708,6 +1708,76 @@ deployment/loaded broker, actual OS/Git and live accounting/total latency remain
 separate gates. No live install/restart/policy/config/toggle/protected-content
 access/runtime replacement/paid provider/push occurred.
 
+## A closed generation still allowed fresh native authentication
+
+The earlier auth-transfer wrapper intentionally kept pre-startup/post-close
+compatibility on the assumption cleanup might need it. That was **not** an owned
+cleanup proof. A real default-factory SDK `session_shutdown` hook calling the public
+`ctx.modelRegistry.getProviderAuth("trusted")` started another genuine faux auth
+resolver **after `generation.close()`**. The new red records nativeCalls `1`, not
+`0`, in `.local/goal-consumers/auth-lifetime-before.log`.
+
+The existing wrapped runtime `getAuth` now runs the same current lifetime/readiness/
+startup/session/model/tool/provider checks before invoking the exact original
+method and in `finally` after its await. No pre-startup/post-close cleanup exemption
+remains on this boundary. A late result is not transferred after close/revocation/
+caller cancellation or provenance drift. Native undefined values/errors, receiver,
+argument identity/count, reusable producer/signing/refresh data and independently
+owned completed DTOs are unchanged **inside** the live lifetime. No additional auth
+resolution, controller/registry, grant, lifecycle engine or credential-store access.
+This supersedes the earlier compatibility/"needed for cleanup" statements; those
+were assumptions, not current behavior or evidence of necessary cleanup calls.
+
+Nine new opaque units prove no resolver invocation during startup/unreadiness/
+closure/revocation/cancellation, and withholding late auth data after closure/
+revocation/cancellation/tool drift. Existing native-error/DTO/signal-ownership/
+current-operation auth-baseUrl tests remain green; obsolete cleanup-positive
+assertions now test the current refusal contract rather than preserving a shim.
+The actual SDK shutdown regression observes one attempted public call, zero new
+native resolver calls, the value-free lifecycle refusal, prior legitimate Write,
+two admitted native generations and normal sandbox/scratch teardown. Ordinary
+native startup, warming and physical/virtual auth-prepared compaction still work
+on **both** genuine SDK versions.
+
+Two further detached source/full-compiled cases exercise an actual native auth
+resolver that never returns and keeps a live interval **after both actual
+consumers and sandbox activation**. The parent filesystem wake revokes only its
+publication when the resolver records its owned PID, genuine SDK version and both
+existing acknowledgments. Native process-terminal observation proves owned close,
+failed durable task (despite process exit0), no model backend/Write/Guardian review,
+consumed private config, controller `reset` and no remaining scratch. Initial
+focused cases closed in ~1.7–1.8s, well before the 45s safety-kill deadline. Unlike
+the earlier non-returning loader proof, this is an **active consumer/controller**
+termination case. It is still process-boundary termination, not in-process draining
+of the noncooperative promise/interval or proof of remote OAuth cancellation/token
+persistence; the resolver is credential-free faux and performs no HTTP.
+
+Verification: subagents **4473 total /4456 pass /17 skip /0 fail /444 suites**,
+types; **66/66 per SDK1.2/1.4**, four graph tests, pi-sbx **448/448** +types,
+Guardian types, root/diff/fresh complete build. Last unchanged Guardian-source
+nonheadless gate remains214; full Node24 Guardian evidence at2070ca2 remains a
+separate recorded source/runtime gate, not a new full-guest run here. New source
+`156eec06ccef202c`, artifact `2d9a7b4fde3a680e`, graph384/17/330/18/768.
+Evidence `.local/goal-consumers/auth-lifetime-{before,focused,native-focused,
+native-owned,full,composition,sdk14,sbx,build,root}.log`.
+
+Five interleaved synthetic 1000-auth-result/seven-real-tool-definition samples
+compare exact7521d8f guard code (location-only import adjustment) to current:
+baseline4.37–6.37ms, current380.33–387.85ms, means5.01/384.98ms. The two complete
+freshness checks add about **380µs/auth resolution**, not per SSE event. This is a
+measured safety cost, not free DTO transfer or actual provider/auth/HTTP/paid/whole
+delegation latency. Native calls here are explicit DTO stubs; the SDK models/tool
+schemas are genuine. Driver/baseline/output are
+`.local/goal-consumers/auth-lifetime-{bench.mjs,baseline.ts,bench.log}`.
+
+This closes the wrapped-auth lifetime exemption, not general credential/remote-job
+containment. Already-started native refresh may have its own noncancellable work
+and persistence; other privileged SDK/provider/private-heap paths are not certified
+by a `getAuth` fence. Deferred handle ownership, real effective-auth/HTTP, deployed
+broker, OS/Git and paid total-accounting/latency acceptance remain open. Aggregate
+source/live acceptance stays false. No live installation/restart/session/config/
+policy/toggle/protected-content access/runtime replacement/paid provider/push.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

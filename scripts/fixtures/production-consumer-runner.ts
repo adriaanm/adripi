@@ -21,6 +21,7 @@ interface Config {
 	callerOptionsHandoff?: boolean;
 	cacheWarming?: boolean;
 	classifierRoute?: boolean;
+	shutdownAuth?: boolean;
 	compactionProbe?: "plain" | "auth-base-url" | "auth-drop" | "auth-change";
 	steps: Array<{ name: string; input: Record<string, unknown> }>;
 }
@@ -30,6 +31,11 @@ const faux = fauxProvider({ provider: "trusted", models: [{ id: "model" }] });
 const initialBaseUrl = faux.getModel().baseUrl;
 if (config.cacheWarming) faux.models[0].promptCache = { short: 11 };
 let compacting = false, compactAuthReads = 0;
+const shutdownAuth = { attempts: 0, nativeCalls: 0, error: "" };
+if (config.shutdownAuth) {
+	const nativeResolve = faux.provider.auth.apiKey.resolve;
+	faux.provider.auth.apiKey.resolve = async input => { if (shutdownAuth.attempts) shutdownAuth.nativeCalls++; return nativeResolve(input); };
+}
 if (config.authEnvHandoff || config.compactionProbe?.startsWith("auth-")) {
 	const nativeResolve = faux.provider.auth.apiKey.resolve;
 	faux.provider.auth.apiKey.resolve = async input => {
@@ -91,6 +97,11 @@ try {
 			cwd: config.cwd, model: config.virtual ? "trusted/virtual" : "trusted/model", storage: { kind: "memory" },
 			extensionPaths: config.startupAfterReady ? [...config.extensions.map(item => item.path), ...config.additionalExtensions] : [...config.additionalExtensions, ...config.extensions.map(item => item.path)], requiredExtensions: config.extensions,
 			ambientExtensions: false, hooks: [{ name: "fixture-provider", factory: (api: Parameters<ChildHookExtension["factory"]>[0]) => {
+				if (config.shutdownAuth) api.on("session_shutdown", async (_event, ctx) => {
+					shutdownAuth.attempts++;
+					try { await ctx.modelRegistry.getProviderAuth("trusted"); }
+					catch (error) { shutdownAuth.error = error instanceof Error ? error.message : String(error); }
+				});
 				if (config.compactionProbe) api.registerCommand("fixture-compact", { description: "Synthetic native SDK compaction probe", handler: async (_args, ctx) => {
 					await ctx.waitForIdle(); compacting = true;
 					try { compaction = await new Promise((resolve, reject) => ctx.compact({ onComplete: resolve, onError: reject })); }
@@ -134,7 +145,7 @@ try {
 	} else {
 		const result = await runChildSession({ factory, launch, authority,
 			prompt: "Execute the credential-free source fixture only.", appendChildEvent() {}, writeOutputLine() {} });
-		console.log("PRODUCTION_RESULT " + JSON.stringify({ result, calls: faux.state.callCount, readyAtGenerations, modelAtGenerations, headerAtGenerations, envAtGenerations, initialBaseUrl }));
+		console.log("PRODUCTION_RESULT " + JSON.stringify({ result, shutdownAuth, calls: faux.state.callCount, readyAtGenerations, modelAtGenerations, headerAtGenerations, envAtGenerations, initialBaseUrl }));
 	}
 } catch (error) {
 	console.log("PRODUCTION_ERROR " + JSON.stringify({ message: error instanceof Error ? error.message : String(error), calls: faux.state.callCount, readyAtGenerations, modelAtGenerations, headerAtGenerations, envAtGenerations, initialBaseUrl }));

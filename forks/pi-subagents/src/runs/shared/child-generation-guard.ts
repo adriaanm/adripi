@@ -134,13 +134,17 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 	// retain an endpoint as a future dispatch grant or share it between requests.
 	const authFrames = new WeakMap<AbortSignal, { model: ModelIdentity; data: ModelIdentity; canonical: ModelIdentity; canonicalData: ModelIdentity; baseUrl: string; matched: boolean }>();
 	const authLookup = async (...args: unknown[]) => {
-		// Keep native resolution/refresh/signals, including owned cleanup calls.
-		// Transfer its completed DTO, not a resolver's retained env/auth aliases.
+		// Auth may resolve credentials or refresh remotely; it is not an unbounded
+		// cleanup exemption. Preserve native calls/signals inside this lifetime,
+		// and transfer its DTO without retaining resolver-owned aliases.
 		const overrides = args[1] && typeof args[1] === "object" && !types.isProxy(args[1]) ? args[1] : undefined;
 		const signal = overrides && Object.getOwnPropertyDescriptor(overrides, "signal")?.value as AbortSignal | undefined;
 		const frame = signal && authFrames.get(signal);
 		const owned = frame && args[0] === frame.model;
-		const result = await (nativeAuthLookup as Method).apply(runtime, args);
+		assert(undefined, signal);
+		let result: unknown;
+		try { result = await (nativeAuthLookup as Method).apply(runtime, args); }
+		finally { assert(undefined, signal); }
 		try {
 			const copy = copyOwnedData(result);
 			if (owned) {

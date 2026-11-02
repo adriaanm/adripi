@@ -139,7 +139,7 @@ async function run(f, steps, options = {}) {
 			if (name === "started" && existsSync(f.started)) { watcher.close(); controller.dispose(); }
 		});
 		child = spawn(process.execPath, ["--experimental-strip-types", path.join(repo, "scripts/fixtures/production-consumer-runner.ts"),
-			JSON.stringify({ cwd: f.child, sdkRoot: path.join(f.agentDir, "npm/node_modules/@earendil-works/pi-coding-agent"), extensions: layout.extensions, additionalExtensions: layout.additionalExtensions, startupAfterReady: options.startupAfterReady, virtual: options.virtual, configProvider: options.configProvider, authEnvHandoff: options.authEnvHandoff, callerOptionsHandoff: options.callerOptionsHandoff, cacheWarming: options.cacheWarming, classifierRoute: options.classifierRoute, compactionProbe: options.compactionProbe, steps })], {
+			JSON.stringify({ cwd: f.child, sdkRoot: path.join(f.agentDir, "npm/node_modules/@earendil-works/pi-coding-agent"), extensions: layout.extensions, additionalExtensions: layout.additionalExtensions, startupAfterReady: options.startupAfterReady, virtual: options.virtual, configProvider: options.configProvider, authEnvHandoff: options.authEnvHandoff, callerOptionsHandoff: options.callerOptionsHandoff, cacheWarming: options.cacheWarming, classifierRoute: options.classifierRoute, shutdownAuth: options.shutdownAuth, compactionProbe: options.compactionProbe, steps })], {
 			cwd: f.child, env: { ...process.env, PI_CODING_AGENT_DIR: f.agentDir, ...(options.classifierRoute ? { TYPESAFE_API_KEY: "" } : {}) }, stdio: ["ignore", "pipe", "pipe", "ipc"],
 		});
 		child.stdout.on("data", chunk => { output += chunk; }); child.stderr.on("data", chunk => { error += chunk; });
@@ -171,6 +171,7 @@ for (const [label, options] of [
 	["compiled broken Guardian", { compiled: true, brokenGuardian: true }], ["compiled terminal denial", { compiled: true, semanticDeny: true }],
 	["loaded global provider symlink", { resourceSymlink: true }], ["compiled loaded global provider symlink", { compiled: true, resourceSymlink: true }],
 	["loaded local package namespace", { resourcePackage: true }], ["compiled loaded local package namespace", { compiled: true, resourcePackage: true }],
+	["noncooperative native authentication", { noncooperativeAuth: true }], ["compiled noncooperative native authentication", { compiled: true, noncooperativeAuth: true }],
 	["noncooperative provider initializer", { noncooperativeStartup: true }], ["compiled noncooperative provider initializer", { compiled: true, noncooperativeStartup: true }],
 ]) {
 	test(`full detached bootstrap/default factory: ${label}, ${options.noncooperativeStartup ? "no prompt before consumers" : "both actual consumers"}, observed process drain`, async t => {
@@ -183,6 +184,7 @@ import {fauxProvider,fauxAssistantMessage,fauxToolCall} from '@earendil-works/pi
 import {VERSION} from '@earendil-works/pi-coding-agent';
 import {captureChildAuthorityLease} from ${JSON.stringify(nativeAuthority)};
 export default async function(api){const lease=captureChildAuthorityLease(${JSON.stringify(f.child)});${options.noncooperativeStartup ? `appendFileSync(${JSON.stringify(path.join(f.root, "initializer-held"))},JSON.stringify({pid:process.pid,sdk:VERSION})+'\\n');setInterval(()=>{},1000);await new Promise(()=>{});` : ""}const faux=fauxProvider({api:'fixture-faux',provider:'trusted',models:[{id:'model'}]});
+${options.noncooperativeAuth ? `let held=false;const nativeResolve=faux.provider.auth.apiKey.resolve;faux.provider.auth.apiKey.resolve=async input=>{if(!held)return nativeResolve(input);lease.assertReady();appendFileSync(${JSON.stringify(path.join(f.root, "auth-held"))},JSON.stringify({pid:process.pid,sdk:VERSION,ready:lease.requiredConsumers})+'\\n');setInterval(()=>{},1000);return new Promise(()=>{})};api.on('before_agent_start',()=>{held=true});` : ""}
 faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:${JSON.stringify(options.resourceSymlink ? path.join(f.child, 'live-plugin.ts') : options.resourcePackage ? path.join(f.child, 'live-package/sidecar.js') : 'detached.txt')},content:${JSON.stringify(options.semanticDeny ? "FORBIDDEN" : "actual detached input 文🌍")}},{id:'detached-write'}),{stopReason:'toolUse'}),fauxAssistantMessage('Actual detached fixture completed.')].map(response=>(_context,_options,_state,model)=>{lease.assertReady();appendFileSync(${JSON.stringify(generations)},JSON.stringify({ready:lease.requiredConsumers,sdk:VERSION,physical:{provider:model.provider,id:model.id,api:model.api}${options.resourceSymlink || options.resourcePackage ? `,toolResults:_context.messages.filter(message=>message.role==='toolResult').map(message=>({toolName:message.toolName,isError:message.isError,mandatoryDeny:message.content.some(part=>part.type==='text'&&part.text.includes('mandatory deny-write'))}))` : ""}})+'\\n');return response}));api.registerProvider(faux.provider);${options.virtual ? `api.registerVirtualModel({provider:'trusted',id:'virtual',name:'Fixture virtual',contextWindow:128000,maxTokens:2048,route:request=>{appendFileSync(${JSON.stringify(path.join(f.root, "routes.jsonl"))},JSON.stringify({selected:request.model.id,reason:request.reason,previous:request.previous?.model.id})+'\\n');return {model:faux.models[0],thinkingLevel:'off'};}});` : ""}}`);
 	const originalProvider = readFileSync(provider, "utf8");
 	if (options.resourceSymlink) {
@@ -208,8 +210,9 @@ faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:${JSON.string
 	const timer = setTimeout(() => { timedOut = true; if (pid) process.kill(pid, "SIGKILL"); }, 45_000);
 	try {
 		await publication.ready;
-		if (options.noncooperativeStartup) watcher = watch(f.root, (_event, name) => {
-			if (name === "initializer-held" && existsSync(path.join(f.root, "initializer-held"))) { revoked = true; watcher.close(); publication.dispose(); }
+		const heldMarker = options.noncooperativeAuth ? "auth-held" : "initializer-held";
+		if (options.noncooperativeStartup || options.noncooperativeAuth) watcher = watch(f.root, (_event, name) => {
+			if (name === heldMarker && existsSync(path.join(f.root, heldMarker))) { revoked = true; watcher.close(); publication.dispose(); }
 		});
 		const execute = options.compiled ? (await import(pathToFileURL(path.join(f.agentDir, "npm/node_modules/pi-subagents/src/runs/background/async-execution.js")).href)).executeAsyncSingle : executeAsyncSingle;
 		const launch = await execute(id, {
@@ -229,12 +232,19 @@ faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:${JSON.string
 		assert.equal(status.launchContractDigest, launch.details.launchContractDigest);
 		assert.equal(status.processTerminal.runnerProcessInstanceId, proof.runnerProcessInstanceId);
 		assert.equal(existsSync(getAsyncConfigPath(id)), false, "the native bootstrap must consume/unlink its private config");
-		const failedStartup = options.runtimeUnavailable || options.brokenGuardian || options.noncooperativeStartup;
+		const failedStartup = options.runtimeUnavailable || options.brokenGuardian || options.noncooperativeStartup || options.noncooperativeAuth;
 		if (options.noncooperativeStartup) {
 			assert.equal(revoked, true);
 			assert.deepEqual(JSON.parse(readFileSync(path.join(f.root, "initializer-held"), "utf8")), { pid, sdk: sdkVersion });
 			assert.deepEqual(layout.runtime(), [], "the non-returning loader precedes consumer activation; do not claim active-runtime drain");
 			t.diagnostic(JSON.stringify({ initializer: "non-returning with live interval", pid, terminal: proof.instances, status: status.state }));
+		}
+		if (options.noncooperativeAuth) {
+			assert.equal(revoked, true);
+			const marker = JSON.parse(readFileSync(path.join(f.root, "auth-held"), "utf8"));
+			assert.equal(marker.pid, pid); assert.equal(marker.sdk, sdkVersion); assert.deepEqual([...marker.ready].sort(), ["pi-guardian", "pi-sbx"]);
+			assert.equal(layout.runtime()[0].event, "initialize"); assert.equal(layout.runtime().at(-1).event, "reset");
+			t.diagnostic(JSON.stringify({ authentication: "non-returning with live interval", pid, terminal: proof.instances, status: status.state }));
 		}
 		assert.equal(status.state, failedStartup || options.semanticDeny ? "failed" : "complete", JSON.stringify(status));
 		assert.equal(existsSync(path.join(f.child, "detached.txt")), !failedStartup && !options.semanticDeny && !options.resourceSymlink && !options.resourcePackage);
@@ -441,6 +451,18 @@ for (const compactionProbe of ["auth-drop", "auth-change"]) test(`native compact
 		assert.match(report.compactionError, /auth-prepared model endpoint did not match this operation's native auth resolution/);
 		assert.equal(report.calls, 2, "no summary backend dispatched after its auth provenance changed");
 		assert.equal(readFileSync(path.join(f.child, "authorized.txt"), "utf8"), "before refused compaction");
+		assert.deepEqual(scratch(f), []); assert.equal(report.runtime.at(-1).event, "reset");
+	} finally { f.close(); }
+});
+
+test("a native shutdown hook cannot start fresh auth after the generation lifetime closes", async () => {
+	const f = fixture();
+	try {
+		const report = await run(f, [{ name: "write", input: { path: "authorized.txt", content: "before auth shutdown" } }], { shutdownAuth: true });
+		assert.equal(report.shutdownAuth.attempts, 1);
+		assert.equal(report.shutdownAuth.nativeCalls, 0, "closing the factory must not start another native auth resolution");
+		assert.match(report.shutdownAuth.error, /Guarded child generation refused: the bound generation lifetime ended or was cancelled/);
+		assert.equal(report.calls, 2); assert.equal(readFileSync(path.join(f.child, "authorized.txt"), "utf8"), "before auth shutdown");
 		assert.deepEqual(scratch(f), []); assert.equal(report.runtime.at(-1).event, "reset");
 	} finally { f.close(); }
 });

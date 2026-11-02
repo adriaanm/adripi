@@ -5,7 +5,7 @@ import registerSubagentPromptRuntime from "../../src/runs/shared/subagent-prompt
 import { guardChildGeneration } from "../../src/runs/shared/child-generation-guard.ts";
 
 // Barrier/SDK-operation fixtures only, NOT production enforcement consumer acks.
-function fixture(ready = true, makeResult?: () => any, virtual = false, extra: Record<string, unknown> = {}, route?: (...args: any[]) => any, startupComplete = true, catalogueList?: (model: any, physical: any) => any, authLookup: (...args: any[]) => Promise<unknown> = async () => "owned-cleanup-auth") {
+function fixture(ready = true, makeResult?: () => any, virtual = false, extra: Record<string, unknown> = {}, route?: (...args: any[]) => any, startupComplete = true, catalogueList?: (model: any, physical: any) => any, authLookup: (...args: any[]) => Promise<unknown> = async () => "native-auth") {
 	const { lease } = createChildAuthorityLease({ leaseId: "generation", identity: { parentSessionId: "parent", runId: "run", agent: "worker", index: 0, cwd: process.cwd() }, payload: {}, requiredConsumers: ["pi-sbx", "pi-guardian"], send: () => false, cancel: () => {}, requestTimeoutMs: 100 });
 	if (ready) withChildAuthority(lease, () => {
 		for (const id of lease.requiredConsumers) { claimChildAuthority(id, process.cwd()); acknowledgeChildAuthority(id); }
@@ -298,11 +298,28 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		const copy: any = await f.runtime.getAuth(); assert.equal(Object.getPrototypeOf(copy.env), null);
 		assert.deepEqual(Object.keys(copy.env), ["PI_FIXTURE_ENV"]); assert.equal(copy.env.hidden, env.hidden); assert.equal(copy.auth.headers.trace, null); f.guard.close();
 	});
-	it("preserves native undefined/error auth results and delegates owned cleanup after closure", async () => {
+	it("preserves native undefined/error auth results within the live lifetime", async () => {
 		let failure = false, calls = 0; const error = new Error("native auth failed");
 		const f = fixture(true, undefined, false, {}, undefined, true, undefined, async () => { calls++; if (failure) throw error; return undefined; });
-		f.guard.close(); assert.equal(await f.runtime.getAuth(), undefined); failure = true;
-		await assert.rejects(() => f.runtime.getAuth(), value => value === error); assert.equal(calls, 2);
+		assert.equal(await f.runtime.getAuth(), undefined); failure = true;
+		await assert.rejects(() => f.runtime.getAuth(), value => value === error); assert.equal(calls, 2); f.guard.close();
+	});
+	for (const phase of ["startup", "unready", "closed", "revoked", "cancelled"] as const) it(`refuses fresh auth during ${phase} without invoking the SDK resolver`, async () => {
+		let calls = 0;
+		const f = fixture(phase !== "unready", undefined, false, {}, undefined, phase !== "startup", undefined, async () => { calls++; return {}; });
+		const caller = new AbortController();
+		if (phase === "closed") f.guard.close(); if (phase === "revoked") f.lease.dispose(); if (phase === "cancelled") caller.abort();
+		await assert.rejects(() => f.runtime.getAuth(f.model, { signal: caller.signal }), /Guarded child generation refused:/);
+		assert.equal(calls, 0); f.guard.close();
+	});
+	for (const phase of ["closed", "revoked", "cancelled", "definition"] as const) it(`withholds late auth data after ${phase} during native resolution`, async () => {
+		let release!: () => void, calls = 0;
+		const held = new Promise<void>(resolve => { release = resolve; });
+		const f = fixture(true, undefined, false, {}, undefined, true, undefined, async () => { calls++; await held; return { auth: { apiKey: "synthetic" } }; });
+		const caller = new AbortController(), pending = f.runtime.getAuth(f.model, { signal: caller.signal });
+		if (phase === "closed") f.guard.close(); if (phase === "revoked") f.lease.dispose(); if (phase === "cancelled") caller.abort();
+		if (phase === "definition") f.tools[0]!.description = "changed during auth";
+		release(); await assert.rejects(() => pending, /Guarded child generation refused:/); assert.equal(calls, 1); f.guard.close();
 	});
 	for (const shape of ["accessor", "proxy", "code", "oversized"] as const) it(`refuses ${shape} auth DTO data without invoking traps or exposing values`, async () => {
 		let traps = 0;
@@ -658,9 +675,9 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		const f = fixture(); assert.throws(() => guardChildGeneration({ ...f.runtime, getProviders: () => Array.from({ length: 257 }, (_, i) => ({ id: String(i) })) }, f.lease, f.model), /provider catalogue cannot be pinned/);
 		assert.equal(f.lease.signal.aborted, true);
 	});
-	it("does not lend remote cancellation after close while keeping SDK cleanup authentication available", async () => {
+	it("does not lend remote cancellation or fresh authentication after close", async () => {
 		const f = fixture(); f.guard.close(); assert.throws(() => f.runtime.cancelDeferred(f.model, {}, {}), /lifetime ended/);
-		assert.equal(await f.runtime.getAuth(), "owned-cleanup-auth"); assert.equal(f.calls(), 0);
+		await assert.rejects(() => f.runtime.getAuth(), /lifetime ended/); assert.equal(f.calls(), 0);
 	});
 	it("revokes changed provider ownership even when a native promise rejects", async () => {
 		const f = fixture(true, async () => { f.providers[0] = { ...f.providers[0]! }; throw new Error("native failure"); });
@@ -672,10 +689,10 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		assert.throws(() => f.runtime.registerProvider(), /registry cannot be replaced/);
 		assert.equal(f.lease.signal.aborted, true);
 	});
-	it("never dispatches again after close and does not fence off authentication needed for owned cleanup", async () => {
+	it("never dispatches or resolves fresh authentication after close", async () => {
 		const f = fixture(); f.guard.close();
 		assert.throws(() => f.runtime.streamSimple(f.model, {}, {}), /lifetime ended/);
-		assert.equal(await f.runtime.getAuth(), "owned-cleanup-auth"); assert.equal(f.calls(), 0);
+		await assert.rejects(() => f.runtime.getAuth(), /lifetime ended/); assert.equal(f.calls(), 0);
 	});
 	it("captures only the actual scoped lease without inventing a consumer claim", () => {
 		const f = fixture(false);

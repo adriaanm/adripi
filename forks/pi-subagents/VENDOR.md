@@ -751,3 +751,33 @@ for red evidence, reduction review, metadata bounds and remaining native deferre
 OAuth/effective-auth/deployed/OS/Git/live gates. Aggregate acceptance still false.
 No live install/restart/session/config/policy/toggle/protected-content/runtime
 replacement/paid-provider/push.
+
+## Authentication borrowed a closed generation's cleanup exemption
+
+Real SDK session_shutdown → public getProviderAuth started a fresh native faux
+resolver after generation.close. The existing getAuth transfer wrapper now checks
+current lifetime/readiness/startup/session/model/tool/provider provenance before
+its exact native call and in finally after await; no pre-startup/post-close cleanup
+exemption. Preserve live native errors/undefined/receiver/arguments/refresh/signals
+and independent completed DTOs. Nine new units cover zero calls before admission/
+after close/revocation/cancellation and no late data after cancellation/close/drift.
+Earlier cleanup-positive assertions were unproven assumptions and are replaced,
+not compatibility promises. Real default-factory shutdown now records one public
+attempt, zero new resolver calls, refusal, prior valid Write and normal teardown.
+
+Two source/compiled detached native auth resolvers also never return and retain an
+interval after both real consumers/SRT activation. Parent wake revokes publication;
+native process close, task failed despite exit0, no backend/tool/review, controller
+reset, config consumption and scratch cleanup prove owned **process** termination
+(~1.7–1.8s focused), not in-process drain, actual OS, remote OAuth token/persistence
+or deferred job cancellation. No new auth engine/registry/controller/permission.
+4473 total/4456 pass/17 skip/zero fail/444 suites, types; pi-sbx448/30 +types,
+Guardian types, matrix66/66 per SDK1.2/1.4, four graph/root/fresh build. Source
+156eec06ccef202c/artifact2d9a7b4fde3a680e; graph384/17/330/18/768. Five synthetic
+1000-auth-result/seven-tool samples: exact7521d8f baseline mean5.01ms, current384.98ms
+(~380us extra/auth from two freshness checks, not SSE); no actual auth/HTTP/paid/
+whole latency claim. See consumer commission for exact tests, evidence and limits.
+Already-started native refresh/private SDK work, deferred handle ownership,
+effective-auth/HTTP and deployed/OS/Git/live accounting gates remain unaccepted.
+No live install/restart/session/config/policy/toggle/protected-content/runtime
+replacement/paid-provider/push.
