@@ -705,3 +705,19 @@ HTTP/paid/whole latency. Detailed scope and remaining resource/lifetime/live gat
 in docs/round-2-production-consumers.md; aggregate/effective-auth acceptance false.
 No live install/restart/session/config/policy/toggle/protected-content/runtime
 replacement/paid-provider/push.
+
+## Non-returning provider initialization lacked real process-ownership evidence
+
+Two test-only full detached source/compiled cases load a genuine SDK provider
+initializer that never returns and keeps an interval. Parent filesystem wake
+revokes only its publication; existing bounded startup-abort/bootstrap exit and
+native terminal observer prove owned process close, failed task, no model/Write/
+review, config consumption/no scratch. Both SDKs ~4.5–4.7s; no test deadline kill.
+Process exit0 is NOT task success (durable status failed). Loader precedes consumer
+activation, SRT trace empty: not active-runtime drain, in-process initializer
+awaiting, remote deferred/OAuth cleanup or OS proof. No production behavior, new
+engine/context/permission/API/dependency. Matrix59/59 each SDK1.2/1.4, four graph/
+types/root/freshness; prior4443 full subagents gate unchanged, same source/artifact
+5c7cff725cc65042/d45901e5dbead14f. Detailed evidence/limits in consumer commission.
+No live install/restart/session/config/policy/toggle/protected-content/runtime
+replacement/paid-provider/push.

@@ -169,8 +169,9 @@ for (const [label, options] of [
 	["broken Guardian", { brokenGuardian: true }], ["semantic terminal denial", { semanticDeny: true }],
 	["compiled graph success", { compiled: true }], ["compiled SDK virtual routing", { compiled: true, virtual: true }], ["compiled unavailable runtime", { compiled: true, runtimeUnavailable: true }],
 	["compiled broken Guardian", { compiled: true, brokenGuardian: true }], ["compiled terminal denial", { compiled: true, semanticDeny: true }],
+	["noncooperative provider initializer", { noncooperativeStartup: true }], ["compiled noncooperative provider initializer", { compiled: true, noncooperativeStartup: true }],
 ]) {
-	test(`full detached bootstrap/default factory: ${label}, both actual consumers, observed process drain`, async () => {
+	test(`full detached bootstrap/default factory: ${label}, ${options.noncooperativeStartup ? "no prompt before consumers" : "both actual consumers"}, observed process drain`, async t => {
 	const f = fixture(), layout = install(f, options), id = `production-detached-${Date.now().toString(36)}`;
 	const generations = path.join(f.root, "detached-generations.jsonl");
 	const provider = path.join(f.agentDir, "extensions/faux-provider.ts");
@@ -179,7 +180,7 @@ for (const [label, options] of [
 import {fauxProvider,fauxAssistantMessage,fauxToolCall} from '@earendil-works/pi-ai';
 import {VERSION} from '@earendil-works/pi-coding-agent';
 import {captureChildAuthorityLease} from ${JSON.stringify(nativeAuthority)};
-export default function(api){const lease=captureChildAuthorityLease(${JSON.stringify(f.child)});const faux=fauxProvider({api:'fixture-faux',provider:'trusted',models:[{id:'model'}]});
+export default async function(api){const lease=captureChildAuthorityLease(${JSON.stringify(f.child)});${options.noncooperativeStartup ? `appendFileSync(${JSON.stringify(path.join(f.root, "initializer-held"))},JSON.stringify({pid:process.pid,sdk:VERSION})+'\\n');setInterval(()=>{},1000);await new Promise(()=>{});` : ""}const faux=fauxProvider({api:'fixture-faux',provider:'trusted',models:[{id:'model'}]});
 faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'detached.txt',content:${JSON.stringify(options.semanticDeny ? "FORBIDDEN" : "actual detached input 文🌍")}},{id:'detached-write'}),{stopReason:'toolUse'}),fauxAssistantMessage('Actual detached fixture completed.')].map(response=>(_context,_options,_state,model)=>{lease.assertReady();appendFileSync(${JSON.stringify(generations)},JSON.stringify({ready:lease.requiredConsumers,sdk:VERSION,physical:{provider:model.provider,id:model.id,api:model.api}})+'\\n');return response}));api.registerProvider(faux.provider);${options.virtual ? `api.registerVirtualModel({provider:'trusted',id:'virtual',name:'Fixture virtual',contextWindow:128000,maxTokens:2048,route:request=>{appendFileSync(${JSON.stringify(path.join(f.root, "routes.jsonl"))},JSON.stringify({selected:request.model.id,reason:request.reason,previous:request.previous?.model.id})+'\\n');return {model:faux.models[0],thinkingLevel:'off'};}});` : ""}}`);
 	const policy = createFilePolicy({ filesystem: { denyRead: [], allowRead: [], allowWrite: [f.parent], denyWrite: [] },
 		mandatoryDenyRead: [path.join(f.agentDir, "auth.json")], mandatoryDenyWrite: [f.agentDir] });
@@ -189,11 +190,14 @@ faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'detached.txt
 		getHuman: () => ({ ask: async () => ({ kind: "unavailable", reason: "no test UI" }) }),
 		requiredExtensions: layout.extensions, loadRegistration: async () => ({ registerRequiredChildExtensions }),
 	});
-	let pid, terminal, observed = false, timedOut = false;
+	let pid, terminal, watcher, revoked = false, observed = false, timedOut = false;
 	const closed = new Promise(resolve => { terminal = resolve; });
 	const timer = setTimeout(() => { timedOut = true; if (pid) process.kill(pid, "SIGKILL"); }, 45_000);
 	try {
 		await publication.ready;
+		if (options.noncooperativeStartup) watcher = watch(f.root, (_event, name) => {
+			if (name === "initializer-held" && existsSync(path.join(f.root, "initializer-held"))) { revoked = true; watcher.close(); publication.dispose(); }
+		});
 		const execute = options.compiled ? (await import(pathToFileURL(path.join(f.agentDir, "npm/node_modules/pi-subagents/src/runs/background/async-execution.js")).href)).executeAsyncSingle : executeAsyncSingle;
 		const launch = await execute(id, {
 			agent: "worker", task: "Run only the synthetic detached fixture.", agentConfig: makeAgent("worker", { model: options.virtual ? "trusted/virtual" : "trusted/model", tools: ["read", "write", "edit", "bash", "ls", "grep", "find"] }),
@@ -212,7 +216,13 @@ faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'detached.txt
 		assert.equal(status.launchContractDigest, launch.details.launchContractDigest);
 		assert.equal(status.processTerminal.runnerProcessInstanceId, proof.runnerProcessInstanceId);
 		assert.equal(existsSync(getAsyncConfigPath(id)), false, "the native bootstrap must consume/unlink its private config");
-		const failedStartup = options.runtimeUnavailable || options.brokenGuardian;
+		const failedStartup = options.runtimeUnavailable || options.brokenGuardian || options.noncooperativeStartup;
+		if (options.noncooperativeStartup) {
+			assert.equal(revoked, true);
+			assert.deepEqual(JSON.parse(readFileSync(path.join(f.root, "initializer-held"), "utf8")), { pid, sdk: sdkVersion });
+			assert.deepEqual(layout.runtime(), [], "the non-returning loader precedes consumer activation; do not claim active-runtime drain");
+			t.diagnostic(JSON.stringify({ initializer: "non-returning with live interval", pid, terminal: proof.instances, status: status.state }));
+		}
 		assert.equal(status.state, failedStartup || options.semanticDeny ? "failed" : "complete", JSON.stringify(status));
 		assert.equal(existsSync(path.join(f.child, "detached.txt")), !failedStartup && !options.semanticDeny);
 		if (!failedStartup && !options.semanticDeny) assert.equal(readFileSync(path.join(f.child, "detached.txt"), "utf8"), "actual detached input 文🌍");
@@ -228,7 +238,7 @@ faux.setResponses([fauxAssistantMessage(fauxToolCall('write',{path:'detached.txt
 		if (layout.runtime().some(event => event.event === "initialize")) assert.equal(layout.runtime().at(-1).event, "reset");
 		assert.deepEqual(scratch(f), []);
 	} finally {
-		clearTimeout(timer);
+		clearTimeout(timer); watcher?.close();
 		if (pid && !observed) { try { process.kill(pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; } await closed; }
 		publication.dispose(); f.close();
 	}

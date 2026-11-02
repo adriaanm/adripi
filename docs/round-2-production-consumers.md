@@ -1579,6 +1579,38 @@ The earlier source gate at `1e935e6` is historical, not current. This refresh do
 not run the subagents matrix in the guest, fix host Node26, deploy anything or
 prove OS/Git containment, live accounting or representative total cost/latency.
 
+## Non-returning native provider initializer: owned process termination
+
+Two additional full detached cases (source caller and full compiled caller) use
+the **real** SDK ResourceLoader/default factory/Node bootstrap. A trusted synthetic
+global provider initializer captures the existing lease, writes its real PID/SDK
+version, then never returns and keeps a live interval. A parent filesystem wake
+revokes only this publication after that marker; no polling, substitute factory,
+manual consumer acknowledgment, fake history or dependency/runtime change.
+
+The existing runner's bounded startup-abort path settles a **failed task**;
+bootstrap `startConfiguredSubagent` then exits its owned process. Native terminal
+observation and matching process-instance/digest/status establish the close before
+fixture cleanup. Both SDK1.2/1.4, source/compiled: about **4.5–4.7s**, no 45s test
+fallback kill, no model dispatch/Write/review, private config consumed and no
+scratch. The native process exits **0 while task status is failed**; exit code
+alone must not be called task success. The unreturned initializer/interval does
+not survive the process boundary.
+
+This is deliberately a **loader-before-consumer-activation** case: SRT trace is
+empty. It does not prove factory.dispose() awaits an uncancellable initializer in
+process, active-controller shutdown, remote deferred-job cancellation, OAuth
+refresh persistence or OS containment. Those are distinct from owning this
+process's termination; no new cancellation engine or broad cleanup exception was
+added. Full matrix now **59/59 per genuine SDK**, zero failures/skips; four graph
+checks/types/root/freshness pass. Production source/artifact remain
+`5c7cff725cc65042` / `d45901e5dbead14f`; last full subagents gate remains 4,443
+(4,426 pass/17 skip). Evidence:
+`.local/goal-consumers/native-initializer-{first,composition,sdk14,root}.log`.
+Resource/code ownership and other aggregate/live acceptance gates remain open.
+No live install/restart/session/config/policy/toggle/protected-content/runtime
+replacement/paid-provider/push action.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the
