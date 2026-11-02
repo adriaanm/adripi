@@ -1778,6 +1778,98 @@ broker, OS/Git and paid total-accounting/latency acceptance remain open. Aggrega
 source/live acceptance stays false. No live installation/restart/session/config/
 policy/toggle/protected-content access/runtime replacement/paid provider/push.
 
+## A matching model admitted foreign deferred handles
+
+The actual SDK runtime accepted a deferred handle created **before** the later
+child lease. Through guarded `streamDeferred` and `cancelDeferred`, both genuine
+SDK1.2/1.4 fetched `Foreign native SDK deferred result.` and cancelled the job:
+`childFetches:1, childCancellations:1`. Model/provider equality and current consumer
+readiness did not establish job ownership. These red probes use genuine public
+ModelRuntime/AgentSession/faux APIs with explicit manual barrier acknowledgments;
+they are **not** real-consumer/default-factory/IPC or remote-service proof. Evidence:
+`.local/goal-consumers/deferred-ownership-{before,sdk14-before}.log`.
+
+The reduction is confined to the existing generation guard; no new public API,
+wire field, policy registry, grant, loader, remote-job manager or cleanup authority:
+
+- Observe native final deferred messages through the existing result/iterator
+  fence. Require matching assistant/provider/model/API and bounded own-data handle
+  metadata. Weakly pin the **actual native-returned handle object** and independent
+  metadata within that one guard/lease. A supplied ID, equivalent JSON/clone,
+  restored handle, different lease or initial catalogue membership cannot mint
+  provenance. All existing live readiness/model/provider/tool/signal checks and
+  native auth remain mandatory on every action; this is evidence, not an approval.
+- Poll/cancel require that native reference, same model and unchanged complete
+  data, including hidden own values, prototypes, key order and enumeration flags.
+  Pass an independent owned DTO to the original method **before** its lazy auth/
+  header awaits. Do not freeze producer, caller or native-consumer data. Native
+  polling/final/cancel/error behavior and handle conversion fields remain SDK-owned.
+- A native poll cannot change job ID. Native virtual recursion attests only at
+  its already-observed physical dispatch; the outer virtual label does not mint a
+  physical-job grant. No SDK/provider/model replacement or alternative dispatcher.
+- Self-adversarial follow-up caught two holes before commit. A start/partial event
+  can expose the same handle before done; snapshot that first exposure as a **deny
+  floor**, without admitting IO before completion, and reject subsequent drift.
+  Reading a completed stream again cannot re-attest a caller-modified handle.
+  Also, util deep equality ignores non-enumerable values/flags: compare only
+  already-validated independent DTOs recursively, including their own enumerable
+  flags, rather than silently ignoring hidden conversion data. Getter/proxy/bounds
+  validation still belongs to the existing owned-data copier, not a second parser.
+  Red evidence `deferred-partial-before.log`, `deferred-hidden-before.log`.
+
+Twenty-five additional unit cases cover native result/iteration, foreign and
+cross-lease/ID-equivalent/proxy handles, transfer before awaits, partial/duplicate
+observation, job substitution, live cancellation, hidden fields/flag changes,
+malformed/oversized/model-provider-API mismatch and zero getter/trap execution.
+Existing asynchronous cancellation/provider/session-drift tests now first obtain a
+native owned handle; they no longer assume `{}` carries remote-job authority.
+
+`just check-child-composition` now additionally runs
+`scripts/deferred-runtime.test.mjs`. This new gate uses genuine public SDK
+ModelRuntime, AgentSession, ResourceLoader and native faux backend, with explicit
+manual readiness only. Its isolated test-file process deletes nonessential env
+names without inspecting values; native credentials/models are in-memory, HOME is
+synthetic, extensions/context discovery are disabled, and only a synthetic trusted
+key is configured. Native registration/refresh finishes **before** pinning, like
+the factory; virtual registration queues refresh and cannot be treated as already
+settled. There is no loader/factory facade or private runtime extraction.
+
+Sixteen cases per SDK (eight each source/full compiled guard) prove: no foreign
+fetch/cancel reaches native IO; valid result/iterator submissions poll/cancel and
+retain native cancelled errors; native virtual→physical deferred routing works;
+an awaited native header hook changing the caller ID cannot redirect backend IO;
+a mutable native partial cannot forge completed provenance; and own handles still
+refuse after close. These complement, not replace, the **66 existing actual
+factory/consumer/IPC cases**. The combined **82/82 per genuine SDK1.2/1.4** passes;
+it must not be described as 82 real-consumer cases. Reproduce SDK1.4 with the same
+native peer loader and both test filenames:
+`node ... --test scripts/child-composition.test.mjs scripts/deferred-runtime.test.mjs`.
+
+Full subagents **4498 total /4481 pass /17 skip /0 fail /444 suites**, types;
+pi-sbx **448/448 in 30 files** +types; Guardian **214/214 nonheadless** +types;
+four graph/root/diff/fresh-build checks pass. Source `404c4b4ced6c7464`, artifact
+`4f331d39acef1a49`, graph384/17/330/18/768. Evidence
+`.local/goal-consumers/deferred-{focused,native-focused,full,composition,sdk14,
+sbx,guardian,build,root}.log` (build digests also in composition.log).
+
+Performance: five interleaved synthetic same-input seven-real-tool samples against
+exact848bfe4 (location-only import adjustment). 1001 normal events including native-
+shaped partials: baseline189.61–201.22ms/current188.52–199.51ms, mean193.51/192.61ms
+(no meaningful regression established). 1000 owned poll/result admissions:
+baseline570.99–595.82/current583.87–590.66ms, mean577.85/586.31ms (~8.5µs extra/poll,
+~1.5%). These are guard/DTO stubs, not actual SDK preparation/auth/HTTP/SRT/paid or
+whole delegation latency. Driver/baseline/output are
+`.local/goal-consumers/deferred-{bench.mjs,baseline.ts,bench.log}`.
+
+This closes foreign handle admission and alias redirection, **not remote-job
+cleanup or #14 aggregate acceptance**. Restored/copied foreign handles require a
+future explicit ownership contract, not an ID lookup or reusable approval cache.
+No cancellation exemption exists after revocation/close. Already-started remote
+jobs, OAuth refresh/token persistence, privileged SDK/provider/stream-implementation
+JavaScript, effective-auth/HTTP, deployed broker/OS/Git and live paid accounting/
+total latency remain separate gates. No live install/restart/session/config/policy/
+toggle/protected-content access/runtime replacement/paid provider/push occurred.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

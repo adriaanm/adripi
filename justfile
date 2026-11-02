@@ -11,9 +11,9 @@ build-subagents:
     node scripts/build-subagents.mjs
     node --test forks/pi-subagents/test/build/child-authority.test.mjs
 
-# real registered child consumers/SDK/IPC; explicit OS/reviewer/provider doubles, no deploy
+# registered child SDK/IPC + native deferred API seam; explicit doubles, no deploy/OS proof
 check-child-composition: build-subagents
-    node --test scripts/child-composition.test.mjs
+    node --test scripts/child-composition.test.mjs scripts/deferred-runtime.test.mjs
 
 # install packages, deploy the vendored forks, and seed configs
 install:

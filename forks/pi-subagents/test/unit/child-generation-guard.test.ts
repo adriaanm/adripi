@@ -17,8 +17,8 @@ function fixture(ready = true, makeResult?: () => any, virtual = false, extra: R
 	const session = { sessionId: "sdk-session", model, agent: { state: { model } },
 		getAllTools: () => tools.map(({ name, description, parameters }) => ({ name, description, parameters, sourceInfo: { path: "/owned/tool.ts" } })),
 		getToolDefinition: (name: string) => tools.find(tool => tool.name === name), getActiveToolNames: () => [...active], getCallableToolNames: () => [...callable] };
-	let calls = 0, options: any, lastModel: unknown;
-	const native = (_model: unknown, _context: unknown, value: unknown) => { calls++; options = value; lastModel = _model; return makeResult ? makeResult() : "same-native-result"; };
+	let calls = 0, options: any, lastModel: unknown, lastContext: unknown;
+	const native = (_model: unknown, _context: unknown, value: unknown) => { calls++; options = value; lastModel = _model; lastContext = _context; return makeResult ? makeResult() : "same-native-result"; };
 	const physical = { provider: "physical", id: "routed", api: "faux", baseUrl: "https://physical.invalid", headers: { trace: "original" } };
 	const catalogue = { model: physical };
 	const providers = ["trusted", "physical"].map(id => ({ id, auth: { resolve: () => undefined }, streamSimple: native }));
@@ -33,7 +33,20 @@ function fixture(ready = true, makeResult?: () => any, virtual = false, extra: R
 		registerProvider() {}, refresh() {}, getAuth: authLookup };
 	const originalAPIs = { getProvider: runtime.getProvider, getProviders: runtime.getProviders, getAuth: runtime.getAuth, getRegisteredNativeProvider: runtime.getRegisteredNativeProvider, getRegisteredProviderConfig: runtime.getRegisteredProviderConfig };
 	const guard = guardChildGeneration(runtime, lease, model); guard.bind(session); if (startupComplete) guard.completeStartup();
-	return { lease, runtime, originalAPIs, native, guard, model, tools, active, callable, physical, catalogue, providers, sources, session, calls: () => calls, options: () => options, lastModel: () => lastModel };
+	return { lease, runtime, originalAPIs, native, guard, model, tools, active, callable, physical, catalogue, providers, sources, session, calls: () => calls, options: () => options, lastModel: () => lastModel, lastContext: () => lastContext };
+}
+
+function deferredFixture(onIo?: () => unknown) {
+	let admitted = false;
+	const handle = { provider: "trusted", modelId: "model", api: "faux", id: "native-job", data: { cursor: ["original", null] } };
+	const message: any = { role: "assistant", provider: "trusted", model: "model", api: "faux", stopReason: "deferred", deferred: handle };
+	const stream = () => ({ result: async () => message, async *[Symbol.asyncIterator]() { yield { type: "start", partial: message }; yield { type: "done", message }; } });
+	const f = fixture(true, () => admitted && onIo ? onIo() : stream(), false, { api: "faux" });
+	return { ...f, handle, message, async admit(iterate = false) {
+		const result = f.runtime.streamSimple(f.model, {}, {});
+		if (iterate) { for await (const _event of result) {} } else await result.result();
+		admitted = true;
+	} };
 }
 
 describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () => {
@@ -556,9 +569,11 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 	for (const method of ["classify", "generateImages", "cancelDeferred"] as const) {
 		it(`rejects a late ${method} result after session drift`, async () => {
 			let change: () => void = () => {};
-			const f = fixture(true, async () => { await Promise.resolve(); change(); return "late"; });
+			const operation = async () => { await Promise.resolve(); change(); return "late"; };
+			const f = method === "cancelDeferred" ? deferredFixture(operation) : fixture(true, operation);
+			if ("admit" in f) await f.admit();
 			change = () => { f.session.sessionId = "different"; };
-			await assert.rejects(() => f.runtime[method](f.model, {}, {}), /identity changed/);
+			await assert.rejects(() => f.runtime[method](f.model, "handle" in f ? f.handle : {}, {}), /identity changed/);
 		});
 	}
 	for (const change of ["dispatch", "auth", "metadata", "owner", "API", "auth API"] as const) it(`prevents live provider ${change} drift without substituting native code`, () => {
@@ -675,13 +690,108 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		const f = fixture(); assert.throws(() => guardChildGeneration({ ...f.runtime, getProviders: () => Array.from({ length: 257 }, (_, i) => ({ id: String(i) })) }, f.lease, f.model), /provider catalogue cannot be pinned/);
 		assert.equal(f.lease.signal.aborted, true);
 	});
+	for (const method of ["streamDeferred", "cancelDeferred"] as const) it(`refuses a foreign ${method} handle without invoking native IO`, () => {
+		const f = deferredFixture();
+		assert.throws(() => f.runtime[method](f.model, f.handle, {}), /not observed from this live SDK child/);
+		assert.equal(f.calls(), 0);
+	});
+	for (const iterate of [false, true]) it(`admits only a native deferred handle observed through ${iterate ? "iteration" : "result"}, preserving producer data and native copies`, async () => {
+		const f = deferredFixture(); await f.admit(iterate);
+		await f.runtime.streamDeferred(f.model, f.handle, {}).result();
+		assert.notEqual(f.lastContext(), f.handle); assert.deepEqual(f.lastContext(), f.handle);
+		assert.notEqual((f.lastContext() as any).data, f.handle.data); assert.equal(Object.isFrozen(f.handle), false);
+		await f.runtime.cancelDeferred(f.model, f.handle, {}); assert.equal(f.calls(), 3); f.guard.close();
+	});
+	it("does not turn an ID-equivalent copy into same-lease native provenance", async () => {
+		const f = deferredFixture(); await f.admit();
+		assert.throws(() => f.runtime.streamDeferred(f.model, structuredClone(f.handle), {}), /not observed/); assert.equal(f.calls(), 1);
+	});
+	it("does not transfer a genuine handle from another otherwise-identical live lease", async () => {
+		const a = deferredFixture(), b = deferredFixture(); await a.admit();
+		assert.throws(() => b.runtime.cancelDeferred(b.model, a.handle, {}), /not observed/);
+		assert.equal(b.calls(), 0); a.guard.close();
+	});
+	it("refuses changed conversion data before native deferred IO", async () => {
+		const f = deferredFixture(); await f.admit(); f.handle.data.cursor[0] = "changed";
+		assert.throws(() => f.runtime.streamDeferred(f.model, f.handle, {}), /handle metadata changed/); assert.equal(f.calls(), 1);
+	});
+	it("does not inspect a proxy around an otherwise-genuine owned handle", async () => {
+		const f = deferredFixture(); await f.admit(); let traps = 0;
+		const proxy = new Proxy(f.handle, { getOwnPropertyDescriptor() { traps++; throw new Error("private"); } });
+		assert.throws(() => f.runtime.streamDeferred(f.model, proxy, {}), /not observed/); assert.equal(traps, 0); assert.equal(f.calls(), 1);
+	});
+	it("does not evaluate conversion-data accessors added after native admission", async () => {
+		const f = deferredFixture(); await f.admit(); let traps = 0;
+		Object.defineProperty(f.handle.data, "cursor", { get() { traps++; throw new Error("private"); } });
+		assert.throws(() => f.runtime.cancelDeferred(f.model, f.handle, {}), /handle metadata changed/); assert.equal(traps, 0); assert.equal(f.calls(), 1);
+	});
+	for (const field of ["id", "conversion"] as const) it(`does not ignore changed non-enumerable deferred ${field} data`, async () => {
+		const f = deferredFixture();
+		if (field === "id") Object.defineProperty(f.handle, "id", { enumerable: false });
+		else Object.defineProperty(f.handle.data, "cursor", { enumerable: false });
+		await f.admit();
+		if (field === "id") f.handle.id = "hidden foreign"; else f.handle.data.cursor[0] = "hidden conversion";
+		assert.throws(() => f.runtime.cancelDeferred(f.model, f.handle, {}), /handle metadata changed/); assert.equal(f.calls(), 1);
+	});
+	it("retains genuine hidden handle/conversion fields without dropping them from comparison or native copies", async () => {
+		const f = deferredFixture(); Object.defineProperty(f.handle, "id", { enumerable: false }); Object.defineProperty(f.handle.data, "cursor", { enumerable: false });
+		await f.admit(); await f.runtime.cancelDeferred(f.model, f.handle, {});
+		const copy = f.lastContext() as typeof f.handle;
+		assert.equal(copy.id, "native-job"); assert.equal(copy.data.cursor[0], "original");
+		assert.equal(Object.getOwnPropertyDescriptor(copy, "id")!.enumerable, false); assert.equal(Object.getOwnPropertyDescriptor(copy.data, "cursor")!.enumerable, false);
+		assert.equal(Object.isFrozen(f.handle), false); f.guard.close();
+	});
+	it("refuses changed handle enumeration even when every value is unchanged", async () => {
+		const f = deferredFixture(); await f.admit(); Object.defineProperty(f.handle.data, "cursor", { enumerable: false });
+		assert.throws(() => f.runtime.cancelDeferred(f.model, f.handle, {}), /handle metadata changed/); assert.equal(f.calls(), 1);
+	});
+	it("cannot re-attest a caller-mutated handle by reading the same native result again", async () => {
+		const f = deferredFixture(), stream = f.runtime.streamSimple(f.model, {}, {}); await stream.result(); f.handle.id = "foreign";
+		await assert.rejects(() => stream.result(), /handle metadata changed/); assert.equal(f.calls(), 1);
+	});
+	it("transfers an independent handle before native preparation can await", async () => {
+		const f = deferredFixture(); await f.admit(); f.runtime.streamDeferred(f.model, f.handle, {});
+		const nativeCopy = f.lastContext() as typeof f.handle;
+		f.handle.id = "late foreign"; f.handle.data.cursor[0] = "late conversion";
+		assert.equal(nativeCopy.id, "native-job"); assert.equal(nativeCopy.data.cursor[0], "original"); f.guard.close();
+	});
+	it("does not mint handle provenance from a partial event or non-deferred final message", async () => {
+		const f = deferredFixture(), iterator = f.runtime.streamSimple(f.model, {}, {})[Symbol.asyncIterator]();
+		await iterator.next();
+		assert.throws(() => f.runtime.streamDeferred(f.model, f.handle, {}), /not observed/); await iterator.return();
+		const g = deferredFixture(); g.message.stopReason = "stop"; await g.admit();
+		assert.throws(() => g.runtime.cancelDeferred(g.model, g.handle, {}), /not observed/);
+	});
+	it("cannot attest a handle changed through a native partial event before completion", async () => {
+		const f = deferredFixture(), iterator = f.runtime.streamSimple(f.model, {}, {})[Symbol.asyncIterator]();
+		const first = await iterator.next(); assert.equal(first.value.type, "start");
+		first.value.partial.deferred.id = "foreign through partial";
+		await assert.rejects(() => iterator.next(), /deferred response changed after exposure/); assert.equal(f.calls(), 1);
+	});
+	it("does not let a native poll switch an owned handle to another job", async () => {
+		const f = deferredFixture(); await f.admit(); const poll = f.runtime.streamDeferred(f.model, f.handle, {});
+		f.message.deferred = { ...f.handle, id: "different native job" };
+		await assert.rejects(() => poll.result(), /polling substituted/); assert.equal(f.calls(), 2);
+	});
+	for (const shape of ["proxy", "accessor", "oversized", "wrong model", "wrong provider", "wrong api", "wrong message"] as const) it(`refuses ${shape} native deferred metadata without executing traps`, async () => {
+		const f = deferredFixture(); let traps = 0;
+		if (shape === "proxy") f.message.deferred = new Proxy(f.handle, { ownKeys() { traps++; throw new Error("private"); } });
+		if (shape === "accessor") Object.defineProperty(f.handle, "id", { get() { traps++; return "private"; } });
+		if (shape === "oversized") f.handle.id = "x".repeat(65537);
+		if (shape === "wrong model") f.handle.modelId = "other";
+		if (shape === "wrong provider") f.handle.provider = "other";
+		if (shape === "wrong api") f.handle.api = "other";
+		if (shape === "wrong message") f.message.model = "other";
+		await assert.rejects(() => f.admit(), /lacks bounded model-bound handle provenance/); assert.equal(traps, 0);
+	});
 	it("does not lend remote cancellation or fresh authentication after close", async () => {
 		const f = fixture(); f.guard.close(); assert.throws(() => f.runtime.cancelDeferred(f.model, {}, {}), /lifetime ended/);
 		await assert.rejects(() => f.runtime.getAuth(), /lifetime ended/); assert.equal(f.calls(), 0);
 	});
 	it("revokes changed provider ownership even when a native promise rejects", async () => {
-		const f = fixture(true, async () => { f.providers[0] = { ...f.providers[0]! }; throw new Error("native failure"); });
-		await assert.rejects(() => f.runtime.cancelDeferred(f.model, {}, {}), /provider identity changed/); assert.equal(f.lease.signal.aborted, true);
+		const f = deferredFixture(async () => { f.providers[0] = { ...f.providers[0]! }; throw new Error("native failure"); });
+		await f.admit();
+		await assert.rejects(() => f.runtime.cancelDeferred(f.model, f.handle, {}), /provider identity changed/); assert.equal(f.lease.signal.aborted, true);
 	});
 	it("does not permit replacement of the guarded dispatch or selected provider registry", () => {
 		const f = fixture();

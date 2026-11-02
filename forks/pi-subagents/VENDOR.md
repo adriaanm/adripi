@@ -781,3 +781,39 @@ Already-started native refresh/private SDK work, deferred handle ownership,
 effective-auth/HTTP and deployed/OS/Git/live accounting gates remain unaccepted.
 No live install/restart/session/config/policy/toggle/protected-content/runtime
 replacement/paid-provider/push.
+
+## Matching models lent IO to foreign deferred handles
+
+Both genuine SDKs fetched/cancelled a native job submitted before the later lease.
+The existing generation guard now weakly pins only native-returned completed
+handle objects plus bounded independent model-bound data, within that guard/lease.
+IDs, equivalent JSON/clones, old sessions and matching catalogue models are not
+ownership. Every fetch/cancel retains current readiness/session/model/provider/
+tool/cancellation/auth fences. Transfer an owned native-consumer copy before lazy
+auth/header awaits; producer/signing/native maps remain mutable. No new public API,
+wire field, policy registry, grant, loader, remote-job manager or cleanup exemption.
+
+Self-adversarial iteration caught partial-event alias mutation before completion
+and hidden-value/enum-flag gaps in util deep equality. First partial exposure is a
+deny floor, not IO admission; completion cannot re-attest modified data. A poll
+cannot switch job IDs. Compare only validated independent DTOs, including hidden
+values and enumeration/prototype semantics; copied native arguments preserve the
+original owned-data transfer behavior. Native virtual recursion attests through
+its already-observed physical operation, not the virtual label.25 new unit cases.
+
+New scripts/deferred-runtime.test.mjs uses genuine public SDK ModelRuntime/
+AgentSession/ResourceLoader/faux, with explicit manual readiness and in-memory
+synthetic credentials, isolated HOME and env-name sanitization.16 tests per SDK,
+source/full compiled guard: foreign IO counters0; normal result/iterator poll/
+cancel/native errors and virtual physical routing; actual awaited header alias,
+partial alias and lifetime refusal. These are NOT default-factory/real-consumer/
+IPC/OS/remote proof. Existing66 actual composition cases +16 native API cases =
+82/82 per SDK1.2/1.4; just check-child-composition runs both.4498 total/4481 pass/
+17 skip/zero fail/444 suites; types, pi-sbx448/30 files +types, Guardian214
+nonheadless +types, four graph/root/fresh build. Source404c4b4ced6c7464/artifact
+4f331d39acef1a49, graph384/17/330/18/768. Five synthetic1000-poll mean577.85→586.31ms
+(~8.5us/poll),1001-event means193.51/192.61ms (noise), not SDK/auth/HTTP/paid/whole
+latency. Detailed red evidence, reduction review and exact limits in consumer
+commission. Owned remote cancellation after closure/OAuth/effective-auth/deployed/
+OS/Git/live accounting gates remain unaccepted. No live install/restart/session/
+config/policy/toggle/protected-content/runtime replacement/paid-provider/push.

@@ -57,6 +57,19 @@ function copyOwnedData(value: unknown): unknown {
 	};
 	flags(copy, value); return copy;
 }
+// Only independent DTOs already validated by copyOwnedData reach this comparison.
+// util's deep equality ignores hidden values and enumeration changes; both can
+// alter a native handle's conversion/serialization meaning. Do not freeze producers.
+function sameOwnedData(left: unknown, right: unknown): boolean {
+	if (Object.is(left, right)) return true;
+	if (!left || !right || typeof left !== "object" || typeof right !== "object" || Object.getPrototypeOf(left) !== Object.getPrototypeOf(right)) return false;
+	const keys = Object.getOwnPropertyNames(left), other = Object.getOwnPropertyNames(right);
+	if (keys.length !== other.length || keys.some((name, index) => name !== other[index])) return false;
+	return keys.every(name => {
+		const a = Object.getOwnPropertyDescriptor(left, name)!, b = Object.getOwnPropertyDescriptor(right, name)!;
+		return a.enumerable === b.enumerable && sameOwnedData(a.value, b.value);
+	});
+}
 /** Only validated, bounded SDK-owned DATA reaches this function. Keep callable
  * values untouched. Immutable data closes async handoff gaps without replacing
  * the model/provider objects, SDK definitions or the native transport. */
@@ -283,6 +296,10 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 			return route;
 		}, true);
 	}
+	// Same-lease native-response provenance, not IDs supplied by a caller or a
+	// persisted permission cache. Every later IO still checks current authority.
+	const deferredPins = new WeakMap<object, { model: string; data: Record<string, unknown> }>();
+	const deferredModel = (model: ModelIdentity) => JSON.stringify([model.provider, model.id, model.api]);
 	for (const name of ["stream", "streamSimple", "streamDeferred", "cancelDeferred", "generateImages", "classify"]) {
 		install(name, original => (model: ModelIdentity, context: unknown, options?: Record<string, unknown>) => {
 			const signal = AbortSignal.any([lease.signal, ...(startupSignal ? [startupSignal] : []), ...(options?.signal ? [options.signal as AbortSignal] : [])]);
@@ -308,6 +325,41 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 				}
 			}
 			assert(model, signal, requestMetadata);
+			let deferredInput: Record<string, unknown> | undefined, exposedDeferred: Record<string, unknown> | undefined;
+			if (name === "streamDeferred" || name === "cancelDeferred") {
+				const pin = context && typeof context === "object" && !types.isProxy(context) ? deferredPins.get(context) : undefined;
+				if (!pin || pin.model !== deferredModel(requestMetadata)) return fail("the deferred handle was not observed from this live SDK child model operation");
+				let copy: unknown;
+				try { copy = copyOwnedData(context); } catch { return fail("the admitted deferred handle metadata changed"); }
+				if (!sameOwnedData(copy, pin.data)) fail("the admitted deferred handle metadata changed");
+				deferredInput = pin.data;
+				// Native preparation awaits auth/hooks. Do not lend a caller's mutable
+				// handle alias across that await; leave producer/native data mutable.
+				context = copy;
+			}
+			const observeDeferred = (message: unknown, complete = true) => {
+				if (!message || typeof message !== "object" || types.isProxy(message)) return;
+				const field = (name: string) => Object.getOwnPropertyDescriptor(message, name)?.value;
+				// Native virtual streaming recursively dispatches through its guarded
+				// physical operation; only that concrete boundary can attest a handle.
+				if (requestMetadata.api === "pi-virtual" || complete && field("stopReason") !== "deferred") return;
+				const handle = field("deferred");
+				if (!complete && handle === undefined) return;
+				let data: Record<string, unknown>;
+				try {
+					data = copyOwnedData(handle) as Record<string, unknown>;
+					if (!data || typeof data !== "object" || Array.isArray(data) || field("role") !== "assistant" || field("provider") !== requestMetadata.provider || field("model") !== requestMetadata.id || field("api") !== requestMetadata.api ||
+						data.provider !== requestMetadata.provider || data.modelId !== requestMetadata.id || data.api !== requestMetadata.api || typeof data.id !== "string" || !data.id) throw new Error("unsupported handle");
+				} catch { return fail("the native deferred response lacks bounded model-bound handle provenance"); }
+				if (deferredInput && data.id !== deferredInput.id) fail("native deferred polling substituted a different job handle");
+				if (exposedDeferred && !sameOwnedData(exposedDeferred, data)) fail("the deferred response changed after exposure to a caller");
+				// Partial events can expose the same mutable handle before completion.
+				// Pin that first exposure as a deny floor, not permission to use it.
+				if (!complete) { exposedDeferred ??= data; return; }
+				const previous = deferredPins.get(handle);
+				if (previous && (previous.model !== deferredModel(requestMetadata) || !sameOwnedData(previous.data, data))) fail("the admitted deferred handle metadata changed");
+				if (!previous) deferredPins.set(handle, { model: deferredModel(requestMetadata), data });
+			};
 			const bounded: Record<string, unknown> = { ...options, signal };
 			// Native preparation is lazy and awaits auth/hooks. Admit caller maps
 			// once, without retaining aliases that can change before those reads.
@@ -351,11 +403,18 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 				get(stream, property) {
 					const value = Reflect.get(stream, property, stream);
 					if (property === "result" && typeof value === "function") return async () => {
-						assert(model, signal, requestMetadata); const message = await value.call(stream); assert(model, signal, requestMetadata, true); return message;
+						assert(model, signal, requestMetadata); const message = await value.call(stream); assert(model, signal, requestMetadata, true); observeDeferred(message); return message;
 					};
 					if (property === Symbol.asyncIterator && typeof value === "function") return async function* () {
 						assert(model, signal, requestMetadata);
-						for await (const event of { [Symbol.asyncIterator]: () => value.call(stream) }) { assert(model, signal, requestMetadata, true); yield event; }
+						for await (const event of { [Symbol.asyncIterator]: () => value.call(stream) }) {
+							assert(model, signal, requestMetadata, true);
+							if (event && typeof event === "object" && !types.isProxy(event)) {
+								observeDeferred(Object.getOwnPropertyDescriptor(event, "partial")?.value, false);
+								if (Object.getOwnPropertyDescriptor(event, "type")?.value === "done") observeDeferred(Object.getOwnPropertyDescriptor(event, "message")?.value);
+							}
+							yield event;
+						}
 						assert(model, signal, requestMetadata, true);
 					};
 					return typeof value === "function" ? value.bind(stream) : value;
