@@ -598,3 +598,23 @@ Source154dd6afda95173e/artifact5700b701be2a3ea3 graph384/17/330/18/768. Syntheti
 Exact evidence/budgets/remaining prepared-auth/code/resources/lifecycle/live gates:
 docs/round-2-production-consumers.md. No live install/restart/session/config/policy/
 toggle/protected-content/runtime replacement/paidprovider/push.
+
+## A completed header hook retained a writable alias used by native dispatch
+
+GenuineSDKred: retained before_provider_headers map changed4microtasks afterhook;
+2readybackends received synthetic changed header. Native hook mutatesinplace;
+prepareRequest passes its returned map directly. Existing callback fences now
+validate completed string/null headerdata (1024nodes64KiBdepth12), transfer a
+bounded independent map with original prototype/enumerability. Never freeze reusable
+producer/signing maps or restrict native SDK request ownership; late producer writes
+succeed but no longer change previous request copies. No header algorithm/coercion,
+model/provider/transport replacement, SDK/API/registry/permission/context store.
+13addedunits independent/reusable/async/default/null/non-enumerable/nativecopy and
+8badshape/no code/getter/proxy invocation/privacy. Actual4/8microtick producerchanged,
+backendoriginal/2readycalls/Write/reset/cleanup.4414total4397pass17skip0fail443suites/
+types;46/46 perSDK1.2/1.4,4graph/root. Source97e4ca14c29ece50/artifactf9440553581aecfd,
+graph384/17/330/18/768. Synthetic1000completedcallbacks7realtools/3headers versus
+897b3d5:373.3–390.6msbaseline/380.4–396.9current (mean+3.9us/callback/~1%); perhook,
+notperSSE. No auth/HTTP/paid/wholelatency proof. Docs record exact remaining auth/env/
+calleroptions/resources/lifecycle/live gates. No live install/restart/session/config/
+policy/toggle/protected-content/runtime replacement/paidprovider/push.

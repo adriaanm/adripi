@@ -28,11 +28,13 @@ const factory = createDefaultChildSessionFactory({
 let authority: Awaited<ReturnType<typeof bindRunnerChildAuthority>>;
 const readyAtGenerations: string[][] = [];
 const modelAtGenerations: Array<{ baseUrl: string; api: string }> = [];
+const headerAtGenerations: Array<string | null | undefined> = [];
 // Passive observation of the genuine faux backend input, before its queued
 // onResponse hook. The same native faux implementation still owns execution.
 const nativeStream = faux.provider.streamSimple;
 faux.provider.streamSimple = (model, context, options) => {
 	modelAtGenerations.push({ baseUrl: model.baseUrl, api: model.api });
+	headerAtGenerations.push(options?.headers && Object.getOwnPropertyDescriptor(options.headers, "x-fixture")?.value);
 	return nativeStream.call(faux.provider, model, context, options);
 };
 faux.setResponses([
@@ -74,9 +76,9 @@ try {
 	} as unknown as InProcessChildLaunch;
 	const result = await runChildSession({ factory, launch, authority,
 		prompt: "Execute the credential-free source fixture only.", appendChildEvent() {}, writeOutputLine() {} });
-	console.log("PRODUCTION_RESULT " + JSON.stringify({ result, calls: faux.state.callCount, readyAtGenerations, modelAtGenerations, initialBaseUrl }));
+	console.log("PRODUCTION_RESULT " + JSON.stringify({ result, calls: faux.state.callCount, readyAtGenerations, modelAtGenerations, headerAtGenerations, initialBaseUrl }));
 } catch (error) {
-	console.log("PRODUCTION_ERROR " + JSON.stringify({ message: error instanceof Error ? error.message : String(error), calls: faux.state.callCount, readyAtGenerations, modelAtGenerations, initialBaseUrl }));
+	console.log("PRODUCTION_ERROR " + JSON.stringify({ message: error instanceof Error ? error.message : String(error), calls: faux.state.callCount, readyAtGenerations, modelAtGenerations, headerAtGenerations, initialBaseUrl }));
 	process.exitCode = 1;
 } finally {
 	await factory.dispose();

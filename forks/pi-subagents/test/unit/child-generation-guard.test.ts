@@ -191,6 +191,46 @@ describe("guarded SDK generation lifetime (opaque API/transport fixtures)", () =
 		assert.throws(() => f.runtime.streamSimple({ ...f.model, baseUrl: "https://changed.invalid" }, {}, {}), /metadata|selection/);
 		assert.equal(f.calls(), 0);
 	});
+	it("transfers completed headers as independent data, leaving producer and SDK maps usable", async () => {
+		const f = fixture(), headers = { trace: "original", remove: null };
+		f.runtime.streamSimple(f.model, {}, { transformHeaders: async () => headers });
+		const copy = await f.options().transformHeaders({}); assert.notEqual(copy, headers); assert.deepEqual(copy, headers);
+		headers.trace = "late"; assert.equal(copy.trace, "original"); copy.trace = "native SDK owned";
+		assert.equal(headers.trace, "late"); assert.equal(copy.remove, null); f.guard.close();
+	});
+	it("permits reusable signing/header maps to change for later requests, not earlier copies", async () => {
+		const f = fixture(), headers = { nonce: "one" };
+		f.runtime.streamSimple(f.model, {}, { transformHeaders: async () => headers });
+		const first = await f.options().transformHeaders({}); headers.nonce = "two";
+		const second = await f.options().transformHeaders({});
+		assert.equal(first.nonce, "one"); assert.equal(second.nonce, "two"); assert.notEqual(first, second); f.guard.close();
+	});
+	it("allows in-place async header changes until the native hook actually completes", async () => {
+		const f = fixture(), headers = { trace: "before" };
+		f.runtime.streamSimple(f.model, {}, { transformHeaders: async value => { await Promise.resolve(); value.trace = "complete"; return value; } });
+		const copy = await f.options().transformHeaders(headers); assert.equal(copy.trace, "complete"); assert.equal(headers.trace, "complete"); f.guard.close();
+	});
+	it("copies default header callbacks without inventing a caller hook", async () => {
+		const f = fixture(), headers = { trace: "default" };
+		f.runtime.streamSimple(f.model, {}, {}); const copy = await f.options().transformHeaders(headers);
+		assert.notEqual(copy, headers); assert.deepEqual(copy, headers); f.guard.close();
+	});
+	it("preserves null prototypes and non-enumerability instead of introducing hidden HTTP fields", async () => {
+		const f = fixture(), headers = Object.assign(Object.create(null), { trace: "visible", remove: null });
+		Object.defineProperty(headers, "hidden", { value: "not an HTTP field", enumerable: false });
+		f.runtime.streamSimple(f.model, {}, {}); const copy = await f.options().transformHeaders(headers);
+		assert.equal(Object.getPrototypeOf(copy), null); assert.deepEqual(Object.keys(copy), ["trace", "remove"]);
+		assert.equal(copy.hidden, headers.hidden); assert.equal(copy.remove, null); f.guard.close();
+	});
+	for (const shape of ["accessor", "proxy", "array", "undefined", "number value", "object value", "function value", "oversized"] as const) it(`refuses ${shape} completed headers without inspecting code or logging values`, async () => {
+		const f = fixture(); let traps = 0;
+		const headers = shape === "accessor" ? Object.defineProperty({}, "private", { get() { traps++; return "must not read"; } })
+			: shape === "proxy" ? new Proxy({}, { ownKeys() { traps++; return []; } }) : shape === "array" ? [] : shape === "undefined" ? undefined
+			: shape === "number value" ? { private: 42 } : shape === "object value" ? { private: {} } : shape === "function value" ? { private: () => { traps++; } } : { private: "x".repeat(65537) };
+		f.runtime.streamSimple(f.model, {}, { transformHeaders: async () => headers });
+		await assert.rejects(() => f.options().transformHeaders({}), /completed SDK header hook did not return bounded accessor-free header data/);
+		assert.equal(traps, 0); assert.equal(f.lease.signal.aborted, true);
+	});
 	it("prevents asynchronous header hooks from installing model accessors", async () => {
 		const f = fixture(); let reads = 0;
 		f.runtime.streamSimple(f.model, {}, { transformHeaders: async () => {

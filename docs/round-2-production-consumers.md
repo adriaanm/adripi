@@ -1294,6 +1294,59 @@ acceptance, live deployment/broker/OS/Git/accounting/total latency remain open.
 No aggregate production acceptance or live install/restart/session/config/policy/
 toggle/protected-content/runtime replacement/paid-provider/push action.
 
+## Completed header hooks leaked retained aliases into native dispatch
+
+Genuine SDK source trace: `prepareRequest` awaits `getAuth`, merges headers, awaits
+`transformHeaders` and passes that same map to the provider. Native extension
+`before_provider_headers` mutates it in place; handler return values are ignored.
+A retained hook alias changed four microtasks later: both ready backend calls
+received synthetic `x-fixture:"changed"` instead of the completed `"original"`.
+Delay8 already had the original value at backend entry, but retained the same alias
+for later consumer use. Red `.local/goal-consumers/header-handoff-before.log`.
+Only a literal synthetic header was observed, never auth keys or arbitrary headers;
+this is not an HTTP/billing/complete effective-auth provenance proof.
+
+At the existing public callback boundary, retain all pre/finally checks and then
+transfer an independent bounded header record. Validate the completed result as
+accessor/proxy/code-free own string/null header data (1024nodes/64KiB/depth12);
+reject invalid data without printing values. Preserve null prototype, values/order
+and enumerable flags: the generic metadata comparison snapshot normalizes flags,
+so returning it unchanged would introduce previously non-enumerable HTTP fields.
+Copy the original flags before transfer. No header naming/coercion/merge algorithm,
+new callback/service/registry/permission/transport/SDK or model/provider substitution.
+
+Do **not** freeze the producer's reusable signing/header map or the native SDK's
+request copy. The producer can mutate/reuse its original map; those later writes
+cannot change earlier native request copies. This is per-request data ownership,
+not an approval cache. Mutations awaited inside the hook remain supported, and
+native errors retain the original exception when lifetime/provenance are current.
+Auth/env resolution, caller option ownership, private global/config code and actual
+HTTP backend behaviour remain separate audits, not inferred from this map copy.
+
+Actual delay4/8 cases now prove the producer really changed its retained map
+without TypeError, backend snapshots stay original,2readycalls/assignedWrite/reset/
+cleanup.13added opaque units cover independent/reusable maps, native copy ownership,
+async in-hook writes/default hook, null/non-enumerable semantics and8bad shapes
+without getters/proxy/function invocation or raw-value error text. Native callback
+error/cancellation/provenance failure tests remain intact.
+**4,414 total /4,397 pass /17 skip /zero fail /443 suites**, types,
+**46/46 per genuine SDK1.2/1.4**, zero composition fail/skip;4graph/root/freshness.
+Source `97e4ca14c29ece50`, artifact `f9440553581aecfd`, graph384/17/330/18/768.
+Five synthetic same-input samples vs exact preceding897b3d5guard:1000completed
+header callbacks/seven real tool schemas/one real faux provider metadata/three
+synthetic header fields, baseline373.3–390.6ms/current380.4–396.9ms (mean+3.9µs per
+callback/~1.0%); setup0.42–2.01ms/0.42–1.39ms. This path runs per header hook, not per
+SSE event. No auth/provider dispatch, HTTP, paid savings or representative total
+latency is measured. Evidence `.local/goal-consumers/header-handoff-{before,focused,
+after,composition,sdk14,full,bench,root}.log`, local exact baseline/benchmark and
+committed regressions.
+
+Aggregate source/deployed consumer acceptance stays false. Initializer/cache-warmer/
+auxiliary router/deferred lifecycle, declared code/resource/executable ownership,
+prepared auth/env/options, deployment/broker/OS/Git/paid costs/total latency gates
+remain open. No live install/restart/session/config/policy/toggle/protected-content/
+runtime replacement/paid-provider/push action.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the
