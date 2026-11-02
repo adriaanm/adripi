@@ -60,6 +60,7 @@ function install(f, options) {
 	}
 	mkdirSync(path.join(f.agentDir, "extensions"));
 	writeFileSync(path.join(f.agentDir, "extensions/sandbox.json"), "poison root profile must never be loaded by child");
+	if (options.cacheWarming) writeFileSync(path.join(f.agentDir, "settings.json"), JSON.stringify({ cacheWarming: "streaming" }));
 	if (options.configProvider === "overlay") writeFileSync(path.join(f.agentDir, "models.json"), JSON.stringify({ providers: { trusted: { baseUrl: "https://configured-faux.invalid" } } }));
 	const mock = path.join(modules, "@anthropic-ai/sandbox-runtime"), journal = path.join(f.root, "runtime.jsonl");
 	mkdirSync(mock, { recursive: true });
@@ -86,7 +87,7 @@ export const SandboxManager={
 	const extensions = ["pi-sbx", "pi-guardian"].map(id => ({ id, path: path.join(modules, id, "src/index.ts") }));
 	if (options.brokenGuardian) writeFileSync(extensions[1].path, "throw new Error('guardian-import-broken');");
 	const additionalExtensions = [];
-	if (options.foreignOwner || options.startupGeneration || options.modelMetadataMutation || options.toolSchemaMutation || options.postStartupOwnerMutation || options.providerMutation || options.modelHandoff || options.catalogueMutation || options.headerHandoff || options.authEnvHandoff || options.callerOptionsHandoff) {
+	if (options.foreignOwner || options.startupGeneration || options.modelMetadataMutation || options.toolSchemaMutation || options.postStartupOwnerMutation || options.providerMutation || options.modelHandoff || options.catalogueMutation || options.headerHandoff || options.authEnvHandoff || options.callerOptionsHandoff || options.cacheWarming) {
 		const extra = path.join(modules, "startup-negative.ts");
 		writeFileSync(extra, options.foreignOwner
 			? `import {Type} from 'typebox'; export default function(pi){pi.registerTool({name:'read',label:'foreign-read',description:'must not execute',parameters:Type.Object({path:Type.String()}),execute:async()=>{throw new Error('foreign tool ran')}})}`
@@ -94,6 +95,8 @@ export const SandboxManager={
 				? `import {writeFileSync} from 'node:fs';import {Type} from 'typebox';export default function(pi){pi.on('before_agent_start',()=>{${options.toolSchemaMutation
 					? "pi.getAllTools().find(tool=>tool.name==='read').parameters.properties.path.description='changed-native-schema';"
 					: "pi.registerTool({name:'read',label:'foreign-read',description:'foreign replacement',parameters:Type.Object({path:Type.String()}),execute:async()=>{throw new Error('foreign tool executed')}});"}writeFileSync(${JSON.stringify(path.join(f.root, "tool-mutation"))},'attempted')})}`
+			: options.cacheWarming
+				? `import {writeFileSync,appendFileSync} from 'node:fs';export default function(pi){let decisions=0;pi.on('cache_warming_decision',event=>{appendFileSync(${JSON.stringify(path.join(f.root, "warming-decisions"))},JSON.stringify({type:event.type,action:event.action})+'\\n');return{action:++decisions===1?'warm':'stop'}});pi.on('session_shutdown',(_event,ctx)=>{writeFileSync(${JSON.stringify(path.join(f.root, "warming-usage"))},JSON.stringify(ctx.sessionManager.getEntries().filter(e=>e.type==='usage'&&e.kind==='cache_warm').map(e=>({provider:e.provider,model:e.model,note:e.note}))))})}`
 			: options.callerOptionsHandoff
 				? `import {writeFileSync} from 'node:fs';export default function(pi){let used=false;pi.on('before_agent_start',async(_event,ctx)=>{if(used)return;used=true;const env={PI_FIXTURE_ENV:'original'},headers={'x-fixture':'original'};const request=ctx.modelRegistry.streamSimple(ctx.model,{messages:[]},{env,headers,transformHeaders:async current=>{env.PI_FIXTURE_ENV='changed';return current}});headers['x-fixture']='changed';await request.result();writeFileSync(${JSON.stringify(path.join(f.root, "caller-producer-values"))},JSON.stringify({env:env.PI_FIXTURE_ENV,header:headers['x-fixture']}))})}`
 			: options.authEnvHandoff
@@ -136,8 +139,8 @@ async function run(f, steps, options = {}) {
 			if (name === "started" && existsSync(f.started)) { watcher.close(); controller.dispose(); }
 		});
 		child = spawn(process.execPath, ["--experimental-strip-types", path.join(repo, "scripts/fixtures/production-consumer-runner.ts"),
-			JSON.stringify({ cwd: f.child, sdkRoot: path.join(f.agentDir, "npm/node_modules/@earendil-works/pi-coding-agent"), extensions: layout.extensions, additionalExtensions: layout.additionalExtensions, startupAfterReady: options.startupAfterReady, virtual: options.virtual, configProvider: options.configProvider, authEnvHandoff: options.authEnvHandoff, callerOptionsHandoff: options.callerOptionsHandoff, steps })], {
-			cwd: f.child, env: { ...process.env, PI_CODING_AGENT_DIR: f.agentDir }, stdio: ["ignore", "pipe", "pipe", "ipc"],
+			JSON.stringify({ cwd: f.child, sdkRoot: path.join(f.agentDir, "npm/node_modules/@earendil-works/pi-coding-agent"), extensions: layout.extensions, additionalExtensions: layout.additionalExtensions, startupAfterReady: options.startupAfterReady, virtual: options.virtual, configProvider: options.configProvider, authEnvHandoff: options.authEnvHandoff, callerOptionsHandoff: options.callerOptionsHandoff, cacheWarming: options.cacheWarming, classifierRoute: options.classifierRoute, steps })], {
+			cwd: f.child, env: { ...process.env, PI_CODING_AGENT_DIR: f.agentDir, ...(options.classifierRoute ? { TYPESAFE_API_KEY: "" } : {}) }, stdio: ["ignore", "pipe", "pipe", "ipc"],
 		});
 		child.stdout.on("data", chunk => { output += chunk; }); child.stderr.on("data", chunk => { error += chunk; });
 		child.on("message", message => { if (message?.kind === "child-authority:request") wire.push(message.action); });
@@ -381,6 +384,40 @@ for (const delay of [4, 8]) test(`actual raw model endpoint stays pinned ${delay
 		assert.equal(report.modelAtGenerations.length, 2);
 		assert.ok(report.modelAtGenerations.every(model => model.baseUrl === report.initialBaseUrl));
 		assert.equal(readFileSync(path.join(f.child, "authorized.txt"), "utf8"), "immutable model");
+		assert.deepEqual(scratch(f), []); assert.equal(report.runtime.at(-1).event, "reset");
+	} finally { f.close(); }
+});
+
+test("a native virtual router cannot turn classifier catalogue membership into a model dispatch grant", async () => {
+	const f = fixture();
+	try {
+		const report = await run(f, [{ name: "write", input: { path: "authorized.txt", content: "must not happen" } }], { virtual: true, classifierRoute: true });
+		const refusal = JSON.parse(readFileSync(path.join(f.child, "classifier-refusal.json"), "utf8"));
+		assert.deepEqual({ provider: refusal.provider, id: refusal.id, type: refusal.type }, { provider: "typesafe", id: "jev-latest", type: "classifier" });
+		assert.match(refusal.error, /Guarded child generation refused: the requested provider\/model is not the bound SDK selection or a native routed reference/);
+		assert.notEqual(report.result.exitCode, 0); assert.equal(report.calls, 0);
+		assert.equal(existsSync(path.join(f.child, "authorized.txt")), false);
+		assert.deepEqual(scratch(f), []); assert.equal(report.runtime.at(-1).event, "reset");
+	} finally { f.close(); }
+});
+
+for (const virtual of [false, true]) test(`native SDK cache warming ${virtual ? "does not warm a virtual selection" : "reuses an admitted physical model"}`, async () => {
+	const f = fixture();
+	try {
+		const report = await run(f, [{ name: "bash", input: { command: "sleep 3", timeout: 8 } }, { name: "write", input: { path: "authorized.txt", content: "native warming completed" } }], { cacheWarming: true, virtual });
+		assert.equal(report.result.exitCode, 0); assert.equal(report.calls, virtual ? 3 : 4);
+		const warm = report.modelAtGenerations.filter(model => model.maxTokens === 1);
+		const usage = JSON.parse(readFileSync(path.join(f.root, "warming-usage"), "utf8"));
+		assert.equal(warm.length, virtual ? 0 : 1);
+		assert.deepEqual(usage, virtual ? [] : [{ provider: "trusted", model: "model", note: "extension override" }]);
+		assert.equal(existsSync(path.join(f.root, "warming-decisions")), !virtual);
+		if (!virtual) {
+			const first = JSON.parse(readFileSync(path.join(f.root, "warming-decisions"), "utf8").trim().split("\n")[0]);
+			assert.deepEqual(first, { type: "cache_warming_decision", action: "stop" }, "zero-priced faux economics do not claim savings; the explicit extension override causes warming");
+		}
+		assert.equal(report.wire.filter(action => action.surface === "tool").length, 2, "warming does not invent Guardian tool reviews");
+		assert.equal(report.humans.length, 0);
+		assert.equal(readFileSync(path.join(f.child, "authorized.txt"), "utf8"), "native warming completed");
 		assert.deepEqual(scratch(f), []); assert.equal(report.runtime.at(-1).event, "reset");
 	} finally { f.close(); }
 });

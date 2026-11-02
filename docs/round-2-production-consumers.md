@@ -1450,6 +1450,59 @@ these source cases do not certify arbitrary privileged host JS/private closure
 state or actual network/auth backends. No live install/restart/session/config/
 policy/toggle/protected-content/runtime replacement/paid-provider/push action.
 
+## Actual SDK warming and auxiliary-router refusal (not reference-only proof)
+
+The SDK1.2/1.4 `CacheWarmer` is created by the native `createAgentSession`, not a
+fixture warmer. It replays through guarded `ModelRuntime.streamSimple` with
+`maxTokens:1`, then appends native `usage/cache_warm` entries. Both SDKs explicitly
+limit warming to the selected physical model: `cacheContextIsCurrent` rejects a
+virtual selection whose physical request differs. Earlier routed-reference unit
+reuse was not a native virtual-warming integration and must not be described as
+such. The guard comment now says the actual native policy; no production behavior,
+new warming engine/config knob/clock/timer/scheduler or source context was added.
+
+Two genuine integration cases: physical and virtual selection, actual SDK/default
+factory/consumers/controller/IPC. Synthetic global settings enable native streaming
+warming, physical DTO declares11s prompt-cache lifetime before admission, and an
+ordinary sandboxed `sleep 3` tool keeps the native run active. SDK's own minimum
+expiry margin schedules the first decision after1s; no fake clock/timer, private
+warmer calls or polling. Native extension event explicitly overrides the first
+zero-priced faux `stop` decision to `warm` and stops subsequent decisions. An extra
+queued genuine faux response serves the physical warm. Provider inputs show exactly
+one `maxTokens:1` request and a native cache_warm usage entry with `extension override`;
+ordinary tool flow writes assigned output and resets/cleans. Two Guardian tool
+reviews and no human ask, not an invented review for warming. For virtual selection,
+the same active interval has no warming decision/request/usage, retaining native
+selection semantics. Both cases keep real readiness at every dispatch.
+
+A third native router uses the documented `route(request,ctx)` API to find builtin
+`typesafe/jev-latest` classifier and call public `ctx.modelRegistry.classify`.
+Catalogue existence/kind is proven, but it is not the selected/routed chat-model
+reference. Exact guard refusal is captured before generic teardown; failed task,
+zero chat backend calls/no assigned Write/reset/no scratch leak. Typesafe key is
+explicitly blank in the synthetic child env so a future broken guard cannot make
+this refusal regression a paid classifier request. No alternative classifier,
+resolver, SDK, physical fallback or added authorization. This is **verified
+unsupported auxiliary dispatch**, not a claim that arbitrary classifier-assisted
+routers work. Catalogue membership is provenance only, not a dispatch grant; a
+future supported auxiliary path requires a deliberate bounded authority contract.
+
+Full **51/51 per genuine SDK1.2/1.4**, zero fail/skip, plus strengthened three cases
+rerun on both; subagents **4,434 total/4,417 pass/17skip/zero fail/443suites**, types,
+4graph/root/freshness. Source `6b3c44afed19f373`, artifact `c79a311a5bc9137b`,
+graph384/17/330/18/768. First rerun properly refused the stale artifact after the
+comment edit; rebuilt, never bypassed verification. Evidence
+`.local/goal-consumers/native-{warming-first,auxiliary-{first,build,after,composition,
+sdk14,full,final12,final14,root}}.log` and committed cases. No production hot-path
+change/performance claim. Faux prices/usage and explicit extension override are
+not paid accounting, economic savings, classifier backend or actual OS proof.
+
+This closes native warming source-integration and honest auxiliary refusal evidence,
+not #14 aggregate acceptance. Native auth-prepared summarization, resource/code
+ownership, deferred/initializer drain, deployment/broker/OS/Git and representative
+paid costs/latency remain open. No live install/restart/session/config/policy/toggle/
+protected-content/runtime replacement/paid-provider/push action.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

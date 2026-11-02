@@ -659,3 +659,23 @@ mean+0.66us/admission~0.3%; noauth/HTTP/paid/wholelatency. Docsrecordremainingna
 authpreparedmodels/auxiliary/cache/deferred/initializer/resources/livegates; aggregate
 acceptedfalse. No liveinstall/restart/session/config/policy/toggle/protected-content/
 runtimereplacement/paidprovider/push.
+
+## Native warming and auxiliary refusal lacked real SDK integration evidence
+
+Test-only3cases + correctedguardcomment, no runtimebehavior/clock/warmer/scheduler/
+context/API added. ActualSDKCacheWarmer selectedphysical model repeats maxTokens1,
+nativecache_warmusageentry/extensionoverride; physicalandvirtual3sBash intervals,
+11sTTL/native1sdecision, syntheticglobalstreamingmode/explicitoverridezeropricedstop.
+4readyphysicalcalls/3virtualcalls/Write/reset/cleanup; virtualneverwarms bybothSDKs'
+cacheContextIsCurrent policy, notjustroutedWeakMapunitreuse. TwoGuardianreviews/nohuman,
+no inventedwarmingreview. Thirdgenuinepublicroute(request,ctx) findsbuiltinTypesafe
+classifier thenclassify: exactselected/routed-referenceguardrefusal/failedtask/0chat/
+noWrite/reset/cleanup. ExplicitblankTypesafekey prevents futurebroken-guard paidtest.
+Cataloguepresence isnotauxiliarygrant. Unsupportedclassificationverified, notclaimed
+supportedrouter/fallback/newauthority.51/51 perSDK1.2/1.4+strengthened3each;
+4434total4417pass17skip0fail443suites/types/4graph/root. Source6b3c44afed19f373/
+artifactc79a311a5bc9137b graph384/17/330/18/768. Staleartifactaftercomment properly
+refused/rebuilt. No productionhotpath/performance/paid/economics/OS claim. Docs retain
+authpreparedsummarization/resources/deferred/initializer/liveacceptancegates. No live
+install/restart/session/config/policy/toggle/protected-content/runtimereplacement/
+paidprovider/push.

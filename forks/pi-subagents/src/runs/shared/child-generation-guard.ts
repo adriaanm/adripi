@@ -199,7 +199,8 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 		// current without rescanning large registered configs on every SSE event.
 	};
 	// Observed native router outputs, not decisions/grants or a substitute router.
-	// Exact SDK-owned references also cover its native cache warmer's reuse. Each
+	// Reuse stays native: SDK warming admits selected physical models but does
+	// not warm virtual selections. Recorded route references grant no warming. Each
 	// operation still checks readiness, cancellation and all pinned model data.
 	const routed = new WeakMap<object, ModelIdentity>();
 	const physicalLookup = target.getPhysicalModel;
