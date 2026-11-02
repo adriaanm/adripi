@@ -32,7 +32,7 @@ function sdk(options: {
 	const provider = { id: "trusted" };
 	return {
 		SettingsManager, DefaultResourceLoader,
-		ModelRuntime: { create: async () => ({ getProviders: () => [provider], getProvider: () => provider, getAuth: async () => undefined, stream: () => undefined, streamSimple: () => undefined, registerProvider: () => options.register?.(), refresh: async () => {} }) },
+		ModelRuntime: { create: async () => ({ getProviders: () => [provider], getProvider: () => provider, getRegisteredNativeProvider: () => undefined, getRegisteredProviderConfig: () => undefined, getAuth: async () => undefined, stream: () => undefined, streamSimple: () => undefined, registerProvider: () => options.register?.(), refresh: async () => {} }) },
 		SessionManager: { inMemory: () => ({}) },
 		resolveCliModel: options.resolve ?? (() => ({ model: { provider: "trusted", id: "model" } })),
 		createAgentSession: async ({ resourceLoader, settingsManager }: { resourceLoader: DefaultResourceLoader; settingsManager: SettingsManager }) => {

@@ -1241,6 +1241,59 @@ OS/Git/paid accounting and total cost/latency gates remain open. No production
 acceptance or live install/restart/session/config/policy/toggle/protected-content/
 runtime replacement/paid-provider/push action.
 
+## Public registered sources bypassed immutable composed providers
+
+Two genuine SDK red cases: (1) a native provider under a synthetic `models.json`
+overlay, mutating `getRegisteredNativeProvider().streamSimple`; (2) a legacy
+registration, mutating `getRegisteredProviderConfig().streamSimple`. Both replaced
+code, reached2ready native faux calls, exit0 and completed the Write. Pinning the
+composed provider left these public source objects mutable behind its unchanged
+composer closure. Exact red `.local/goal-consumers/registered-source-before.log`.
+Without an overlay the native provider is the public provider itself and was already
+frozen; a second registration is not an overlay (SDK registration deletes the other
+registration kind). The test now uses real synthetic models.json composition,
+not an impossible simultaneous native/legacy registration.
+
+Extend the existing provider pins to three SDK lookups: composed, registered-native,
+registered-config. Snapshot/validate all before freezing, including exact undefined
+slots; require public lookup/list agreement. Each source1024nodes/64KiB/depth12,
+all source graphs16384nodes/512KiB, existing256provider cap. Reject unavailable APIs,
+malformed/accessor/proxy/oversized sources; never ignore one or truncate. Freeze
+existing data graphs, retain exact original callable values/SDK objects, and seal
+the same getter functions as nonreplaceable own methods. No new registry, router,
+provider/transport wrapper, SDK, role/API/wire, context or permission store.
+
+On each action/callback/event, read the three current source references and compare
+them, including absence. All captured own data is deeply immutable: this removes
+the redundant public-provider snapshot and avoids rescanning large source configs
+per SSE event. Exact reference checks, model/tool/lease/readiness/cancellation checks
+remain; a lookup failure revokes without printing its details. This does not certify
+function properties/implementation closure state or the underlying global API table.
+Native auth/credential refresh and cleanup keep their original implementations.
+
+Immediate native/config mutation cases now fail with0backend/semantic calls/no
+Write/scratch leak. Both registered sources also have caught4-microtask header
+mutation cases: TypeError/no replacement/unchanged native code completes2readycalls,
+Write/reset/cleanup.12added opaque units cover immutable sources/native identities,
+owner replacement, absent-slot appearance, missing APIs,4bad data shapes and private
+lookup-error containment. Two initial fixtures incorrectly resealed an already-bound
+lease; corrected them to unsealed fixtures, not a rebind exception.
+**4,401 total /4,384 pass /17 skip /zero fail /443 suites**, types,
+**44/44 per genuine SDK1.2/1.4**, zero composition fail/skip;4graph/root/freshness.
+Source `154dd6afda95173e`, artifact `5700b701be2a3ea3`, graph384/17/330/18/768.
+Five-sample1000-event/seven-real-tool/one-real-faux-metadata same-input synthetic
+benchmark against the exact preceding1e61c82guard: baseline195.4–205.5ms versus
+current189.6–197.4ms (mean~6.9µs/event/~3.5% lower); setup0.40–1.90ms/0.43–1.40ms.
+Not representative paid latency/savings, large config/candidate memory or transport.
+Evidence `.local/goal-consumers/registered-source-{before,focused,after,composition,
+sdk14,full,bench,root}.log`, local same-input benchmark/baseline and committed tests.
+
+Prepared auth/request data and private models.json/global API/closure sources,
+code/resource/executable provenance, initializer/cache-warmer/router-classifier
+acceptance, live deployment/broker/OS/Git/accounting/total latency remain open.
+No aggregate production acceptance or live install/restart/session/config/policy/
+toggle/protected-content/runtime replacement/paid-provider/push action.
+
 ## Source-proven gaps at the initial baseline
 
 1. Real pi-sbx/Guardian extensions do not claim/acknowledge the live lease, so the

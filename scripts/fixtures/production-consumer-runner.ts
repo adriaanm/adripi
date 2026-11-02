@@ -14,6 +14,7 @@ interface Config {
 	additionalExtensions: string[];
 	startupAfterReady?: boolean;
 	virtual?: boolean;
+	configProvider?: boolean | "overlay";
 	steps: Array<{ name: string; input: Record<string, unknown> }>;
 }
 const config = JSON.parse(process.argv[2]) as Config;
@@ -59,7 +60,9 @@ try {
 			cwd: config.cwd, model: config.virtual ? "trusted/virtual" : "trusted/model", storage: { kind: "memory" },
 			extensionPaths: config.startupAfterReady ? [...config.extensions.map(item => item.path), ...config.additionalExtensions] : [...config.additionalExtensions, ...config.extensions.map(item => item.path)], requiredExtensions: config.extensions,
 			ambientExtensions: false, hooks: [{ name: "fixture-provider", factory: (api: Parameters<ChildHookExtension["factory"]>[0]) => {
-				api.registerProvider(faux.provider);
+				if (config.configProvider === "overlay") api.registerProvider(faux.provider);
+				else if (config.configProvider) api.registerProvider("trusted", { api: faux.api, apiKey: "synthetic-fixture", baseUrl: faux.models[0].baseUrl, models: faux.models, streamSimple: faux.provider.streamSimple });
+				else api.registerProvider(faux.provider);
 				if (config.virtual) api.registerVirtualModel({ provider: "trusted", id: "virtual", name: "Fixture virtual", contextWindow: 128000, maxTokens: 2048,
 					route: () => ({ model: faux.models[0], thinkingLevel: "off" }) });
 			} }],

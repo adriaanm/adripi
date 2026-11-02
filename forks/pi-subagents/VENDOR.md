@@ -575,3 +575,26 @@ SDK1.2/1649models baseline0.51–1.38/current16.32–20.36ms;SDK1.4/1713models
 proof. docs/round-2-production-consumers.md exactred/scope/evidence/remaining gates.
 No live install/restart/session/config/policy/toggle/protected-content/runtime
 replacement/paid provider/push.
+
+## Registered provider/config callbacks bypassed their immutable composed object
+
+ActualSDKred: native with real synthetic models.json overlay, and legacy provider
+config, both exposed mutable streamSimple sources behind unchanged composer code.
+Both replacements ran/2readyfauxcalls/exit0/Write. Withoutoverlay native/public is
+already samefrozenobject; native+legacy registrations delete each other, notcompose.
+Existing pins now track composed/native/config refs inclundefined; validate all,
+then freeze original data and seal exact getter funcs. Per-source1024nodes64KiB,
+aggregate16384nodes512KiB,256providers/depth12. No substitute/wrapper/registry/context/
+permissionstore/API/role/wire. Immutable own data makes per-event deep snapshots
+redundant; check current source identities/absence/lookup failures eachaction instead,
+plus all existing model/tool/readiness/lifetime/cancel guards. Functionobjects/private
+closure/globalAPI/modelConfig auth/request outputs still not certified. Nativeauth/
+cleanup unchanged.12addedunits; immediateviolations0calls/noWrite/leak; registered
+4microtick variants TypeError/noreplacement/original2readycalls/Write/reset/cleanup.
+4401total4384pass17skip0fail443suites/types;44/44 per genuineSDK1.2/1.4,4graph/root.
+Source154dd6afda95173e/artifact5700b701be2a3ea3 graph384/17/330/18/768. Synthetic
+1000event7realtool/fauxmetadata against exact1e61c82guard:195.4–205.5msbaseline,
+189.6–197.4current (mean~6.9us/event/~3.5% lower), not paid savings/total latency.
+Exact evidence/budgets/remaining prepared-auth/code/resources/lifecycle/live gates:
+docs/round-2-production-consumers.md. No live install/restart/session/config/policy/
+toggle/protected-content/runtime replacement/paidprovider/push.

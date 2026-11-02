@@ -116,18 +116,30 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 	// inspect only the selected provider on each operation/callback/event.
 	const providerLookup = target.getProvider, providerList = target.getProviders, authLookup = target.getAuth;
 	if (typeof providerLookup !== "function" || typeof providerList !== "function" || typeof authLookup !== "function") fail("this SDK lacks the public provider provenance boundary");
-	const providerPins = new Map<string, { reference: unknown; data: unknown }>();
+	const sourceLookups = [["getProvider", providerLookup], ["getRegisteredNativeProvider", target.getRegisteredNativeProvider], ["getRegisteredProviderConfig", target.getRegisteredProviderConfig]] as const;
+	if (sourceLookups.some(([, lookup]) => typeof lookup !== "function")) fail("this SDK lacks the public registered provider provenance boundary");
+	const providerPins = new Map<string, readonly unknown[]>();
 	try {
 		const providers = (providerList as Method).call(runtime);
 		const data = snapshotMetadata(providers, { nodes: 16384, bytes: 524288 }, new Set(), 0, true) as Array<{ id: string }>;
 		if (!Array.isArray(data) || data.length > 256) throw new Error("unsupported provider list");
+		const total = { nodes: 16384, bytes: 524288 };
 		for (const [index, provider] of data.entries()) {
 			if (!provider || typeof provider !== "object" || typeof provider.id !== "string" || !provider.id || providerPins.has(provider.id)) throw new Error("invalid provider identity");
-			providerPins.set(provider.id, { reference: providers[index], data: snapshotMetadata(provider, { nodes: 1024, bytes: 65536 }, new Set(), 0, true) });
+			const references = sourceLookups.map(([, lookup]) => (lookup as Method).call(runtime, provider.id));
+			if (references[0] !== providers[index]) throw new Error("provider catalogue/lookup disagree");
+			for (const reference of references) {
+				if (reference !== undefined && (!reference || typeof reference !== "object" || Array.isArray(reference))) throw new Error("malformed provider source");
+				const budget = { nodes: 1024, bytes: 65536 };
+				snapshotMetadata(reference, budget, new Set(), 0, true);
+				total.nodes -= 1024 - budget.nodes; total.bytes -= 65536 - budget.bytes;
+				if (total.nodes < 0 || total.bytes < 0) throw new Error("unbounded provider sources");
+			}
+			providerPins.set(provider.id, references);
 		}
 		const frozen = new Set<object>();
-		for (const pinned of providerPins.values()) freezeOwnedData(pinned.reference, frozen);
-		for (const [name, method] of [["getProvider", providerLookup], ["getProviders", providerList], ["getAuth", authLookup]] as const) {
+		for (const references of providerPins.values()) for (const reference of references) freezeOwnedData(reference, frozen);
+		for (const [name, method] of [...sourceLookups, ["getProviders", providerList], ["getAuth", authLookup]] as const) {
 			Object.defineProperty(runtime, name, { value: method, writable: false, configurable: false });
 		}
 	} catch { fail("the SDK provider catalogue cannot be pinned as bounded accessor-free owned data"); }
@@ -157,14 +169,13 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 	}
 	const assertProvider = (id: string) => {
 		const pinned = providerPins.get(id);
-		let current: unknown;
-		try { current = (providerLookup as Method).call(runtime, id); }
+		let current: unknown[];
+		try { current = sourceLookups.map(([, lookup]) => (lookup as Method).call(runtime, id)); }
 		catch { return fail("the SDK provider provenance lookup failed"); }
-		if (!pinned || current !== pinned.reference) return fail("the SDK provider identity changed or was not present at model resolution");
-		let data: unknown;
-		try { data = snapshotMetadata(current, { nodes: 1024, bytes: 65536 }, new Set(), 0, true); }
-		catch { fail("the SDK provider provenance is not bounded accessor-free owned data"); }
-		if (!isDeepStrictEqual(data, pinned.data)) fail("the SDK provider code, auth or metadata provenance changed");
+		if (!pinned || current.some((reference, index) => reference !== pinned[index])) return fail("the SDK provider identity changed or was not present at model resolution");
+		// Validated graphs are deeply frozen, preserving exact callable values.
+		// Rechecking identity (including undefined source slots) keeps provenance
+		// current without rescanning large registered configs on every SSE event.
 	};
 	// Observed native router outputs, not decisions/grants or a substitute router.
 	// Exact SDK-owned references also cover its native cache warmer's reuse. Each
@@ -182,7 +193,7 @@ export function guardChildGeneration(runtime: object, lease: ChildAuthorityLease
 		if (key(current) !== requestedModel) return fail("the SDK session/model identity changed or is not bound");
 		if (!isDeepStrictEqual(current, selected)) fail("the selected model metadata changed after exact SDK resolution");
 		assertTools();
-		if (target.getProvider !== providerLookup || target.getProviders !== providerList || target.getAuth !== authLookup) fail("the SDK provider provenance APIs changed");
+		if (sourceLookups.some(([name, lookup]) => target[name] !== lookup) || target.getProviders !== providerList || target.getAuth !== authLookup) fail("the SDK provider provenance APIs changed");
 		const requested = model && metadata(model);
 		if (requestMetadata && !isDeepStrictEqual(requested, requestMetadata)) fail("the in-flight request model metadata changed");
 		if (requested && key(requested) === requestedModel && !isDeepStrictEqual(requested, selected)) fail("the request substituted metadata behind the selected provider/model name");
