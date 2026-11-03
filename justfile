@@ -1,10 +1,10 @@
 # adripi maintenance
 
-# shell syntax, config templates, and offline fork-deployment fixtures
+# shell syntax, config templates, and offline deployment/layout fixtures
 check:
     bash -n install.sh
     node scripts/check-configs.mjs
-    node --test scripts/deploy-fork.test.mjs
+    node --test scripts/deploy-fork.test.mjs scripts/set-npm-command.test.mjs
 
 # build the compiled third fork; required before a built-mode deploy
 build-subagents:

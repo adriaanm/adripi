@@ -71,7 +71,9 @@ imports. It never installs dependencies or deploys. Without `just`, run
 `install.sh` first refuses missing/stale/tampered build output, before any package
 installation. It then:
 
-1. sets `npmCommand` to `pnpm` in `~/.pi/agent/settings.json`
+1. sets `npmCommand` to `["pnpm", "--config.node-linker=hoisted"]` in
+   `~/.pi/agent/settings.json`; migrates an existing isolated pnpm tree using its
+   frozen lockfile, without lifecycle scripts (missing lockfiles fail closed)
 2. installs `@anthropic-ai/sandbox-runtime` globally if `srt` is missing
 3. installs the pinned packages in [`packages.txt`](packages.txt)
 4. validates all fork deploy plans before writes, mirrors `pi-guardian`/`pi-sbx`
@@ -84,6 +86,27 @@ Upgrading an older checkout that still used `pi-perm` needs no manual step: the
 script installs `pi-sbx`, deploys the forks, removes any `pi-perm` entry from
 `settings.json`, and moves the old extension data directory to `pi-perm.retired`.
 Restart Pi afterwards.
+
+The hoisted layout matters: Pi's TypeScript loader can resolve imports from the
+public `node_modules/pi-sbx/src/index.ts` path rather than first following the
+package-root symlink into `.pnpm`. With isolated pnpm, the runtime can be present
+in the store yet fail to load with `Cannot find module
+'@anthropic-ai/sandbox-runtime'`. A global `srt` install does not fix that module
+resolution. Layout migration can replace old fork overlays, so run the **whole**
+installer and restart Pi, not just `set-npm-command.mjs`. Future `pi install`
+calls retain hoisted mode through `npmCommand`. Offline fixtures cover command
+persistence, the locked migration invocation/failure handling and both path
+layouts; they do not execute pnpm or certify a live layout migration. An optional
+fixture uses the actual installed Pi loader without starting a session:
+
+```sh
+PI_TEST_EXTENSION_LOADER=/absolute/path/to/pi-coding-agent/dist/core/extensions/loader.js \
+  node --test scripts/set-npm-command.test.mjs
+```
+
+It reproduced the isolated-layout failure and loaded the hoisted fixture under
+Pi 1.4.0. This is loader/fixture coverage, not evidence that pnpm completed a
+live migration. Deployment and restart remain separate human verification.
 
 If `srt` is installed but not on `PATH`:
 

@@ -27,7 +27,11 @@ echo "adripi: close any running Pi before installing; this rewrites its settings
 echo "== fork preflight"
 node scripts/deploy-fork.mjs preflight --forks forks.txt --npm-root "$NPM_ROOT"
 
-echo "== pnpm"
+echo "== pnpm (hoisted dependency layout)"
+# Pi's TS loader can resolve imports from the public package path rather than
+# pnpm's canonical store path. Persist hoisted mode for future Pi package calls;
+# migrate an existing isolated tree from its frozen lock before installing pins.
+# Migration can replace old fork overlays: the complete deploy below is required.
 node scripts/set-npm-command.mjs "$PI_AGENT_DIR"
 
 echo "== sandbox runtime"

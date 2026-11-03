@@ -16,14 +16,21 @@ source-only overlay is invalid. All installed copies live under
 2. for pi-subagents, provision its locked dependencies (`npm ci --ignore-scripts`
    in the fork, only when needed), then `just build-subagents`. This builds and
    checks the actual bundle/compiled authority registry without deploying;
-3. `./install.sh` (or `just install`) — preflights build readiness, installs pinned
-   packages, validates **all** deploy plans, mirrors source forks and deploys the
-   complete verified third-fork graph, seeds configs and applies the agent-dir
-   grant. Stale/tampered artifacts refuse; existing policy is not generally merged;
+3. `./install.sh` (or `just install`) — preflights build readiness, sets pnpm's
+   hoisted layout (migrating an isolated install from its frozen lock without
+   lifecycle scripts), installs pinned packages, validates **all** deploy plans,
+   mirrors source forks and deploys the complete verified third-fork graph,
+   seeds configs and applies the agent-dir grant. Stale/tampered artifacts refuse; existing policy is not generally merged;
 4. **fully quit and restart Pi**. An in-place extension reload can leave the old
    instance registered: the symptom is a tool that reports state the new code
    should not have (e.g. a host grant that still runs sandboxed, or "No guardian
    sandbox broker is published" while guardian is clearly reviewing calls).
+
+Keep `settings.npmCommand` as `["pnpm", "--config.node-linker=hoisted"]`:
+Pi's TypeScript loader can resolve from a public package-root symlink rather
+than its canonical `.pnpm` directory, losing otherwise installed dependencies.
+A global `srt` binary does not repair extension module resolution. Layout
+migration can replace overlays; never run it without the subsequent full deploy.
 
 `./install.sh` never overwrites existing live config files, so a template change
 in `config/` does not reach an installed machine unless `install.sh` learns to
