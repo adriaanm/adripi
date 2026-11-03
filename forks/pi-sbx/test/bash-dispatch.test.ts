@@ -248,9 +248,12 @@ function unpublishBroker() {
   disposers.pop()!();
 }
 
-function publishPolicy(commit: () => ReturnType<Extract<ReturnType<ProjectPolicyService["prepareRule"]>, { ok: true }>["commit"]>) {
+function publishPolicy(
+  commit: () => ReturnType<Extract<ReturnType<ProjectPolicyService["prepareRule"]>, { ok: true }>["commit"]>,
+  options: { alreadyPresent?: boolean } = {},
+) {
   const target = globalThis as Record<symbol, unknown>;
-  const prepareRule = vi.fn((_rule: string) => ({ ok: true as const, commit }));
+  const prepareRule = vi.fn((_rule: string) => ({ ok: true as const, ...options, commit }));
   target[PROJECT_POLICY_KEY] = { path: join(projectRoot, ".pi", "guardian.json"), prepareRule } as ProjectPolicyService;
   disposers.push(() => { delete target[PROJECT_POLICY_KEY]; });
   return prepareRule;
@@ -518,8 +521,8 @@ describe("registered bash tool as one execution seam", () => {
     expect(state.localCalls).toHaveLength(1);
   });
 
-  it("persists a standing rule only through guardian's project policy after a UI yes", async () => {
-    publishBroker();
+  it.each(["rule", "reviewer"] as const)("persists a new standing rule after a %s allow only after a UI yes", async (source) => {
+    publishBroker(async () => ({ kind: "allow", scope: "once", review: { rationale: "allowed", source } }));
     const commit = vi.fn(() => ({ ok: true as const, path: join(projectRoot, ".pi", "guardian.json"), hash: "h", added: true }));
     const confirm = vi.fn(async () => {
       expect(prepareRule).toHaveBeenCalledWith("command:git push:*");
@@ -535,6 +538,52 @@ describe("registered bash tool as one execution seam", () => {
     expect(readFileSync(sandboxPath, "utf8")).toBe(before);
     expect(readFileSync(sandboxPath, "utf8")).not.toContain("excludedCommands");
     expect(confirm).toHaveBeenCalled();
+  });
+
+  it.each(["rule", "reviewer"] as const)("does not re-offer a saved prefix after a %s allow", async (source) => {
+    const broker = publishBroker(async () => ({ kind: "allow", scope: "once", review: { rationale: "allowed", source } }));
+    const confirm = vi.fn(async () => true);
+    const { tool, ctx } = await start({}, { confirm });
+    const commit = vi.fn(() => ({ ok: true as const, path: "p", hash: "h", added: false }));
+    publishPolicy(commit, { alreadyPresent: true });
+    for (let index = 0; index < 3; index++) {
+      const result = await invoke(tool, ctx, `saved-${index}`, escalateHost("just ios-bindings-test", { prefix_rule: ["just"] }));
+      expect(contentText(result)).toBe("host:just ios-bindings-test");
+    }
+    expect(broker.review).toHaveBeenCalledTimes(3);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+    expect(state.localCalls).toHaveLength(3);
+  });
+
+  it("a saved prefix never bypasses a broker deny", async () => {
+    publishBroker(async () => ({ kind: "deny", reason: "global deny", review: { rationale: "restricted", source: "rule" } }));
+    const confirm = vi.fn(async () => true);
+    const { tool, ctx } = await start({}, { confirm });
+    const commit = vi.fn(() => ({ ok: true as const, path: "p", hash: "h", added: false }));
+    publishPolicy(commit, { alreadyPresent: true });
+    const result = await invoke(tool, ctx, "saved-denied", escalateHost("just ios-bindings-test", { prefix_rule: ["just"] }));
+    expect(contentText(result)).toContain("global deny");
+    expect(confirm).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+    expect(state.localCalls).toHaveLength(0);
+  });
+
+  it("a saved prefix still requires one-action human admission on broker defer", async () => {
+    publishBroker(async () => ({ kind: "defer", review: { rationale: "global defer", source: "rule" } }));
+    const select = vi.fn(async (_title: string, options: string[]) => {
+      expect(options.some((option) => /always/i.test(option))).toBe(false);
+      return options[0];
+    });
+    const confirm = vi.fn(async () => true);
+    const { tool, ctx } = await start({}, { select, confirm });
+    const commit = vi.fn(() => ({ ok: true as const, path: "p", hash: "h", added: false }));
+    publishPolicy(commit, { alreadyPresent: true });
+    await invoke(tool, ctx, "saved-deferred", escalateHost("just ios-bindings-test", { prefix_rule: ["just"] }));
+    expect(select).toHaveBeenCalledOnce();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+    expect(state.localCalls).toHaveLength(1);
   });
 
   it("does not fall back to sandbox exclusions when guardian has no policy service", async () => {
@@ -1138,6 +1187,20 @@ describe("decision attribution and lazy standing snapshots", () => {
     const notices = (ctx.ui.notify as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((call) => String(call[0]));
     expect(notices.some((text) => text.includes("unavailable (no human approval channel)"))).toBe(true);
     expect(notices.some((text) => text.includes("denied by Guardian"))).toBe(false);
+  });
+
+  it("keeps a deferred connection prompt but omits an already saved network rule", async () => {
+    publishBroker(async () => ({ kind: "defer", review: { rationale: "global defer", source: "rule" } }));
+    const commit = vi.fn(() => ({ ok: true as const, path: "p", hash: "h", added: false }));
+    publishPolicy(commit, { alreadyPresent: true });
+    const select = vi.fn(async (_title: string, options: string[]) => {
+      expect(options).toEqual(["Allow this connection", "Deny"]);
+      return "Allow this connection";
+    });
+    await start({}, { select });
+    expect(await state.askCallback!({ host: "example.test", port: 443 })).toBe(true);
+    expect(select).toHaveBeenCalledOnce();
+    expect(commit).not.toHaveBeenCalled();
   });
 
   it("prepares the network standing snapshot before the deferred prompt", async () => {

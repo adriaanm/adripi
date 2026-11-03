@@ -36,6 +36,7 @@ test("registered project-policy service binds approval to the pre-prompt snapsho
     const creating = service.prepareRule("command:git push:*");
     assert.equal(creating.ok, true);
     if (!creating.ok) return;
+    assert.equal(creating.alreadyPresent, false);
     const created = creating.commit();
     assert.equal(created.ok, true);
     if (!created.ok) return;
@@ -46,8 +47,20 @@ test("registered project-policy service binds approval to the pre-prompt snapsho
     });
     assert.equal(allowed.kind, "allow");
     assert.equal(allowed.review.source, "rule");
+    const existing = service.prepareRule("command:git push:*");
+    assert.equal(existing.ok && existing.alreadyPresent, true);
+    // A broader proposal must still be offered, even when a narrower rule
+    // already allows the current invocation. Only exact saved rules skip UI.
+    const broader = service.prepareRule("command:git:*");
+    assert.equal(broader.ok && broader.alreadyPresent, false);
+    // The same policy is recognized after a full session service replacement.
+    await handlers.get("session_shutdown")!({});
+    await handlers.get("session_start")!({}, ctx);
+    const restarted = getProjectPolicyService()!;
+    const restored = restarted.prepareRule("command:git push:*");
+    assert.equal(restored.ok && restored.alreadyPresent, true);
 
-    const pending = service.prepareRule("command:gh pr view:*");
+    const pending = restarted.prepareRule("command:gh pr view:*");
     assert.equal(pending.ok, true);
     if (!pending.ok) return;
     // Another legitimate approval occurs while the save question is open.
@@ -65,9 +78,9 @@ test("registered project-policy service binds approval to the pre-prompt snapsho
 
     // Pre-existing unapproved content is never silently approved by saving one rule.
     await writeFile(newer.policy.path, JSON.stringify({ sandboxExceptions: { allow: ["command:echo:*"] } }));
-    assert.equal(service.prepareRule("command:git push:*").ok, false);
+    assert.equal(restarted.prepareRule("command:echo:*").ok, false);
     await writeFile(newer.policy.path, before);
-    const staleSession = service.prepareRule("command:gh pr view:*");
+    const staleSession = restarted.prepareRule("command:gh pr view:*");
     assert.equal(staleSession.ok, true);
     await handlers.get("session_shutdown")!({});
     assert.equal(getProjectPolicyService(), undefined);

@@ -273,6 +273,9 @@ function rootGuardianExtension(pi: ExtensionAPI) {
 				}
 				return {
 					ok: true as const,
+					// UI hint, never execution authority: the broker still decides each
+					// request, including global deny/defer rules above project allows.
+					alreadyPresent: read.kind === "ok" && read.policy.sandboxExceptions.allow.includes(rule),
 					commit() {
 						if (!active) return { ok: false as const, reason: "the project-policy session has ended" };
 						const result = persistProjectRule(ctx.cwd, rule, { agentDir, approved });

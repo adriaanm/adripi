@@ -50,6 +50,12 @@ routes in Git history are retired, not additional supported APIs.
    not proven by callback serialization.
 9. **Standing rules** (broker client/index): only Guardian owns persistence.
    Prepare the rule/trusted snapshot before prompting; commit after human yes.
+   Guardian's optional `alreadyPresent` snapshot hint suppresses repeat save
+   offers for an exact trusted rule (host and deferred network UI), never the
+   per-action broker decision. Without the hint, older services keep the prior
+   prompting behavior; a genuinely new/broader proposal still needs human yes.
+   Regression: a repeated `prefix_rule: ["just"]` was allowed by its saved rule
+   but still asked to save `command:just:*` after every allow.
    No service means no save, not a fallback store. `excludedCommands` and its
    command/settings UI routes are retired. A nonempty legacy list fails config
    closed with migration instructions; an empty old array is accepted.

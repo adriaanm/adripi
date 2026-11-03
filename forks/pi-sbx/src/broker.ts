@@ -104,7 +104,12 @@ export function buildRequest(options: DecideOptions): SandboxExceptionRequest {
 export const PROJECT_POLICY_KEY = Symbol.for("pi-guardian:project-policy");
 
 export type PreparedProjectRule =
-	| { ok: true; commit(): { ok: true; path: string; hash: string; added: boolean } | { ok: false; reason: string } }
+	| {
+		ok: true;
+		/** UI hint only: these trusted snapshot bytes already contain this exact rule. */
+		alreadyPresent?: boolean;
+		commit(): { ok: true; path: string; hash: string; added: boolean } | { ok: false; reason: string };
+	}
 	| { ok: false; reason: string };
 
 export interface ProjectPolicyService {

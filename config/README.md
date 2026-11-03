@@ -189,8 +189,15 @@ on an escalation (`prefix_rule: ["git", "push"]` → `command:git push:*`) you a
 asked once, "Save a standing permission?", and guardian appends it to this file
 and records trust for the new content. Nothing is written without that yes, and
 the command still has to request the exception each time — the rule skips the
-broker's reviewer, not fixed restrictions or the ordinary tool gate. Guardian
-captures a trusted policy snapshot **before** offering to save the rule; a
+broker's reviewer, not fixed restrictions or the ordinary tool gate. Saves apply
+immediately in the current session as well as future sessions; no reload is
+needed. Repeating the same proposed rule must not repeat the save offer:
+Guardian reports whether that exact rule is already in its trusted snapshot.
+This only suppresses save UI, not broker deny/defer decisions. A different or
+broader proposal still needs its own approval, even if an existing rule already
+allows the current command. (Older installed code could allow by the saved rule
+and still repeat the save prompt; deploying the fix needs a full Pi restart.)
+Guardian captures a trusted policy snapshot **before** offering to save the rule; a
 changed, newly appeared, invalid or unapproved file is refused rather than
 implicitly trusted. Symlinked policy files/directories are rejected; writes use
 an exclusive temporary file and atomic rename. Guardian trusts and applies only

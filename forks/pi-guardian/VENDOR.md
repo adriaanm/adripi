@@ -87,6 +87,11 @@ deltas are listed below; nothing else is modified.
     The `Symbol.for("pi-guardian:project-policy")` service exposes `prepareRule`,
     capturing the trusted snapshot **before** the sandbox's human save prompt;
     its commit closure is bound to that rule/base and refuses a disposed session.
+    Prepared results also expose `alreadyPresent` for an exact rule in the
+    trusted snapshot, preventing pi-sbx from repeatedly offering the same save.
+    This is only a UI hint: global deny/defer and each broker review still apply;
+    new/broader proposals are not silently considered saved. Service tests cover
+    the immediate and restarted-session hints and reject unapproved bytes.
     Only returned bytes/rules are trusted/applied — no post-write re-read. Both
     service disposal and the consumer's prepare-before-prompt order are tested.
     Separate processes are not locked, so simultaneous external saves may lose

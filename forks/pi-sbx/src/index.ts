@@ -243,7 +243,7 @@ function installSandbox(pi: ExtensionAPI, child?: ChildSandbox) {
       violation: "network destination is not in the static allowlist",
       offerStandingRule: () => {
         prepared = prepareStandingRule(rule);
-        return prepared.ok ? rule : undefined;
+        return prepared.ok && !prepared.alreadyPresent ? rule : undefined;
       },
     }, { cwd: currentContext?.cwd ?? process.cwd(), human: rootHuman(), signal });
     if (route.kind === "allow") {
@@ -499,13 +499,16 @@ function installSandbox(pi: ExtensionAPI, child?: ChildSandbox) {
     }
     const standingRule = plan.prefixRule ? projectPolicyRule("command", plan.prefixRule) : undefined;
     const prepared = standingRule ? prepareStandingRule(standingRule) : undefined;
+    // A proposal is not a reason to save the same trusted rule again. This hint
+    // suppresses only persistence UI; every execution still reaches the broker.
+    const offerStanding = prepared?.ok && !prepared.alreadyPresent;
     const route = await decideWithParentRoute({
       surface: "command",
       target: plan.command.command,
       origin: "tool",
       reason: plan.justification,
       command: plan.command.command,
-      offerStandingRule: () => (prepared?.ok ? standingRule : undefined),
+      offerStandingRule: () => (offerStanding ? standingRule : undefined),
     }, { cwd: ctx.cwd, human: rootHuman(), signal });
     // A human refusal stays attributed to the human; only a rule/reviewer refusal
     // is Guardian's.
@@ -520,8 +523,8 @@ function installSandbox(pi: ExtensionAPI, child?: ChildSandbox) {
       standingApproved = route.standing;
     } else if (standingRule) {
       // Guardian allowed this call; saving a rule is still the human's decision.
-      if (prepared?.ok) standingApproved = await rootHuman().confirmStanding(standingRule, signal);
-      else if (prepared) ctx.ui.notify(`Standing permission not saved: ${prepared.reason}`, "warning");
+      if (offerStanding) standingApproved = await rootHuman().confirmStanding(standingRule, signal);
+      else if (prepared && !prepared.ok) ctx.ui.notify(`Standing permission not saved: ${prepared.reason}`, "warning");
     }
     if (signal?.aborted) return refusal("the command was cancelled before it started");
     if (standingApproved && prepared) saveStandingRule(prepared);
